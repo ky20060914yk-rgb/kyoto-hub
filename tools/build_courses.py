@@ -24,6 +24,7 @@ FABRICATED_LECTURERS = {
     "京大教養部 教授", "国際高等教育院 講師", "全学共通科目 担当教員",
 }
 UNKNOWN_LECTURER = "担当教員不明"
+DEFAULT_CATEGORY = "全学共通科目"
 VALID_DAYS = {"Mon", "Tue", "Wed", "Thu", "Fri"}
 
 
@@ -75,6 +76,10 @@ def build(rows: list[dict]) -> list[dict]:
         period = _clean_period(item.get("period"))
         lecturer = _clean_lecturer(item.get("lecturer") or "")
         faculty = normalize_text(item.get("faculty") or "") or "全学共通"
+        # M1: the source rows carry a category ('全学共通科目' for the 全学共通
+        # rows). Without it every seeded course fell back to CourseRepository's
+        # '専門/教養' default and the 区分 shown in the picker was wrong.
+        category = normalize_text(item.get("category") or "") or DEFAULT_CATEGORY
         ck = course_key(name, lecturer)
         did = doc_id(ck, day, period)
         if did in seen:
@@ -87,6 +92,7 @@ def build(rows: list[dict]) -> list[dict]:
             "lecturer": lecturer,
             "dayOfWeek": day,
             "period": period,
+            "category": category,
             "university_id": "kyoto_u",
         }
     return sorted(seen.values(), key=lambda c: (c["name"], c["dayOfWeek"], c["period"]))

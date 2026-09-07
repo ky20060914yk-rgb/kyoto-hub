@@ -43,4 +43,20 @@ for (let i = 0; i < courses.length; i += 400) {
   written += chunk.length;
   console.log(`  ${written}/${courses.length}`);
 }
+
+// Bump the catalog version (C3). CourseRepository loads `courses` from the
+// on-device Firestore cache and only goes back to the server when this version
+// differs from the one it last loaded at. Without the bump, a client that
+// already cached the previous catalog would keep serving it forever.
+if (!dryRun) {
+  const metaRef = db.collection('meta').doc('catalog');
+  const prev = await metaRef.get();
+  const version = ((prev.exists ? prev.data().version : 0) || 0) + 1;
+  await metaRef.set({
+    version,
+    courseCount: courses.length,
+    seededAt: new Date().toISOString(),
+  }, { merge: true });
+  console.log(`meta/catalog.version -> ${version}`);
+}
 console.log('done');

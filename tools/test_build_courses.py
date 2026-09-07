@@ -31,3 +31,45 @@ def test_build_drops_fabricated_lecturers_and_dedups(tmp_path):
     # fabricated-pool lecturer replaced with the unknown marker
     mystery = [c for c in out if c["name"] == "謎の講義"][0]
     assert mystery["lecturer"] == "担当教員不明"
+
+
+def test_build_emits_the_full_document_shape():
+    out = build([
+        {"name": "哲学I", "faculty": "全学共通", "dayOfWeek": "Mon", "period": 3,
+         "lecturer": "戸田　剛文", "category": "全学共通科目"},
+    ])
+    assert set(out[0]) == {
+        "id", "courseKey", "name", "faculty", "lecturer", "dayOfWeek", "period",
+        "category", "university_id",
+    }
+
+
+def test_category_is_carried_through_from_the_source(tmp_path):
+    """M1: the seeded catalog must keep the source's 区分."""
+    out = build([
+        {"name": "哲学I", "faculty": "全学共通", "dayOfWeek": "Mon", "period": 3,
+         "lecturer": "戸田　剛文", "category": "全学共通科目"},
+        {"name": "専門ゼミ", "faculty": "工学部", "dayOfWeek": "Tue", "period": 1,
+         "lecturer": "京大　太郎", "category": "専門科目"},
+    ])
+    by_name = {c["name"]: c for c in out}
+    assert by_name["哲学I"]["category"] == "全学共通科目"
+    assert by_name["専門ゼミ"]["category"] == "専門科目"
+
+
+def test_category_falls_back_when_the_source_omits_it():
+    out = build([
+        {"name": "区分なし講義", "faculty": "全学共通", "dayOfWeek": "Wed", "period": 2,
+         "lecturer": "京大　花子"},
+    ])
+    assert out[0]["category"] == "全学共通科目"
+
+
+def test_generated_catalog_carries_a_category_for_every_course():
+    """The committed tools/courses.json must be in sync with build()."""
+    courses = json.loads((pathlib.Path(__file__).parent / "courses.json").read_text(encoding="utf-8"))
+    assert len(courses) > 2000
+    assert all(c.get("category") for c in courses)
+    assert all(c.get("id") and c.get("courseKey") for c in courses)
+    assert all(isinstance(c.get("period"), int) and 1 <= c["period"] <= 5 for c in courses)
+    assert all(c.get("dayOfWeek") in {"Mon", "Tue", "Wed", "Thu", "Fri"} for c in courses)
