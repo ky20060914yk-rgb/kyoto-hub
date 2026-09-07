@@ -6,8 +6,6 @@ import '../models/textbook_request.dart';
 import '../models/talk_room.dart';
 import '../models/transaction.dart';
 import '../models/inquiry.dart';
-import '../models/subject.dart';
-import 'kulasis_dataset.dart';
 
 class FirestoreService {
   final FirebaseFirestore _db = FirebaseFirestore.instance;
@@ -50,31 +48,8 @@ class FirestoreService {
   }
 
   // --- 3. SUBJECTS MASTER ---
-
-  Future<void> createSubject(Subject subject) async {
-    final data = subject.toMap();
-    data['university_id'] = universityId;
-    await _db.collection('subjects').doc(subject.id).set(data, SetOptions(merge: true));
-  }
-
-  Future<void> seedKulasisSubjectsMaster() async {
-    final batch = _db.batch();
-    for (final s in KulasisDataset.sampleSubjects) {
-      final ref = _db.collection('subjects').doc(s.id);
-      final data = s.toMap();
-      data['university_id'] = universityId;
-      batch.set(ref, data, SetOptions(merge: true));
-    }
-    await batch.commit();
-  }
-
-  Stream<List<Subject>> streamSubjects() {
-    return _db
-        .collection('subjects')
-        .where('university_id', isEqualTo: universityId)
-        .snapshots()
-        .map((snapshot) => snapshot.docs.map((d) => Subject.fromMap(d.data())).toList());
-  }
+  // Courses now live in the `courses` collection and are served by
+  // CourseRepository (lib/repositories/course_repository.dart).
 
   // --- 4. POSTS ---
 

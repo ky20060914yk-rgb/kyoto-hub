@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 import '../../services/app_store.dart';
-import '../../services/kulasis_dataset.dart';
+import '../../models/subject.dart';
 
 import '../navigation_root_screen.dart';
 
@@ -18,6 +18,24 @@ class _TimetableRegistrationScreenState extends State<TimetableRegistrationScree
   final List<String> _days = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri'];
   final List<String> _dayLabels = ['月', '火', '水', '木', '金'];
   final List<int> _periods = [1, 2, 3, 4, 5];
+
+  /// Subjects currently registered in the timetable, resolved asynchronously
+  /// from Firestore via CourseRepository and keyed by course id.
+  Map<String, Subject> _registeredById = {};
+
+  @override
+  void initState() {
+    super.initState();
+    _refreshRegistered();
+  }
+
+  Future<void> _refreshRegistered() async {
+    final list = await widget.store.getRegisteredSubjects();
+    if (!mounted) return;
+    setState(() {
+      _registeredById = {for (final s in list) s.id: s};
+    });
+  }
 
   void _proceedToHome() {
     if (widget.isOnboarding) {
@@ -96,22 +114,23 @@ class _TimetableRegistrationScreenState extends State<TimetableRegistrationScree
                     width: double.infinity,
                     height: 48,
                     child: ElevatedButton(
-                      onPressed: () {
-                        if (nameController.text.trim().isNotEmpty) {
-                          widget.store.addCustomSubject(
-                            name: nameController.text.trim(),
-                            faculty: selectedFaculty,
-                            dayOfWeek: dayOfWeek,
-                            period: period,
-                            lecturer: lecturerController.text.trim().isEmpty ? '担当教員' : lecturerController.text.trim(),
-                            category: selectedFaculty == '全学共通' ? '全学共通科目' : '専門科目',
-                          );
-                          Navigator.pop(context);
-                          setState(() {});
-                          ScaffoldMessenger.of(context).showSnackBar(
-                            SnackBar(content: Text(widget.store.lastNoticeMessage ?? '科目を追加しました')),
-                          );
-                        }
+                      onPressed: () async {
+                        if (nameController.text.trim().isEmpty) return;
+                        final messenger = ScaffoldMessenger.of(context);
+                        final navigator = Navigator.of(context);
+                        await widget.store.addCustomSubject(
+                          name: nameController.text.trim(),
+                          faculty: selectedFaculty,
+                          dayOfWeek: dayOfWeek,
+                          period: period,
+                          lecturer: lecturerController.text.trim().isEmpty ? '担当教員' : lecturerController.text.trim(),
+                        );
+                        navigator.pop();
+                        if (!mounted) return;
+                        await _refreshRegistered();
+                        messenger.showSnackBar(
+                          SnackBar(content: Text(widget.store.lastNoticeMessage ?? '科目を追加しました')),
+                        );
                       },
                       style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF0F4C81), foregroundColor: Colors.white),
                       child: const Text('科目を追加して保存', style: TextStyle(fontSize: 15, fontWeight: FontWeight.bold)),
@@ -130,6 +149,8 @@ class _TimetableRegistrationScreenState extends State<TimetableRegistrationScree
     String searchQuery = '';
     final key = '${dayOfWeek}_$period';
     final currentSubjectId = widget.store.userTimetable[key];
+    // Kicked off once, outside the builders, so rebuilds do not refetch.
+    final slotFuture = widget.store.courses.forSlot(dayOfWeek, period);
 
     showModalBottomSheet(
       context: context,
@@ -143,16 +164,6 @@ class _TimetableRegistrationScreenState extends State<TimetableRegistrationScree
 
         return StatefulBuilder(
           builder: (context, setModalState) {
-            final allSlotSubjects = KulasisDataset.getSubjectsForSlot(dayOfWeek, period);
-
-            final filteredSubjects = allSlotSubjects.where((sub) {
-              if (searchQuery.isEmpty) return true;
-              final query = searchQuery.toLowerCase();
-              return sub.name.toLowerCase().contains(query) ||
-                     sub.lecturer.toLowerCase().contains(query) ||
-                     sub.faculty.toLowerCase().contains(query);
-            }).toList();
-
             return Container(
               height: MediaQuery.of(context).size.height * 0.8,
               padding: EdgeInsets.only(
@@ -217,8 +228,24 @@ class _TimetableRegistrationScreenState extends State<TimetableRegistrationScree
                   const SizedBox(height: 12),
 
                   Expanded(
-                    child: filteredSubjects.isEmpty
-                        ? Center(
+                    child: FutureBuilder<List<Subject>>(
+                      future: slotFuture,
+                      builder: (context, snapshot) {
+                        if (snapshot.connectionState != ConnectionState.done) {
+                          return const Center(child: CircularProgressIndicator());
+                        }
+
+                        final allSlotSubjects = snapshot.data ?? const <Subject>[];
+                        final filteredSubjects = allSlotSubjects.where((sub) {
+                          if (searchQuery.isEmpty) return true;
+                          final query = searchQuery.toLowerCase();
+                          return sub.name.toLowerCase().contains(query) ||
+                              sub.lecturer.toLowerCase().contains(query) ||
+                              sub.faculty.toLowerCase().contains(query);
+                        }).toList();
+
+                        if (filteredSubjects.isEmpty) {
+                          return Center(
                             child: Column(
                               mainAxisAlignment: MainAxisAlignment.center,
                               children: [
@@ -234,51 +261,53 @@ class _TimetableRegistrationScreenState extends State<TimetableRegistrationScree
                                 ),
                               ],
                             ),
-                          )
-                        : ListView.separated(
-                            itemCount: filteredSubjects.length,
-                            separatorBuilder: (_, __) => const Divider(height: 1),
-                            itemBuilder: (context, index) {
-                              final sub = filteredSubjects[index];
-                              final isSelected = sub.id == currentSubjectId;
+                          );
+                        }
 
-                              return ListTile(
-                                contentPadding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                                title: Text(
-                                  sub.name,
-                                  style: TextStyle(
-                                    fontWeight: isSelected ? FontWeight.bold : FontWeight.w500,
-                                    color: isSelected ? const Color(0xFF0F4C81) : Colors.black87,
-                                  ),
+                        return ListView.separated(
+                          itemCount: filteredSubjects.length,
+                          separatorBuilder: (_, __) => const Divider(height: 1),
+                          itemBuilder: (context, index) {
+                            final sub = filteredSubjects[index];
+                            final isSelected = sub.id == currentSubjectId;
+
+                            return ListTile(
+                              contentPadding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                              title: Text(
+                                sub.name,
+                                style: TextStyle(
+                                  fontWeight: isSelected ? FontWeight.bold : FontWeight.w500,
+                                  color: isSelected ? const Color(0xFF0F4C81) : Colors.black87,
                                 ),
-                                subtitle: Text('${sub.faculty} • 区分: ${sub.category} • 担当: ${sub.lecturer}'),
-                                trailing: isSelected
-                                    ? const Icon(Icons.check_circle_rounded, color: Color(0xFF0F4C81))
-                                    : OutlinedButton(
-                                        onPressed: () {
-                                          setState(() {
-                                            widget.store.registerTimetableSubject(dayOfWeek, period, sub.id);
-                                          });
-                                          Navigator.pop(context);
-                                        },
-                                        style: OutlinedButton.styleFrom(
-                                          side: const BorderSide(color: Color(0xFF0F4C81)),
-                                        ),
-                                        child: const Text('登録', style: TextStyle(color: Color(0xFF0F4C81))),
+                              ),
+                              subtitle: Text('${sub.faculty} • 区分: ${sub.category} • 担当: ${sub.lecturer}'),
+                              trailing: isSelected
+                                  ? const Icon(Icons.check_circle_rounded, color: Color(0xFF0F4C81))
+                                  : OutlinedButton(
+                                      onPressed: () {
+                                        widget.store.registerTimetableSubject(dayOfWeek, period, sub.id);
+                                        _refreshRegistered();
+                                        Navigator.pop(context);
+                                      },
+                                      style: OutlinedButton.styleFrom(
+                                        side: const BorderSide(color: Color(0xFF0F4C81)),
                                       ),
-                                onTap: () {
-                                  setState(() {
-                                    if (isSelected) {
-                                      widget.store.removeTimetableSubject(dayOfWeek, period);
-                                    } else {
-                                      widget.store.registerTimetableSubject(dayOfWeek, period, sub.id);
-                                    }
-                                  });
-                                  Navigator.pop(context);
-                                },
-                              );
-                            },
-                          ),
+                                      child: const Text('登録', style: TextStyle(color: Color(0xFF0F4C81))),
+                                    ),
+                              onTap: () {
+                                if (isSelected) {
+                                  widget.store.removeTimetableSubject(dayOfWeek, period);
+                                } else {
+                                  widget.store.registerTimetableSubject(dayOfWeek, period, sub.id);
+                                }
+                                _refreshRegistered();
+                                Navigator.pop(context);
+                              },
+                            );
+                          },
+                        );
+                      },
+                    ),
                   ),
                   if (currentSubjectId != null) ...[
                     const SizedBox(height: 12),
@@ -286,9 +315,8 @@ class _TimetableRegistrationScreenState extends State<TimetableRegistrationScree
                       width: double.infinity,
                       child: TextButton.icon(
                         onPressed: () {
-                          setState(() {
-                            widget.store.removeTimetableSubject(dayOfWeek, period);
-                          });
+                          widget.store.removeTimetableSubject(dayOfWeek, period);
+                          _refreshRegistered();
                           Navigator.pop(context);
                         },
                         icon: const Icon(Icons.delete_outline, color: Colors.redAccent),
@@ -434,7 +462,7 @@ class _TimetableRegistrationScreenState extends State<TimetableRegistrationScree
                                       final dayOfWeek = _days[dIdx];
                                       final key = '${dayOfWeek}_$period';
                                       final registeredId = widget.store.userTimetable[key];
-                                      final subject = registeredId != null ? KulasisDataset.findById(registeredId) : null;
+                                      final subject = registeredId != null ? _registeredById[registeredId] : null;
 
                                       return Expanded(
                                         child: GestureDetector(

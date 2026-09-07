@@ -10,20 +10,22 @@ import '../models/textbook_request.dart';
 import '../models/talk_room.dart';
 import '../models/transaction.dart';
 import '../models/inquiry.dart';
-import 'kulasis_dataset.dart';
+import '../repositories/course_repository.dart';
 import 'firestore_service.dart';
 import '../firebase_options.dart';
 import '../utils/download_helper.dart';
 import 'package:firebase_storage/firebase_storage.dart' as fb_storage;
 
 class AppStore extends ChangeNotifier {
+  /// Course catalog, backed by the Firestore `courses` collection.
+  final CourseRepository courses;
+
   final FirestoreService _firestore = FirestoreService();
   final fb_auth.FirebaseAuth _firebaseAuth = fb_auth.FirebaseAuth.instance;
 
   UserProfile? currentUser;
   Map<String, String> userTimetable = {};
 
-  List<Subject> customSubjects = [];
   List<Post> posts = [];
   List<MaterialRequest> requests = [];
   List<TextbookRequest> textbookRequests = [];
@@ -40,14 +42,16 @@ class AppStore extends ChangeNotifier {
     notifyListeners();
   }
 
-  AppStore() {
+  AppStore(this.courses) {
     // _initSampleData(); // Commented out for production release
     _initFirebaseSync();
   }
 
   Future<void> _initFirebaseSync() async {
     try {
-      _firestore.seedKulasisSubjectsMaster().catchError((_) {});
+      // Prime the course catalog cache so the first search / timetable render
+      // does not have to wait on a cold collection fetch.
+      courses.warmUp().catchError((_) {});
 
       final href = getUriHref();
       if (href.isNotEmpty && _firebaseAuth.isSignInWithEmailLink(href)) {
@@ -109,13 +113,6 @@ class AppStore extends ChangeNotifier {
         }
       }, onError: (_) {});
 
-      _firestore.streamSubjects().listen((remoteSubjects) {
-        if (remoteSubjects.isNotEmpty) {
-          customSubjects = remoteSubjects;
-          notifyListeners();
-        }
-      }, onError: (_) {});
-
       _firestore.streamPosts().listen((remotePosts) {
         if (remotePosts.isNotEmpty) {
           posts = remotePosts;
@@ -152,47 +149,36 @@ class AppStore extends ChangeNotifier {
 
   // --- ADD / IMPORT CUSTOM SUBJECT (REAL KULASIS DATA) ---
 
-  void addCustomSubject({
+  Future<Subject> addCustomSubject({
     required String name,
     required String faculty,
     required String dayOfWeek,
     required int period,
     required String lecturer,
-    required String category,
-  }) {
-    final id = 'ku_custom_${DateTime.now().millisecondsSinceEpoch}';
-    final newSubject = Subject(
-      id: id,
-      universityId: 'kyoto_u',
+  }) async {
+    final newSubject = await courses.addCustomCourse(
       name: name,
       faculty: faculty,
       dayOfWeek: dayOfWeek,
       period: period,
       lecturer: lecturer,
-      category: category,
     );
-
-    KulasisDataset.sampleSubjects.insert(0, newSubject);
-    customSubjects.insert(0, newSubject);
-
-    // Save to Cloud Firestore
-    _firestore.createSubject(newSubject).catchError((_) {});
 
     lastNoticeMessage = '『$name』をKULASIS科目マスタおよびFirestoreに追加しました！';
     notifyListeners();
+    return newSubject;
   }
 
-  void importSubjectsFromBatch(List<Map<String, dynamic>> subjectList) {
+  Future<void> importSubjectsFromBatch(List<Map<String, dynamic>> subjectList) async {
     int addedCount = 0;
     for (final item in subjectList) {
       if (item['name'] != null && item['dayOfWeek'] != null && item['period'] != null) {
-        addCustomSubject(
+        await addCustomSubject(
           name: item['name'].toString(),
           faculty: item['faculty']?.toString() ?? '全学共通',
           dayOfWeek: item['dayOfWeek'].toString(),
           period: int.tryParse(item['period'].toString()) ?? 1,
           lecturer: item['lecturer']?.toString() ?? '担当教員未定',
-          category: item['category']?.toString() ?? '専門/教養',
         );
         addedCount++;
       }
@@ -403,10 +389,10 @@ class AppStore extends ChangeNotifier {
     notifyListeners();
   }
 
-  List<Subject> getRegisteredSubjects() {
+  Future<List<Subject>> getRegisteredSubjects() async {
     final List<Subject> list = [];
-    for (final id in userTimetable.values) {
-      final sub = KulasisDataset.findById(id);
+    for (final id in userTimetable.values.toSet()) {
+      final sub = await courses.byId(id);
       if (sub != null && !list.any((element) => element.id == sub.id)) {
         list.add(sub);
       }
@@ -430,7 +416,7 @@ class AppStore extends ChangeNotifier {
       ..sort((a, b) => b.createdAt.compareTo(a.createdAt));
   }
 
-  bool addPost({
+  Future<bool> addPost({
     required String subjectId,
     required PostCategory category,
     int? year,
@@ -439,10 +425,10 @@ class AppStore extends ChangeNotifier {
     required List<String> fileNames,
     required int downloadCost,
     String? requestId,
-  }) {
+  }) async {
     if (currentUser == null) return false;
 
-    final sub = KulasisDataset.findById(subjectId);
+    final sub = await courses.byId(subjectId);
     final subjectName = sub?.name ?? '不明な科目';
 
     int cost = downloadCost;
@@ -783,14 +769,14 @@ class AppStore extends ChangeNotifier {
     notifyListeners();
   }
 
-  bool addMaterialRequest({
+  Future<bool> addMaterialRequest({
     required String subjectId,
     required PostCategory category,
     int? year,
     required String title,
     required String description,
     required int rewardPoints,
-  }) {
+  }) async {
     if (currentUser == null) return false;
 
     final cost = category == PostCategory.pastExam ? 1 : 0;
@@ -814,7 +800,7 @@ class AppStore extends ChangeNotifier {
       );
     }
 
-    final sub = KulasisDataset.findById(subjectId);
+    final sub = await courses.byId(subjectId);
 
     final req = MaterialRequest(
       id: 'req_${DateTime.now().millisecondsSinceEpoch}',
@@ -840,13 +826,13 @@ class AppStore extends ChangeNotifier {
     return true;
   }
 
-  bool addTextbookRequest({
+  Future<bool> addTextbookRequest({
     required String subjectId,
     required String bookTitle,
-  }) {
+  }) async {
     if (currentUser == null) return false;
 
-    final sub = KulasisDataset.findById(subjectId);
+    final sub = await courses.byId(subjectId);
 
     final req = TextbookRequest(
       id: 'tb_${DateTime.now().millisecondsSinceEpoch}',

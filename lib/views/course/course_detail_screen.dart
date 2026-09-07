@@ -313,7 +313,7 @@ class _CourseDetailScreenState extends State<CourseDetailScreen> with SingleTick
                                   return;
                                 }
 
-                                widget.store.addPost(
+                                await widget.store.addPost(
                                   subjectId: widget.subject.id,
                                   category: category,
                                   year: category == PostCategory.pastExam ? selectedYear : null,
@@ -459,8 +459,10 @@ class _CourseDetailScreenState extends State<CourseDetailScreen> with SingleTick
                       ElevatedButton(
                         onPressed: (titleController.text.trim().isEmpty)
                             ? null
-                            : () {
-                                final success = widget.store.addMaterialRequest(
+                            : () async {
+                                final messenger = ScaffoldMessenger.of(context);
+                                final navigator = Navigator.of(context);
+                                final success = await widget.store.addMaterialRequest(
                                   subjectId: widget.subject.id,
                                   category: category,
                                   year: category == PostCategory.pastExam ? selectedYear : null,
@@ -469,13 +471,13 @@ class _CourseDetailScreenState extends State<CourseDetailScreen> with SingleTick
                                   rewardPoints: rewardPoints.round(),
                                 );
                                 if (success) {
-                                  Navigator.pop(context);
-                                  setState(() {});
-                                  ScaffoldMessenger.of(context).showSnackBar(
+                                  navigator.pop();
+                                  if (mounted) setState(() {});
+                                  messenger.showSnackBar(
                                     SnackBar(content: Text(widget.store.lastNoticeMessage ?? 'リクエストを投稿しました！')),
                                   );
                                 } else {
-                                  ScaffoldMessenger.of(context).showSnackBar(
+                                  messenger.showSnackBar(
                                     SnackBar(content: Text(widget.store.lastNoticeMessage ?? 'ポイントが不足しています。')),
                                   );
                                 }

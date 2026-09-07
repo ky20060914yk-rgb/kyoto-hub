@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:firebase_core/firebase_core.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
 import 'firebase_options.dart';
+import 'repositories/course_repository.dart';
 import 'services/app_store.dart';
 import 'views/auth/signup_screen.dart';
 import 'views/navigation_root_screen.dart';
@@ -11,6 +13,10 @@ void main() async {
   WidgetsFlutterBinding.ensureInitialized();
   await Firebase.initializeApp(
     options: DefaultFirebaseOptions.currentPlatform,
+  );
+  FirebaseFirestore.instance.settings = const Settings(
+    persistenceEnabled: true,
+    cacheSizeBytes: Settings.CACHE_SIZE_UNLIMITED,
   );
   runApp(const KyotoExamHubApp());
 }
@@ -23,7 +29,7 @@ class KyotoExamHubApp extends StatefulWidget {
 }
 
 class _KyotoExamHubAppState extends State<KyotoExamHubApp> {
-  final AppStore _store = AppStore();
+  final AppStore _store = AppStore(CourseRepository(FirebaseFirestore.instance));
 
   @override
   Widget build(BuildContext context) {

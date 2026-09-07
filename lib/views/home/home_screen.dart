@@ -1,6 +1,5 @@
 import 'package:flutter/material.dart';
 import '../../services/app_store.dart';
-import '../../services/kulasis_dataset.dart';
 import '../../models/subject.dart';
 import '../course/course_detail_screen.dart';
 import '../timetable/timetable_registration_screen.dart';
@@ -24,11 +23,59 @@ class HomeScreenState extends State<HomeScreen> {
   final List<String> _dayLabels = ['月', '火', '水', '木', '金'];
   final List<int> _periods = [1, 2, 3, 4, 5];
 
+  // Courses are loaded asynchronously from Firestore via CourseRepository.
+  List<Subject> _registeredSubjects = [];
+  Map<String, Subject> _registeredById = {};
+  bool _loadingTimetable = true;
+
+  List<Subject> _searchResults = [];
+  bool _isSearching = false;
+  int _searchSeq = 0;
+
+  @override
+  void initState() {
+    super.initState();
+    _refreshRegistered();
+  }
+
+  @override
+  void dispose() {
+    _searchController.dispose();
+    super.dispose();
+  }
+
+  Future<void> _refreshRegistered() async {
+    final list = await widget.store.getRegisteredSubjects();
+    if (!mounted) return;
+    setState(() {
+      _registeredSubjects = list;
+      _registeredById = {for (final s in list) s.id: s};
+      _loadingTimetable = false;
+    });
+  }
+
+  Future<void> _runSearch(String query) async {
+    final seq = ++_searchSeq;
+    if (query.isEmpty) {
+      setState(() {
+        _searchResults = [];
+        _isSearching = false;
+      });
+      return;
+    }
+    setState(() => _isSearching = true);
+    final results = await widget.store.courses.search(query);
+    if (!mounted || seq != _searchSeq) return;
+    setState(() {
+      _searchResults = results;
+      _isSearching = false;
+    });
+  }
+
   void resetSearch() {
     _searchController.clear();
-    setState(() {
-      _searchQuery = '';
-    });
+    _searchQuery = '';
+    _runSearch('');
   }
 
   void _openOnboardingEditor() {
@@ -38,7 +85,7 @@ class HomeScreenState extends State<HomeScreen> {
         builder: (_) => TimetableRegistrationScreen(store: widget.store, isOnboarding: false),
       ),
     ).then((_) {
-      setState(() {});
+      _refreshRegistered();
     });
   }
 
@@ -184,7 +231,7 @@ class HomeScreenState extends State<HomeScreen> {
                     ScaffoldMessenger.of(context).showSnackBar(
                       SnackBar(content: Text('『${subject.name}』を時間割に登録しました。')),
                     );
-                    setState(() {});
+                    _refreshRegistered();
                   },
                 ),
               ],
@@ -197,17 +244,6 @@ class HomeScreenState extends State<HomeScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final registeredSubjects = widget.store.getRegisteredSubjects();
-
-    final searchResults = _searchQuery.isEmpty
-        ? <Subject>[]
-        : KulasisDataset.sampleSubjects.where((s) {
-            final query = _searchQuery.toLowerCase();
-            return s.name.toLowerCase().contains(query) ||
-                s.lecturer.toLowerCase().contains(query) ||
-                s.faculty.toLowerCase().contains(query);
-          }).toList();
-
     return Scaffold(
       backgroundColor: const Color(0xFFF8FAFC),
       appBar: AppBar(
@@ -276,6 +312,7 @@ class HomeScreenState extends State<HomeScreen> {
                   setState(() {
                     _searchQuery = val.trim();
                   });
+                  _runSearch(_searchQuery);
                 },
                 decoration: InputDecoration(
                   hintText: '科目名・教員名・学部で検索 (未登録科目も可能)',
@@ -289,6 +326,7 @@ class HomeScreenState extends State<HomeScreen> {
                             setState(() {
                               _searchQuery = '';
                             });
+                            _runSearch('');
                           },
                         )
                       : null,
@@ -301,9 +339,14 @@ class HomeScreenState extends State<HomeScreen> {
 
             // Main Content Area
             if (_searchQuery.isNotEmpty)
-              _buildSearchResults(searchResults)
+              _buildSearchResults(_searchResults)
+            else if (_loadingTimetable)
+              const Padding(
+                padding: EdgeInsets.symmetric(vertical: 48),
+                child: Center(child: CircularProgressIndicator()),
+              )
             else
-              _buildRegisteredTimetableGrid(registeredSubjects),
+              _buildRegisteredTimetableGrid(_registeredSubjects),
           ],
         ),
       ),
@@ -323,7 +366,14 @@ class HomeScreenState extends State<HomeScreen> {
         ),
         const SizedBox(height: 12),
 
-        if (searchResults.isEmpty)
+        if (_isSearching)
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.all(24),
+            decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(12)),
+            child: const Center(child: CircularProgressIndicator()),
+          )
+        else if (searchResults.isEmpty)
           Container(
             width: double.infinity,
             padding: const EdgeInsets.all(24),
@@ -536,7 +586,7 @@ class HomeScreenState extends State<HomeScreen> {
                       final dayOfWeek = _days[dIdx];
                       final key = '${dayOfWeek}_$period';
                       final subjectId = widget.store.userTimetable[key];
-                      final subject = subjectId != null ? KulasisDataset.findById(subjectId) : null;
+                      final subject = subjectId != null ? _registeredById[subjectId] : null;
 
                       return Expanded(
                         child: _buildGridCell(subject, dayOfWeek, period),
@@ -611,7 +661,7 @@ class HomeScreenState extends State<HomeScreen> {
                     ..._periods.map((period) {
                       final key = '${dayOfWeek}_$period';
                       final subjectId = widget.store.userTimetable[key];
-                      final subject = subjectId != null ? KulasisDataset.findById(subjectId) : null;
+                      final subject = subjectId != null ? _registeredById[subjectId] : null;
 
                       return Expanded(
                         child: _buildGridCell(subject, dayOfWeek, period),
