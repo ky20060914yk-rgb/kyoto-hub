@@ -58,9 +58,18 @@ beforeEach(async () => {
     await setDoc(doc(db, 'posts/seed_u1'), {
       authorId: 'u1', university_id: 'kyoto_u', title: 't', reports: [], downloadCount: 0,
     });
-    // Three reports already stored -> eligible for auto-moderation deletion.
+    // Three reports from three DISTINCT accounts already stored -> eligible for
+    // auto-moderation deletion. Distinct uids matter: the append-only carve-out
+    // means this state can only be reached by three separate reporters (I7).
     await setDoc(doc(db, 'posts/reported_u1'), {
-      authorId: 'u1', university_id: 'kyoto_u', title: 't', reports: ['a', 'b', 'c'], downloadCount: 0,
+      authorId: 'u1', university_id: 'kyoto_u', title: 't',
+      reports: ['ra', 'rb', 'rc'], downloadCount: 0,
+    });
+    // One existing report from another account: the fixture for "u2 appends the
+    // second report" (I7).
+    await setDoc(doc(db, 'posts/flagged_u1'), {
+      authorId: 'u1', university_id: 'kyoto_u', title: 't',
+      reports: ['ra'], downloadCount: 0,
     });
     // Download-counter fixtures: one with no reward claimed yet, one that has
     // already claimed the 5-download reward.
@@ -219,6 +228,50 @@ test('non-author may only touch the reports field of a post', async () => {
   await assertFails(updateDoc(doc(db, 'posts/seed_u1'), { title: 'vandalised' }));
   await assertFails(updateDoc(doc(db, 'posts/seed_u1'), { reports: ['u2'], title: 'vandalised' }));
   await assertFails(deleteDoc(doc(db, 'posts/seed_u1')));
+});
+
+// --- posts: the reports flag is append-only, one per account (I7) ------------
+//
+// The carve-out that lets a non-author write `reports` used to accept any value
+// for the field, so a single verified account could write three reports in one
+// update and then satisfy the >= 3 auto-delete rule by itself.
+
+test('a non-author may append exactly one report — their own uid (I7)', async () => {
+  await assertSucceeds(updateDoc(doc(asKu2(), 'posts/flagged_u1'), { reports: ['ra', 'u2'] }));
+});
+
+test('a non-author cannot write several reports at once (I7)', async () => {
+  await assertFails(updateDoc(doc(asKu2(), 'posts/seed_u1'), { reports: ['a', 'b', 'c'] }));
+  await assertFails(updateDoc(doc(asKu2(), 'posts/flagged_u1'), { reports: ['ra', 'u2', 'x'] }));
+});
+
+test('a non-author cannot append a report that is not their own uid (I7)', async () => {
+  await assertFails(updateDoc(doc(asKu2(), 'posts/seed_u1'), { reports: ['someone_else'] }));
+  await assertFails(updateDoc(doc(asKu2(), 'posts/flagged_u1'), { reports: ['ra', 'rb'] }));
+});
+
+test('a non-author cannot drop or replace existing reports (I7)', async () => {
+  const db = asKu2();
+  // Shrinking the array.
+  await assertFails(updateDoc(doc(db, 'posts/flagged_u1'), { reports: [] }));
+  // Same size, prior report swapped out for the caller's own uid.
+  await assertFails(updateDoc(doc(db, 'posts/flagged_u1'), { reports: ['u2'] }));
+});
+
+test('the same account cannot report a post twice (I7)', async () => {
+  const db = asKu2();
+  await assertSucceeds(updateDoc(doc(db, 'posts/seed_u1'), { reports: ['u2'] }));
+  // u2 is already in `reports`, so it may not add a further entry — this is what
+  // keeps the auto-delete threshold at three *distinct* accounts.
+  await assertFails(updateDoc(doc(db, 'posts/seed_u1'), { reports: ['u2', 'x'] }));
+});
+
+test('an author cannot clear the reports on their own post (I7)', async () => {
+  const db = asKu();
+  await assertFails(updateDoc(doc(db, 'posts/flagged_u1'), { reports: [] }));
+  await assertFails(updateDoc(doc(db, 'posts/reported_u1'), { reports: [] }));
+  // ...but an ordinary edit that leaves `reports` alone still works.
+  await assertSucceeds(updateDoc(doc(db, 'posts/flagged_u1'), { description: 'x' }));
 });
 
 test('an author cannot rewrite a post out of its stream or reassign it (M5)', async () => {

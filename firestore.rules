@@ -49,7 +49,16 @@ service cloud.firestore {
     // Three narrow carve-outs let non-authors write:
     //   * `reports` alone, so a post can be flagged — verified KU only (I4), so
     //     an outsider Firebase account cannot mass-flag into the auto-delete
-    //     below;
+    //     below. The flag is append-only, exactly one entry per write, and the
+    //     appended entry must be the caller's own uid (I7). Without that, a
+    //     single account could write `reports: ['x','y','z']` in one update and
+    //     then satisfy the >= 3 auto-delete below by itself; the append-only
+    //     shape restores the intended cost of three distinct accounts and
+    //     mirrors `app_store.reportPost()`, which appends the caller's uid and
+    //     refuses to report twice. The "not already in `reports`" clause is
+    //     what makes it one report per account: without it an account already
+    //     in the array would still satisfy `hasAny([uid])` while appending
+    //     someone else's uid, and could walk the array to 3 on its own;
     //   * the download counters, for the *downloader*'s `updatePostMilestones`
     //     write — strictly +1 and the reward flags may only go false -> true,
     //     so no arbitrary counts and no un-flipping (I5);
@@ -57,16 +66,25 @@ service cloud.firestore {
     //     (I2) — the client removes the post it just pushed over the threshold.
     // The author branch pins `authorId` and `university_id` (M5) so an author
     // cannot reassign authorship or move the post out of the university-scoped
-    // streams.
+    // streams, and forbids it from touching `reports` at all (I7) — otherwise
+    // an author could clear the flags on their own post and dodge the
+    // auto-moderation threshold. Reports are only ever cleared by removing the
+    // whole document through the moderation delete path below.
     match /posts/{id} {
       allow read: if signedIn();
       allow create: if kuVerified() && request.resource.data.authorId == request.auth.uid;
       allow update: if signedIn()
         && ((resource.data.authorId == request.auth.uid
              && request.resource.data.authorId == resource.data.authorId
-             && request.resource.data.university_id == resource.data.university_id)
+             && request.resource.data.university_id == resource.data.university_id
+             && !request.resource.data.diff(resource.data).affectedKeys().hasAny(['reports']))
             || (kuVerified()
-                && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['reports']))
+                && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['reports'])
+                && request.resource.data.reports.size()
+                     == resource.data.get('reports', []).size() + 1
+                && request.resource.data.reports.hasAll(resource.data.get('reports', []))
+                && request.resource.data.reports.hasAny([request.auth.uid])
+                && !resource.data.get('reports', []).hasAny([request.auth.uid]))
             || (kuVerified()
                 && request.resource.data.diff(resource.data).affectedKeys()
                      .hasOnly(['downloadCount', 'is5DownloadsRewarded', 'is10DownloadsRewarded'])
