@@ -15,7 +15,8 @@ import { initializeApp, cert, applicationDefault } from 'firebase-admin/app';
 import { getFirestore } from 'firebase-admin/firestore';
 
 const args = process.argv.slice(2);
-const projectId = args[args.indexOf('--project') + 1] || process.env.GCLOUD_PROJECT;
+const pi = args.indexOf('--project');
+const projectId = (pi >= 0 ? args[pi + 1] : undefined) || process.env.GCLOUD_PROJECT;
 const dryRun = args.includes('--dry-run');
 if (!projectId) { console.error('missing --project'); process.exit(1); }
 
@@ -35,6 +36,7 @@ for (let i = 0; i < courses.length; i += 400) {
   if (dryRun) { written += chunk.length; continue; }
   const batch = db.batch();
   for (const c of chunk) {
+    if (!c.id) { console.warn('skipping course with no id'); continue; }
     batch.set(db.collection('courses').doc(c.id), { ...c, university_id: 'kyoto_u' }, { merge: true });
   }
   await batch.commit();
