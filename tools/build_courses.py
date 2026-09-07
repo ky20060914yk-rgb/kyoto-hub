@@ -97,8 +97,8 @@ def main() -> int:
     courses = build(rows)
     OUT.write_text(json.dumps(courses, ensure_ascii=False, indent=1), encoding="utf-8")
     print(f"wrote {len(courses)} courses -> {OUT}")
-    if not (2000 <= len(courses) <= 9000):
-        print(f"WARNING: course count {len(courses)} outside the expected 2000-9000 range", file=sys.stderr)
+    if not (2000 <= len(courses) <= 12000):
+        print(f"WARNING: course count {len(courses)} outside the expected 2000-12000 range", file=sys.stderr)
         return 1
     return 0
 

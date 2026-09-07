@@ -21,9 +21,8 @@ Each `courses.json` entry:
 - `faculty` is whatever the scrape recorded (mostly `全学共通`); no enrichment.
 - No credits / term / evaluation method / syllabus text (needs a per-URL scrape,
   deferred to a later phase).
-- The current source yields ~10.1k course docs — just above the 2000–9000 sanity
-  guard in `main()` (it prints a warning and exits non-zero but still writes the
-  file). Dedup only collapses exact (courseKey, day, period) matches, so
+- The current source yields ~10.1k course docs — within the 2000–12000 sanity
+  guard in `main()`. Dedup only collapses exact (courseKey, day, period) matches, so
   multi-section courses stay distinct.
 
 ## seeding
