@@ -135,6 +135,10 @@ class FirestoreService {
   Future<void> recordTransaction(PointTransaction tx) async {
     final data = tx.toMap();
     data['university_id'] = universityId;
+    // Phase-1 ledger rows are written by the client and are therefore not
+    // trustworthy for balances; `schema: 1` marks them so a Phase-2
+    // server-authored reconciliation can tell them apart (I6/R15).
+    data['schema'] = 1;
     await _db.collection('transactions').doc(tx.id).set(data);
   }
 

@@ -285,6 +285,11 @@ class AppStore extends ChangeNotifier {
     if (fbUser == null) return false;
 
     await fbUser.reload(); // Refresh the user state
+    // `reload()` refreshes the user record but NOT the cached ID token, and the
+    // Firestore rules read `request.auth.token.email_verified`. Without a forced
+    // token refresh a freshly-verified user would be denied every content write
+    // until the token expired (~1h). Cheap and harmless when already fresh.
+    await fbUser.getIdToken(true);
     final isEmailVerified = fbUser.emailVerified;
 
     if (isEmailVerified) {
@@ -297,29 +302,25 @@ class AppStore extends ChangeNotifier {
           description: '新規登録ボーナス（過去問約6年分相当）',
         );
 
+        // Resolve the referrer first (a read), but credit them only AFTER this
+        // user's own verified/bonus state is persisted: writing another user's
+        // profile is denied by the `users` ownership rule, so it must never sit
+        // between us and our own save.
+        UserProfile? referrer;
         final refCode = currentUser!.pendingReferralCode;
         if (refCode != null && refCode.trim().isNotEmpty) {
-          final referrer = await _firestore.getUserByInvitationCode(refCode.trim());
-          if (referrer != null) {
-            // Reward referrer
-            final updatedReferrer = referrer.copyWith(points: referrer.points + 10);
-            await _firestore.saveUserProfile(updatedReferrer);
-            _addTransaction(
-              userId: referrer.uid,
-              type: 'referral_bonus',
-              amount: 10,
-              description: '招待コード特典（招待ボーナス） [${currentUser!.displayName} が登録]',
-            );
+          referrer = await _firestore.getUserByInvitationCode(refCode.trim());
+        }
 
-            // Reward referred (new user)
-            bonus += 10;
-            _addTransaction(
-              userId: currentUser!.uid,
-              type: 'referral_bonus',
-              amount: 10,
-              description: '招待コード特典（被招待者ボーナス）',
-            );
-          }
+        if (referrer != null) {
+          // Reward referred (new user)
+          bonus += 10;
+          _addTransaction(
+            userId: currentUser!.uid,
+            type: 'referral_bonus',
+            amount: 10,
+            description: '招待コード特典（被招待者ボーナス）',
+          );
         }
 
         currentUser = currentUser!.copyWith(
@@ -329,6 +330,20 @@ class AppStore extends ChangeNotifier {
         );
 
         await _firestore.saveUserProfile(currentUser!);
+
+        if (referrer != null) {
+          // Cross-user write: denied by the `users` ownership rule, so it is
+          // best-effort only. Reconciled server-side in Phase 2.
+          final updatedReferrer = referrer.copyWith(points: referrer.points + 10);
+          await _firestore.saveUserProfile(updatedReferrer).catchError((_) {});
+          _addTransaction(
+            userId: referrer.uid,
+            type: 'referral_bonus',
+            amount: 10,
+            description: '招待コード特典（招待ボーナス） [${currentUser!.displayName} が登録]',
+          );
+        }
+
         lastNoticeMessage = 'メールアドレスの検証が完了しました！ ボーナス ${bonus}pt を付与しました！';
         notifyListeners();
         return true;
@@ -736,6 +751,10 @@ class AppStore extends ChangeNotifier {
     if (updatedReports.length >= 3) {
       // Auto-delete / hide the post!
       posts.removeAt(idx);
+      // Persist this third report FIRST: the auto-moderation delete rule checks
+      // the stored `reports` size, so deleting before the report lands would be
+      // denied (the server would still see only two reports).
+      await _firestore.updatePostReports(postId, updatedReports).catchError((_) {});
       await _firestore.deletePost(postId).catchError((_) {});
 
       // Claw back points from uploader!
@@ -754,7 +773,11 @@ class AppStore extends ChangeNotifier {
         final updatedUploader = uploaderProfile.copyWith(
           points: (uploaderProfile.points - penalty).clamp(0, 99999)
         );
-        await _firestore.saveUserProfile(updatedUploader);
+        // Cross-user write (the uploader's profile, from the reporter's
+        // session): denied by the `users` ownership rule, so it is best-effort.
+        // Without the guard the PERMISSION_DENIED would escape reportPost() and
+        // hang the report dialog, which has no try/catch.
+        await _firestore.saveUserProfile(updatedUploader).catchError((_) {});
 
         _addTransaction(
           userId: post.authorId,
