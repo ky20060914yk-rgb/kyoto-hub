@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:flutter/foundation.dart';
 import '../models/subject.dart';
 
 // best-effort courseKey — no NFKC in dart:core; Plan 2 (review aggregation by
@@ -29,10 +30,6 @@ class CourseRepository {
 
   bool _loaded = false;
   Future<void>? _loading;
-
-  /// The `meta/catalog.version` the in-memory catalog was loaded at. Used to
-  /// decide whether the on-device Firestore cache is stale.
-  int? _catalogVersion;
 
   /// Builds a [Subject] from a raw document, or null when the document is not
   /// usable at all (C1).
@@ -72,19 +69,19 @@ class CourseRepository {
     return _loading ??= _load();
   }
 
-  /// Reads `meta/catalog.version` (one document read per cold start). A version
-  /// that differs from the one this session last loaded means the seeded
-  /// catalog changed, so the on-device cache must be bypassed.
+  /// Reads `meta/catalog.courseCount` — the number of course documents the last
+  /// seed wrote (one document read per cold start).
   ///
-  /// `tools/seed_courses.mjs` bumps `meta/catalog.version` after every seed —
-  /// without that bump, a client that already has the old catalog cached would
-  /// keep serving it for the life of the install.
-  Future<int?> _remoteCatalogVersion() async {
+  /// `tools/seed_courses.mjs` writes `{ version, courseCount }` after every
+  /// seed. `courseCount` is the authoritative catalog size; the client compares
+  /// it against the size of its own cached snapshot to decide whether the cache
+  /// is complete and current.
+  Future<int?> _remoteCatalogCount() async {
     try {
       final meta = await _db.collection('meta').doc('catalog').get();
-      final v = meta.data()?['version'];
-      if (v is int) return v;
-      if (v is num) return v.toInt();
+      final c = meta.data()?['courseCount'];
+      if (c is int) return c;
+      if (c is num) return c.toInt();
       return null;
     } catch (_) {
       // The staleness check is advisory: a missing or unreadable `meta/catalog`
@@ -93,26 +90,50 @@ class CourseRepository {
     }
   }
 
+  /// Whether an on-device cache snapshot holding [cachedLen] documents may be
+  /// served without a server round-trip.
+  ///
+  /// The decision is **count-based** on purpose. The previous version compared
+  /// `meta/catalog.version` against an in-memory field that was null on every
+  /// cold start, so the "stale" branch always won and every session ran the
+  /// full ~10k-document `Source.server` fetch — enough to blow through the
+  /// Spark plan's 50k-reads/day *project-wide* quota after a handful of
+  /// visitors. Both operands here are recomputed from durable state each call
+  /// (the cached snapshot's own size, and the seeded count), so the answer
+  /// survives a page reload.
+  ///
+  /// A null [authoritativeCount] means `meta/catalog` was missing or unreadable
+  /// — we cannot vouch for the cache and must read the server.
+  ///
+  /// Exposed for unit testing because `fake_cloud_firestore` does not
+  /// distinguish `Source.cache` from `Source.server`, so the cache/server
+  /// branch cannot be exercised through `_load()` in tests.
+  @visibleForTesting
+  static bool cacheIsFresh(int cachedLen, int? authoritativeCount) =>
+      authoritativeCount != null &&
+      cachedLen > 0 &&
+      cachedLen == authoritativeCount;
+
   Future<void> _load() async {
     try {
-      final remoteVersion = await _remoteCatalogVersion();
-      final stale = remoteVersion != null && remoteVersion != _catalogVersion;
+      final authoritativeCount = await _remoteCatalogCount();
 
       // Cache-first (C3). The Spark plan allows 50k document reads per day
       // *project-wide*; a full 10k-document server fetch on every session would
-      // exhaust that after five visitors. The server is only consulted when the
-      // cache has nothing, or when meta/catalog says the catalog moved on.
+      // exhaust that after five visitors. The cached snapshot is served only
+      // when it is non-empty AND exactly the size meta/catalog says the seeded
+      // catalog is; anything else falls through to the server.
       QuerySnapshot<Map<String, dynamic>>? snap;
-      if (!stale) {
-        try {
-          snap = await _query().get(const GetOptions(source: Source.cache));
-        } catch (_) {
-          snap = null;
+      try {
+        final cached =
+            await _query().get(const GetOptions(source: Source.cache));
+        if (cacheIsFresh(cached.docs.length, authoritativeCount)) {
+          snap = cached;
         }
+      } catch (_) {
+        // No usable on-device cache (first run, evicted, or unsupported).
       }
-      if (snap == null || snap.docs.isEmpty) {
-        snap = await _query().get(const GetOptions(source: Source.server));
-      }
+      snap ??= await _query().get(const GetOptions(source: Source.server));
 
       // An empty catalog is a failure, not a valid state (I6): latching
       // `_loaded = true` on it would leave the app permanently showing "no
@@ -130,7 +151,6 @@ class CourseRepository {
         // A malformed document is skipped, not fatal (C1).
         if (s != null) _remember(s);
       }
-      _catalogVersion = remoteVersion;
       _loaded = true;
     } finally {
       // Always release the in-flight future so a failed cold load is

@@ -216,11 +216,30 @@ void main() {
     expect(await repo.byId('dangling'), isNull);
   });
 
-  // --- C3: the catalog version drives the cache-vs-server decision -----------
+  // --- C3: the cached snapshot's size vs. meta/catalog.courseCount -----------
+  //
+  // `fake_cloud_firestore` serves the same documents for Source.cache and
+  // Source.server, so the "did we hit the server?" decision cannot be observed
+  // through `_load()`. The decision itself is the pure `cacheIsFresh` helper,
+  // unit-tested directly here; the integration tests below only confirm the
+  // meta read is non-fatal and does not perturb the load.
 
-  test('a meta/catalog version is read and does not disturb the load', () async {
+  test('cacheIsFresh: cache serves only when it is non-empty and matches the count', () {
+    // N cached docs, meta says N -> serve the cache, no server read.
+    expect(CourseRepository.cacheIsFresh(10071, 10071), isTrue);
+    // N cached docs, meta says N+1 (a re-seed grew the catalog) -> go to server.
+    expect(CourseRepository.cacheIsFresh(10071, 10072), isFalse);
+    // N cached docs, meta says N-1 -> go to server.
+    expect(CourseRepository.cacheIsFresh(10071, 10070), isFalse);
+    // Empty cache is never fresh, even if meta also (nonsensically) says 0.
+    expect(CourseRepository.cacheIsFresh(0, 0), isFalse);
+    // No authoritative count (meta/catalog missing/unreadable) -> go to server.
+    expect(CourseRepository.cacheIsFresh(10071, null), isFalse);
+  });
+
+  test('a meta/catalog with a courseCount is read and does not disturb the load', () async {
     final db = await _seeded();
-    await db.collection('meta').doc('catalog').set({'version': 7});
+    await db.collection('meta').doc('catalog').set({'version': 7, 'courseCount': 2});
     final repo = CourseRepository(db);
     await repo.warmUp();
     expect((await repo.forSlot('Mon', 2)).length, 2);
