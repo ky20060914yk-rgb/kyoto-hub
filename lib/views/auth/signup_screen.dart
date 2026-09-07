@@ -47,8 +47,15 @@ class _SignupScreenState extends State<SignupScreen> {
         // If login is successful, check if the email is verified
         final isVerified = widget.store.currentUser?.isVerified ?? false;
         if (!isVerified) {
-          // If not verified in Firestore, check Firebase Auth's current state
-          final verifiedNow = await widget.store.checkEmailVerification();
+          // If not verified in Firestore, check Firebase Auth's current state.
+          // A network failure here must fall through to the verification screen
+          // rather than escaping as an unhandled async error (I2).
+          bool verifiedNow = false;
+          try {
+            verifiedNow = await widget.store.checkEmailVerification();
+          } catch (_) {
+            verifiedNow = false;
+          }
           if (!verifiedNow) {
             setState(() {
               _isVerificationMode = true;
@@ -78,12 +85,31 @@ class _SignupScreenState extends State<SignupScreen> {
     setState(() {
       _isLoading = true;
     });
-    final verified = await widget.store.checkEmailVerification();
-    setState(() {
-      _isLoading = false;
-    });
+    // A network failure inside checkEmailVerification() used to escape and leave
+    // _isLoading stuck at true, permanently disabling the button (I2).
+    bool verified = false;
+    bool failed = false;
+    try {
+      verified = await widget.store.checkEmailVerification();
+    } catch (_) {
+      failed = true;
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isLoading = false;
+        });
+      }
+    }
+    if (!mounted) return;
 
-    if (verified && mounted) {
+    if (failed) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('通信エラーが発生しました。通信環境を確認して再試行してください。')),
+      );
+      return;
+    }
+
+    if (verified) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('メールアドレスの認証に成功しました！')),
       );

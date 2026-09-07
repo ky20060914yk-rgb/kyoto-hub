@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/foundation.dart' show setEquals;
 import 'package:flutter/material.dart';
 import '../../services/app_store.dart';
@@ -38,6 +40,13 @@ class HomeScreenState extends State<HomeScreen> {
   bool _isSearching = false;
   int _searchSeq = 0;
   String? _searchError;
+  // Keystroke debounce (I5): without it every character runs a full scan of the
+  // ~10k-course catalog.
+  Timer? _searchDebounce;
+  static const _searchDebounceDelay = Duration(milliseconds: 200);
+  // Mirrors CourseRepository.search's default limit: a result list exactly this
+  // long has been capped, so the count is rendered as "N件以上" (I1).
+  static const _searchLimit = 500;
 
   @override
   void initState() {
@@ -52,8 +61,24 @@ class HomeScreenState extends State<HomeScreen> {
   @override
   void dispose() {
     widget.store.removeListener(_onStoreChanged);
+    _searchDebounce?.cancel();
     _searchController.dispose();
     super.dispose();
+  }
+
+  /// Re-arms the debounce timer. An empty query is applied immediately so
+  /// clearing the box never leaves stale results on screen.
+  void _scheduleSearch(String query) {
+    _searchDebounce?.cancel();
+    if (query.isEmpty) {
+      _runSearch('');
+      return;
+    }
+    setState(() {
+      _isSearching = true;
+      _searchError = null;
+    });
+    _searchDebounce = Timer(_searchDebounceDelay, () => _runSearch(query));
   }
 
   Set<String> _currentTimetableIds() =>
@@ -109,7 +134,7 @@ class HomeScreenState extends State<HomeScreen> {
       _searchError = null;
     });
     try {
-      final results = await widget.store.courses.search(query);
+      final results = await widget.store.courses.search(query, limit: _searchLimit);
       if (!mounted || seq != _searchSeq) return;
       setState(() => _searchResults = results);
     } catch (_) {
@@ -162,6 +187,7 @@ class HomeScreenState extends State<HomeScreen> {
   }
 
   void resetSearch() {
+    _searchDebounce?.cancel();
     _searchController.clear();
     _searchQuery = '';
     _runSearch('');
@@ -401,7 +427,7 @@ class HomeScreenState extends State<HomeScreen> {
                   setState(() {
                     _searchQuery = val.trim();
                   });
-                  _runSearch(_searchQuery);
+                  _scheduleSearch(_searchQuery);
                 },
                 decoration: InputDecoration(
                   hintText: '科目名・教員名・学部で検索 (未登録科目も可能)',
@@ -415,7 +441,7 @@ class HomeScreenState extends State<HomeScreen> {
                             setState(() {
                               _searchQuery = '';
                             });
-                            _runSearch('');
+                            _scheduleSearch('');
                           },
                         )
                       : null,
@@ -452,7 +478,13 @@ class HomeScreenState extends State<HomeScreen> {
           children: [
             const Text('全KULASIS科目からの検索結果', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Color(0xFF1E293B))),
             const SizedBox(width: 8),
-            Text('${searchResults.length} 件', style: const TextStyle(color: Color(0xFF64748B), fontSize: 13)),
+            // `length == limit` is CourseRepository.search's "capped" signal (I1).
+            Text(
+              searchResults.length >= _searchLimit
+                  ? '$_searchLimit件以上'
+                  : '${searchResults.length} 件',
+              style: const TextStyle(color: Color(0xFF64748B), fontSize: 13),
+            ),
           ],
         ),
         const SizedBox(height: 12),

@@ -50,6 +50,15 @@ class _TimetableRegistrationScreenState extends State<TimetableRegistrationScree
     }
   }
 
+  /// Adding a course to the shared catalog is a `courses` create, and the
+  /// security rules only allow that for a *verified* KU account (C4). The
+  /// onboarding flow runs before the confirmation link has been clicked, so the
+  /// button has to say so up front rather than failing silently afterwards.
+  bool get _canAddCustomSubject => widget.store.currentUser?.isVerified == true;
+
+  static const _unverifiedAddMessage =
+      'メール認証の完了後に科目を追加できます。（通信環境もご確認ください）';
+
   void _showAddCustomSubjectModal(String dayOfWeek, int period) {
     final nameController = TextEditingController();
     final lecturerController = TextEditingController();
@@ -78,6 +87,29 @@ class _TimetableRegistrationScreenState extends State<TimetableRegistrationScree
                   Text('新規科目をマスタに追加 (${dayMap[dayOfWeek]} $period限)', style: const TextStyle(fontSize: 17, fontWeight: FontWeight.bold)),
                   const SizedBox(height: 4),
                   const Text('追加した科目はCloud Firestoreへリアルタイム保存されます', style: TextStyle(fontSize: 12, color: Color(0xFF64748B))),
+                  if (!_canAddCustomSubject) ...[
+                    const SizedBox(height: 12),
+                    Container(
+                      width: double.infinity,
+                      padding: const EdgeInsets.all(12),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFFFEF3C7),
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                      child: const Row(
+                        children: [
+                          Icon(Icons.warning_amber_rounded, color: Color(0xFFD97706), size: 20),
+                          SizedBox(width: 8),
+                          Expanded(
+                            child: Text(
+                              _unverifiedAddMessage,
+                              style: TextStyle(fontSize: 12, color: Color(0xFF92400E)),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
                   const SizedBox(height: 16),
 
                   TextField(
@@ -114,18 +146,30 @@ class _TimetableRegistrationScreenState extends State<TimetableRegistrationScree
                     width: double.infinity,
                     height: 48,
                     child: ElevatedButton(
-                      onPressed: () async {
+                      onPressed: !_canAddCustomSubject
+                          ? null
+                          : () async {
                         if (nameController.text.trim().isEmpty) return;
                         final messenger = ScaffoldMessenger.of(context);
                         final navigator = Navigator.of(context);
-                        await widget.store.addCustomSubject(
-                          name: nameController.text.trim(),
-                          faculty: selectedFaculty,
-                          dayOfWeek: dayOfWeek,
-                          period: period,
-                          lecturer: lecturerController.text.trim().isEmpty ? '担当教員' : lecturerController.text.trim(),
-                          category: selectedFaculty == '全学共通' ? '全学共通科目' : '専門科目',
-                        );
+                        // The write can be refused (unverified account) or simply
+                        // fail (offline). Either way the modal must report it and
+                        // stay put rather than popping as if it had succeeded (C4).
+                        try {
+                          await widget.store.addCustomSubject(
+                            name: nameController.text.trim(),
+                            faculty: selectedFaculty,
+                            dayOfWeek: dayOfWeek,
+                            period: period,
+                            lecturer: lecturerController.text.trim().isEmpty ? '担当教員' : lecturerController.text.trim(),
+                            category: selectedFaculty == '全学共通' ? '全学共通科目' : '専門科目',
+                          );
+                        } catch (_) {
+                          messenger.showSnackBar(
+                            const SnackBar(content: Text(_unverifiedAddMessage)),
+                          );
+                          return;
+                        }
                         navigator.pop();
                         if (!mounted) return;
                         await _refreshRegistered();
@@ -134,7 +178,10 @@ class _TimetableRegistrationScreenState extends State<TimetableRegistrationScree
                         );
                       },
                       style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF0F4C81), foregroundColor: Colors.white),
-                      child: const Text('科目を追加して保存', style: TextStyle(fontSize: 15, fontWeight: FontWeight.bold)),
+                      child: Text(
+                        _canAddCustomSubject ? '科目を追加して保存' : 'メール認証が必要です',
+                        style: const TextStyle(fontSize: 15, fontWeight: FontWeight.bold),
+                      ),
                     ),
                   ),
                 ],

@@ -69,18 +69,36 @@ class _NavigationRootScreenState extends State<NavigationRootScreen> {
                         onPressed: _isCheckingVerification
                             ? null
                             : () async {
+                                // The reload/token-refresh inside
+                                // checkEmailVerification() can throw when the
+                                // network is down. Without the try/finally the
+                                // loading flag would stay true and this button
+                                // would be disabled for the rest of the session
+                                // with no way to recover (I2).
                                 setState(() => _isCheckingVerification = true);
-                                final verified = await widget.store.checkEmailVerification();
-                                setState(() => _isCheckingVerification = false);
-                                if (verified && mounted) {
-                                  ScaffoldMessenger.of(context).showSnackBar(
-                                    const SnackBar(content: Text('メールアドレスが正常に認証されました！')),
-                                  );
-                                } else if (mounted) {
-                                  ScaffoldMessenger.of(context).showSnackBar(
-                                    const SnackBar(content: Text('まだメール認証が完了していません。')),
-                                  );
+                                bool verified = false;
+                                bool failed = false;
+                                try {
+                                  verified = await widget.store.checkEmailVerification();
+                                } catch (_) {
+                                  failed = true;
+                                } finally {
+                                  if (mounted) {
+                                    setState(() => _isCheckingVerification = false);
+                                  }
                                 }
+                                if (!mounted) return;
+                                ScaffoldMessenger.of(context).showSnackBar(
+                                  SnackBar(
+                                    content: Text(
+                                      failed
+                                          ? '通信エラーが発生しました。通信環境を確認して再試行してください。'
+                                          : verified
+                                              ? 'メールアドレスが正常に認証されました！'
+                                              : 'まだメール認証が完了していません。',
+                                    ),
+                                  ),
+                                );
                               },
                         style: TextButton.styleFrom(
                           backgroundColor: const Color(0xFFD97706),
