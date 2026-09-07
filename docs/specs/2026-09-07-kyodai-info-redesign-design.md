@@ -163,11 +163,17 @@
 Course {
   id, courseKey,
   name, lecturers[], faculty, series,          // series = 全学共通の系列
-  syllabus: { credits, term, evaluationMethod, summary },  // syllabus_data.json から流し込む
+  syllabus: { credits, term, evaluationMethod, summary },  // 後フェーズで各シラバスURLをスクレイプして流し込む
   slots: [{ day, period, term }],              // 時間割表示用の非正規化
   stats: { reviewCount, avgRating, rakutanDist, resourceCount, ... }  // 集計キャッシュ
 }
 ```
+
+**データ現実（2026-09-07 調査）:**
+- ソースの `syllabus_data.json`（11,663 件）は**ほぼ全学共通科目のみ**（専門科目 58 件）。既存の変換スクリプトは教員名を欠損時に捏造し、学部を科目名の正規表現で推定していた
+- **Phase 1 の Course は `name / lecturers[] / faculty(実データ) / slots[]` のみ**。学部・教員の捏造はしない（欠損は「担当教員不明」）
+- `series`、`syllabus.*` は後フェーズ（各 URL の個別スクレイプが必要）
+- Phase 1 のカバー範囲は当面**全学共通科目**（新入生のレビュー対象と一致）
 
 - レビュー・資料・教科書出品は**すべて courseId に紐づく**（曜日×時限のコマではなく）
 - 年度をまたいでレビューが集計される（2022 と 2024 の「微積 A・教員 X」は同じ Course）
@@ -179,7 +185,8 @@ Course {
 - 既存の `.py` スクレイパ＋`syllabus_data.json` から**クリーンなビルドスクリプト**を 1 本用意
 
 #### 4.5.3 セキュリティルール（現状: 無し → 必須）
-- メール検証時に Cloud Function が**カスタムクレーム `ku_verified`** を付与。ルールはこれを見る
+- **Phase 1**: カスタムクレームは Cloud Function が必要なため使わない。ルールは `request.auth.token.email` が `@st.kyoto-u.ac.jp` で終わること＋`request.auth.token.email_verified == true` を直接見る
+- **Phase 2 以降**: メール検証時に Cloud Function が**カスタムクレーム `ku_verified`** を付与し、ルールをそれに移行
 - `courses`: 認証済み読取のみ / 書込は管理者
 - `reviews`: 読取 = 認証済み全員、作成 = `ku_verified` かつ 1 人 1 科目 1 件、更新・削除 = 本人
 - `resources`: メタは読取可、**ファイル本体は Function 経由のみ**
