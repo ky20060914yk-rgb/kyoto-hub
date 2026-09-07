@@ -226,6 +226,14 @@ test('course create is rejected when `courseKey` is missing (C1)', async () => {
   await assertFails(setDoc(doc(asKu(), 'courses/c_nokey'), data));
 });
 
+test('course create is rejected for a non-string `lecturer` (C1)', async () => {
+  await assertFails(setDoc(doc(asKu(), 'courses/c_lec'), validCourse('c_lec', { lecturer: 123 })));
+});
+
+test('course create is rejected for a non-string `faculty` (C1)', async () => {
+  await assertFails(setDoc(doc(asKu(), 'courses/c_fac'), validCourse('c_fac', { faculty: [] })));
+});
+
 // --- reads require a KU-domain address (I3) ----------------------------------
 //
 // Anyone can mint a Firebase account through the Auth REST API; before this the

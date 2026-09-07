@@ -33,6 +33,7 @@
 // Usage:
 //   node migrate_ids.mjs --project kyodai-sns --dry-run   # report only
 //   node migrate_ids.mjs --project kyodai-sns             # rewrite
+//   node migrate_ids.mjs --project kyodai-sns --check-live # + verify the seed ran
 //   FIRESTORE_EMULATOR_HOST=localhost:8080 node migrate_ids.mjs --project demo
 //   node migrate_ids.mjs --verify-only                   # id table check only
 
@@ -54,6 +55,9 @@ const dryRun = args.includes('--dry-run');
 const datasetRef = flag('--dataset-ref', '7941776');
 // Rebuild + check the id table and stop, without touching Firestore at all.
 const verifyOnly = args.includes('--verify-only');
+// Sample target newIds against the live `courses` collection before writing —
+// catches "migration ran before the seed". Ignored under --verify-only.
+const checkLive = args.includes('--check-live');
 if (!projectId && !verifyOnly) { console.error('missing --project'); process.exit(1); }
 
 const REPO_ROOT = fileURLToPath(new URL('..', import.meta.url));
@@ -167,11 +171,22 @@ console.log(`legacy dataset: ${legacy.length} subjects, ${idMap.size} mapped, ${
 const catalog = JSON.parse(await readFile(new URL('./courses.json', import.meta.url), 'utf-8'));
 const catalogIds = new Set(catalog.map((c) => c.id));
 let hit = 0;
-for (const newId of idMap.values()) if (catalogIds.has(newId)) hit += 1;
+const unresolved = [];
+for (const [oldId, newId] of idMap) {
+  if (catalogIds.has(newId)) hit += 1;
+  else unresolved.push([oldId, newId]);
+}
 const rate = hit / idMap.size;
 console.log(`id reproduction check: ${hit}/${idMap.size} (${(rate * 100).toFixed(2)}%) resolve to a course in courses.json`);
-if (rate < 0.95) {
-  console.error('the courseKey/hash reproduction does not match build_courses.py — refusing to run');
+// This is a one-off production run: anything below 100% means at least one
+// legacy id would be rewritten to a course that does not exist in the catalog,
+// which is strictly worse than leaving it alone. Abort and name the offenders.
+if (rate < 1.0) {
+  console.error(`the courseKey/hash reproduction does not match build_courses.py — ${unresolved.length} legacy id(s) map to a non-existent course, refusing to run:`);
+  for (const [oldId, newId] of unresolved.slice(0, 50)) {
+    console.error(`  ${oldId} -> ${newId} (not in courses.json)`);
+  }
+  if (unresolved.length > 50) console.error(`  ... and ${unresolved.length - 50} more`);
   process.exit(1);
 }
 
@@ -183,6 +198,25 @@ initializeApp({
   credential: keyPath ? cert(JSON.parse(await readFile(keyPath, 'utf-8'))) : applicationDefault(),
 });
 const db = getFirestore();
+
+// --check-live: before touching anything, confirm the target project actually
+// holds the catalog this migration is mapping into. Without this, a migration
+// run before `seed_courses.mjs` would happily rewrite every timetable cell to a
+// `courses/{newId}` doc that does not exist yet.
+if (checkLive) {
+  const sample = [...idMap.values()].filter((v, i, a) => a.indexOf(v) === i).slice(0, 20);
+  const missingLive = [];
+  for (const newId of sample) {
+    const d = await db.collection('courses').doc(newId).get();
+    if (!d.exists) missingLive.push(newId);
+  }
+  console.log(`--check-live: sampled ${sample.length} target ids, ${missingLive.length} missing from courses/ in ${projectId}`);
+  if (missingLive.length > 0) {
+    console.error('target catalog is missing sampled course docs — run seed_courses.mjs first, refusing to run:');
+    for (const id of missingLive) console.error(`  courses/${id}`);
+    process.exit(1);
+  }
+}
 
 const stats = {
   timetableDocs: 0, timetableCells: 0,
