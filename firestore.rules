@@ -7,11 +7,13 @@ service cloud.firestore {
     // A verified Kyoto University student. The email pattern is start-anchored
     // and forbids a further '@', so an address such as
     // "evil@evil.com@st.kyoto-u.ac.jp" or "a@st.kyoto-u.ac.jp.attacker.com"
-    // cannot pass as a KU address.
+    // cannot pass as a KU address. The address is lower-cased first, because
+    // mail domains are case-insensitive and "A@ST.KYOTO-U.AC.JP" is the same
+    // mailbox (M1).
     function kuVerified() {
       return signedIn()
         && request.auth.token.email is string
-        && request.auth.token.email.matches('^[^@]+@st[.]kyoto-u[.]ac[.]jp$')
+        && request.auth.token.email.lower().matches('^[^@]+@st[.]kyoto-u[.]ac[.]jp$')
         && request.auth.token.email_verified == true;
     }
 
@@ -42,21 +44,53 @@ service cloud.firestore {
     }
 
     // User-generated content: readable by signed-in users, created by verified
-    // KU users as themselves, edited/removed by the author. Any signed-in user
-    // may append to `reports` (and nothing else) to flag a post.
+    // KU users as themselves, edited/removed by the author.
+    //
+    // Three narrow carve-outs let non-authors write:
+    //   * `reports` alone, so a post can be flagged — verified KU only (I4), so
+    //     an outsider Firebase account cannot mass-flag into the auto-delete
+    //     below;
+    //   * the download counters, for the *downloader*'s `updatePostMilestones`
+    //     write — strictly +1 and the reward flags may only go false -> true,
+    //     so no arbitrary counts and no un-flipping (I5);
+    //   * delete once `reports` reaches 3, which is the app's auto-moderation
+    //     (I2) — the client removes the post it just pushed over the threshold.
+    // The author branch pins `authorId` and `university_id` (M5) so an author
+    // cannot reassign authorship or move the post out of the university-scoped
+    // streams.
     match /posts/{id} {
       allow read: if signedIn();
       allow create: if kuVerified() && request.resource.data.authorId == request.auth.uid;
       allow update: if signedIn()
+        && ((resource.data.authorId == request.auth.uid
+             && request.resource.data.authorId == resource.data.authorId
+             && request.resource.data.university_id == resource.data.university_id)
+            || (kuVerified()
+                && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['reports']))
+            || (kuVerified()
+                && request.resource.data.diff(resource.data).affectedKeys()
+                     .hasOnly(['downloadCount', 'is5DownloadsRewarded', 'is10DownloadsRewarded'])
+                && request.resource.data.downloadCount == resource.data.get('downloadCount', 0) + 1
+                && (resource.data.get('is5DownloadsRewarded', false) == false
+                    || request.resource.data.is5DownloadsRewarded == true)
+                && (resource.data.get('is10DownloadsRewarded', false) == false
+                    || request.resource.data.is10DownloadsRewarded == true)));
+      allow delete: if signedIn()
         && (resource.data.authorId == request.auth.uid
-            || request.resource.data.diff(resource.data).affectedKeys().hasOnly(['reports']));
-      allow delete: if signedIn() && resource.data.authorId == request.auth.uid;
+            || (kuVerified() && resource.data.get('reports', []).size() >= 3));
     }
 
+    // The author owns the request; a *fulfiller* (anyone verified) may mark it
+    // solved, and nothing else — mirrors the `posts.reports` carve-out (I3).
     match /requests/{id} {
       allow read: if signedIn();
       allow create: if kuVerified() && request.resource.data.authorId == request.auth.uid;
-      allow update, delete: if signedIn() && resource.data.authorId == request.auth.uid;
+      allow update: if signedIn()
+        && (resource.data.authorId == request.auth.uid
+            || (kuVerified()
+                && request.resource.data.diff(resource.data).affectedKeys()
+                     .hasOnly(['isFulfilled', 'fulfilledPostId'])));
+      allow delete: if signedIn() && resource.data.authorId == request.auth.uid;
     }
 
     match /textbook_requests/{id} {
