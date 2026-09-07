@@ -124,6 +124,7 @@ class _TimetableRegistrationScreenState extends State<TimetableRegistrationScree
                           dayOfWeek: dayOfWeek,
                           period: period,
                           lecturer: lecturerController.text.trim().isEmpty ? '担当教員' : lecturerController.text.trim(),
+                          category: selectedFaculty == '全学共通' ? '全学共通科目' : '専門科目',
                         );
                         navigator.pop();
                         if (!mounted) return;

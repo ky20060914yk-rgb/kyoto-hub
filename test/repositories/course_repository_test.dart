@@ -12,7 +12,7 @@ Future<FakeFirebaseFirestore> _seeded() async {
   await db.collection('courses').doc('c_2').set({
     'id': 'c_2', 'courseKey': '哲学i|戸田剛文', 'name': '哲学I',
     'faculty': '全学共通', 'lecturer': '戸田 剛文', 'dayOfWeek': 'Mon', 'period': 2,
-    'university_id': 'kyoto_u',
+    'category': '全学共通科目', 'university_id': 'kyoto_u',
   });
   return db;
 }
@@ -42,13 +42,23 @@ void main() {
     expect(await repo.byId('nope'), isNull);
   });
 
+  test('category is read from the doc, falling back to the default', () async {
+    final repo = CourseRepository(await _seeded());
+    expect((await repo.byId('c_2'))!.category, '全学共通科目');
+    // c_1 carries no category field.
+    expect((await repo.byId('c_1'))!.category, '専門/教養');
+  });
+
   test('addCustomCourse writes to Firestore and appears in later lookups', () async {
     final db = await _seeded();
     final repo = CourseRepository(db);
     await repo.warmUp();
     final s = await repo.addCustomCourse(
-      name: '新規ゼミ', faculty: '全学共通', dayOfWeek: 'Fri', period: 4, lecturer: '担当教員不明');
+      name: '新規ゼミ', faculty: '全学共通', dayOfWeek: 'Fri', period: 4,
+      lecturer: '担当教員不明', category: '全学共通科目');
     expect((await db.collection('courses').doc(s.id).get()).exists, isTrue);
+    expect((await db.collection('courses').doc(s.id).get()).data()!['category'], '全学共通科目');
+    expect(s.category, '全学共通科目');
     expect((await repo.forSlot('Fri', 4)).single.id, s.id);
   });
 }

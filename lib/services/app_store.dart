@@ -155,6 +155,7 @@ class AppStore extends ChangeNotifier {
     required String dayOfWeek,
     required int period,
     required String lecturer,
+    required String category,
   }) async {
     final newSubject = await courses.addCustomCourse(
       name: name,
@@ -162,6 +163,7 @@ class AppStore extends ChangeNotifier {
       dayOfWeek: dayOfWeek,
       period: period,
       lecturer: lecturer,
+      category: category,
     );
 
     lastNoticeMessage = '『$name』をKULASIS科目マスタおよびFirestoreに追加しました！';
@@ -179,6 +181,7 @@ class AppStore extends ChangeNotifier {
           dayOfWeek: item['dayOfWeek'].toString(),
           period: int.tryParse(item['period'].toString()) ?? 1,
           lecturer: item['lecturer']?.toString() ?? '担当教員未定',
+          category: item['category']?.toString() ?? '専門/教養',
         );
         addedCount++;
       }

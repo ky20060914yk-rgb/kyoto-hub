@@ -23,6 +23,7 @@ class CourseRepository {
         dayOfWeek: (m['dayOfWeek'] ?? 'Mon') as String,
         period: (m['period'] ?? 1) as int,
         lecturer: (m['lecturer'] ?? '') as String,
+        category: (m['category'] ?? '専門/教養') as String,
         courseKey: (m['courseKey'] ?? '') as String,
       );
 
@@ -32,18 +33,24 @@ class CourseRepository {
   }
 
   Future<void> _load() async {
-    final snap = await _db
-        .collection('courses')
-        .where('university_id', isEqualTo: 'kyoto_u')
-        .get();
-    _byId
-      ..clear()
-      ..addEntries(snap.docs.map((d) {
-        final s = _fromDoc(d.data());
-        return MapEntry(s.id, s);
-      }));
-    _loaded = true;
-    _loading = null;
+    try {
+      final snap = await _db
+          .collection('courses')
+          .where('university_id', isEqualTo: 'kyoto_u')
+          .get();
+      _byId
+        ..clear()
+        ..addEntries(snap.docs.map((d) {
+          final s = _fromDoc(d.data());
+          return MapEntry(s.id, s);
+        }));
+      _loaded = true;
+    } finally {
+      // Always release the in-flight future so a failed cold load is
+      // retryable; _loaded stays false on failure, so the next warmUp()
+      // starts a fresh attempt instead of replaying a rejected future.
+      _loading = null;
+    }
   }
 
   Future<List<Subject>> search(String query, {int limit = 50}) async {
@@ -67,7 +74,11 @@ class CourseRepository {
   }
 
   Future<Subject?> byId(String id) async {
+    // Warm the whole catalog first: resolving a 25-cell timetable one doc at a
+    // time would otherwise be 25 sequential round-trips on a cold start.
+    await warmUp();
     if (_byId.containsKey(id)) return _byId[id];
+    // Genuine cache miss (dangling id, or a doc written after the warm-up).
     final doc = await _db.collection('courses').doc(id).get();
     if (!doc.exists) return null;
     final s = _fromDoc(doc.data()!);
@@ -84,6 +95,7 @@ class CourseRepository {
     required String dayOfWeek,
     required int period,
     required String lecturer,
+    String category = '専門/教養',
   }) async {
     final courseKey = '${_fold(name)}|${_fold(lecturer)}';
     final id = 'c_custom_${DateTime.now().millisecondsSinceEpoch}';
@@ -95,6 +107,7 @@ class CourseRepository {
       'lecturer': lecturer,
       'dayOfWeek': dayOfWeek,
       'period': period,
+      'category': category,
       'university_id': 'kyoto_u',
     };
     await _db.collection('courses').doc(id).set(data);
