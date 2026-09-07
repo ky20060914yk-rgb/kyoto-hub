@@ -14,8 +14,9 @@ class TextbookLendingScreen extends StatefulWidget {
 }
 
 class _TextbookLendingScreenState extends State<TextbookLendingScreen> {
-  void _showNewTextbookRequestModal() {
-    final registeredSubjects = widget.store.getRegisteredSubjects();
+  Future<void> _showNewTextbookRequestModal() async {
+    final registeredSubjects = await widget.store.getRegisteredSubjects();
+    if (!mounted) return;
     if (registeredSubjects.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('まず時間割に科目を登録してください')),
@@ -84,18 +85,19 @@ class _TextbookLendingScreenState extends State<TextbookLendingScreen> {
                     width: double.infinity,
                     height: 48,
                     child: ElevatedButton(
-                      onPressed: () {
-                        if (bookTitleController.text.trim().isNotEmpty) {
-                          widget.store.addTextbookRequest(
-                            subjectId: selectedSubject.id,
-                            bookTitle: bookTitleController.text.trim(),
-                          );
-                          Navigator.pop(context);
-                          setState(() {});
-                          ScaffoldMessenger.of(context).showSnackBar(
-                            SnackBar(content: Text(widget.store.lastNoticeMessage ?? 'リクエストを作成しました')),
-                          );
-                        }
+                      onPressed: () async {
+                        if (bookTitleController.text.trim().isEmpty) return;
+                        final messenger = ScaffoldMessenger.of(context);
+                        final navigator = Navigator.of(context);
+                        await widget.store.addTextbookRequest(
+                          subjectId: selectedSubject.id,
+                          bookTitle: bookTitleController.text.trim(),
+                        );
+                        navigator.pop();
+                        if (mounted) setState(() {});
+                        messenger.showSnackBar(
+                          SnackBar(content: Text(widget.store.lastNoticeMessage ?? 'リクエストを作成しました')),
+                        );
                       },
                       style: ElevatedButton.styleFrom(
                         backgroundColor: const Color(0xFF0F4C81),

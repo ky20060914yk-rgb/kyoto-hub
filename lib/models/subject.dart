@@ -7,6 +7,7 @@ class Subject {
   final int period; // 1 to 5
   final String lecturer;
   final String category;
+  final String courseKey;
 
   Subject({
     required this.id,
@@ -17,6 +18,7 @@ class Subject {
     required this.period,
     required this.lecturer,
     this.category = '専門/教養',
+    this.courseKey = '',
   });
 
   String get timeSlotLabel {
@@ -41,6 +43,7 @@ class Subject {
       'period': period,
       'lecturer': lecturer,
       'category': category,
+      'courseKey': courseKey,
     };
   }
 
@@ -54,6 +57,7 @@ class Subject {
       period: map['period'] ?? 1,
       lecturer: map['lecturer'] ?? '',
       category: map['category'] ?? '専門/教養',
+      courseKey: map['courseKey'] ?? '',
     );
   }
 }

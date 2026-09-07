@@ -1,6 +1,8 @@
+import 'dart:async';
+
+import 'package:flutter/foundation.dart' show setEquals;
 import 'package:flutter/material.dart';
 import '../../services/app_store.dart';
-import '../../services/kulasis_dataset.dart';
 import '../../models/subject.dart';
 import '../course/course_detail_screen.dart';
 import '../timetable/timetable_registration_screen.dart';
@@ -24,11 +26,171 @@ class HomeScreenState extends State<HomeScreen> {
   final List<String> _dayLabels = ['月', '火', '水', '木', '金'];
   final List<int> _periods = [1, 2, 3, 4, 5];
 
-  void resetSearch() {
-    _searchController.clear();
+  // Courses are loaded asynchronously from Firestore via CourseRepository.
+  List<Subject> _registeredSubjects = [];
+  Map<String, Subject> _registeredById = {};
+  bool _loadingTimetable = true;
+  String? _timetableError;
+  int _timetableSeq = 0;
+  // The set of course ids the last refresh was started for. Used to decide
+  // whether an AppStore notification actually changed the timetable.
+  Set<String> _lastTimetableIds = {};
+
+  List<Subject> _searchResults = [];
+  bool _isSearching = false;
+  int _searchSeq = 0;
+  String? _searchError;
+  // Keystroke debounce (I5): without it every character runs a full scan of the
+  // ~10k-course catalog.
+  Timer? _searchDebounce;
+  static const _searchDebounceDelay = Duration(milliseconds: 200);
+  // Mirrors CourseRepository.search's default limit: a result list exactly this
+  // long has been capped, so the count is rendered as "N件以上" (I1).
+  static const _searchLimit = 500;
+
+  @override
+  void initState() {
+    super.initState();
+    // HomeScreen is held behind a GlobalKey, so initState runs once. The store
+    // may populate userTimetable *after* we mount (Firestore sync), so listen
+    // for changes instead of relying on load ordering.
+    widget.store.addListener(_onStoreChanged);
+    _refreshRegistered();
+  }
+
+  @override
+  void dispose() {
+    widget.store.removeListener(_onStoreChanged);
+    _searchDebounce?.cancel();
+    _searchController.dispose();
+    super.dispose();
+  }
+
+  /// Re-arms the debounce timer. An empty query is applied immediately so
+  /// clearing the box never leaves stale results on screen.
+  void _scheduleSearch(String query) {
+    _searchDebounce?.cancel();
+    if (query.isEmpty) {
+      _runSearch('');
+      return;
+    }
     setState(() {
-      _searchQuery = '';
+      _isSearching = true;
+      _searchError = null;
     });
+    _searchDebounce = Timer(_searchDebounceDelay, () => _runSearch(query));
+  }
+
+  Set<String> _currentTimetableIds() =>
+      widget.store.userTimetable.values.toSet();
+
+  void _onStoreChanged() {
+    // Only refetch when the registered course ids actually changed — the store
+    // notifies for many unrelated reasons (points, posts, requests…).
+    if (setEquals(_currentTimetableIds(), _lastTimetableIds)) return;
+    _refreshRegistered();
+  }
+
+  Future<void> _refreshRegistered() async {
+    final seq = ++_timetableSeq;
+    // Recorded up-front (success *and* failure) so a persistent failure cannot
+    // turn every store notification into another refresh attempt.
+    _lastTimetableIds = _currentTimetableIds();
+    setState(() {
+      _loadingTimetable = true;
+      _timetableError = null;
+    });
+    try {
+      final list = await widget.store.getRegisteredSubjects();
+      if (!mounted || seq != _timetableSeq) return;
+      setState(() {
+        _registeredSubjects = list;
+        _registeredById = {for (final s in list) s.id: s};
+      });
+    } catch (_) {
+      if (!mounted || seq != _timetableSeq) return;
+      setState(() {
+        _timetableError = '時間割の読み込みに失敗しました。通信環境を確認して再試行してください。';
+      });
+    } finally {
+      if (mounted && seq == _timetableSeq) {
+        setState(() => _loadingTimetable = false);
+      }
+    }
+  }
+
+  Future<void> _runSearch(String query) async {
+    final seq = ++_searchSeq;
+    if (query.isEmpty) {
+      setState(() {
+        _searchResults = [];
+        _isSearching = false;
+        _searchError = null;
+      });
+      return;
+    }
+    setState(() {
+      _isSearching = true;
+      _searchError = null;
+    });
+    try {
+      final results = await widget.store.courses.search(query, limit: _searchLimit);
+      if (!mounted || seq != _searchSeq) return;
+      setState(() => _searchResults = results);
+    } catch (_) {
+      if (!mounted || seq != _searchSeq) return;
+      setState(() {
+        _searchResults = [];
+        _searchError = '検索に失敗しました。通信環境を確認して再試行してください。';
+      });
+    } finally {
+      if (mounted && seq == _searchSeq) {
+        setState(() => _isSearching = false);
+      }
+    }
+  }
+
+  Widget _buildErrorCard(String message, VoidCallback onRetry) {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(24),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: const Color(0xFFE2E8F0)),
+      ),
+      child: Column(
+        children: [
+          const Icon(Icons.cloud_off_rounded, size: 36, color: Color(0xFFCBD5E1)),
+          const SizedBox(height: 8),
+          const Text('読み込みに失敗しました', style: TextStyle(fontWeight: FontWeight.bold, color: Color(0xFF64748B))),
+          const SizedBox(height: 4),
+          Text(
+            message,
+            style: const TextStyle(fontSize: 12, color: Color(0xFF94A3B8)),
+            textAlign: TextAlign.center,
+          ),
+          const SizedBox(height: 16),
+          ElevatedButton.icon(
+            onPressed: onRetry,
+            icon: const Icon(Icons.refresh_rounded, size: 18),
+            label: const Text('再試行', style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold)),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: const Color(0xFF0F4C81),
+              foregroundColor: Colors.white,
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void resetSearch() {
+    _searchDebounce?.cancel();
+    _searchController.clear();
+    _searchQuery = '';
+    _runSearch('');
   }
 
   void _openOnboardingEditor() {
@@ -38,7 +200,7 @@ class HomeScreenState extends State<HomeScreen> {
         builder: (_) => TimetableRegistrationScreen(store: widget.store, isOnboarding: false),
       ),
     ).then((_) {
-      setState(() {});
+      _refreshRegistered();
     });
   }
 
@@ -184,7 +346,7 @@ class HomeScreenState extends State<HomeScreen> {
                     ScaffoldMessenger.of(context).showSnackBar(
                       SnackBar(content: Text('『${subject.name}』を時間割に登録しました。')),
                     );
-                    setState(() {});
+                    _refreshRegistered();
                   },
                 ),
               ],
@@ -197,17 +359,6 @@ class HomeScreenState extends State<HomeScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final registeredSubjects = widget.store.getRegisteredSubjects();
-
-    final searchResults = _searchQuery.isEmpty
-        ? <Subject>[]
-        : KulasisDataset.sampleSubjects.where((s) {
-            final query = _searchQuery.toLowerCase();
-            return s.name.toLowerCase().contains(query) ||
-                s.lecturer.toLowerCase().contains(query) ||
-                s.faculty.toLowerCase().contains(query);
-          }).toList();
-
     return Scaffold(
       backgroundColor: const Color(0xFFF8FAFC),
       appBar: AppBar(
@@ -276,6 +427,7 @@ class HomeScreenState extends State<HomeScreen> {
                   setState(() {
                     _searchQuery = val.trim();
                   });
+                  _scheduleSearch(_searchQuery);
                 },
                 decoration: InputDecoration(
                   hintText: '科目名・教員名・学部で検索 (未登録科目も可能)',
@@ -289,6 +441,7 @@ class HomeScreenState extends State<HomeScreen> {
                             setState(() {
                               _searchQuery = '';
                             });
+                            _scheduleSearch('');
                           },
                         )
                       : null,
@@ -301,9 +454,16 @@ class HomeScreenState extends State<HomeScreen> {
 
             // Main Content Area
             if (_searchQuery.isNotEmpty)
-              _buildSearchResults(searchResults)
+              _buildSearchResults(_searchResults)
+            else if (_loadingTimetable)
+              const Padding(
+                padding: EdgeInsets.symmetric(vertical: 48),
+                child: Center(child: CircularProgressIndicator()),
+              )
+            else if (_timetableError != null)
+              _buildErrorCard(_timetableError!, _refreshRegistered)
             else
-              _buildRegisteredTimetableGrid(registeredSubjects),
+              _buildRegisteredTimetableGrid(_registeredSubjects),
           ],
         ),
       ),
@@ -318,12 +478,27 @@ class HomeScreenState extends State<HomeScreen> {
           children: [
             const Text('全KULASIS科目からの検索結果', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Color(0xFF1E293B))),
             const SizedBox(width: 8),
-            Text('${searchResults.length} 件', style: const TextStyle(color: Color(0xFF64748B), fontSize: 13)),
+            // `length == limit` is CourseRepository.search's "capped" signal (I1).
+            Text(
+              searchResults.length >= _searchLimit
+                  ? '$_searchLimit件以上'
+                  : '${searchResults.length} 件',
+              style: const TextStyle(color: Color(0xFF64748B), fontSize: 13),
+            ),
           ],
         ),
         const SizedBox(height: 12),
 
-        if (searchResults.isEmpty)
+        if (_isSearching)
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.all(24),
+            decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(12)),
+            child: const Center(child: CircularProgressIndicator()),
+          )
+        else if (_searchError != null)
+          _buildErrorCard(_searchError!, () => _runSearch(_searchQuery))
+        else if (searchResults.isEmpty)
           Container(
             width: double.infinity,
             padding: const EdgeInsets.all(24),
@@ -536,7 +711,7 @@ class HomeScreenState extends State<HomeScreen> {
                       final dayOfWeek = _days[dIdx];
                       final key = '${dayOfWeek}_$period';
                       final subjectId = widget.store.userTimetable[key];
-                      final subject = subjectId != null ? KulasisDataset.findById(subjectId) : null;
+                      final subject = subjectId != null ? _registeredById[subjectId] : null;
 
                       return Expanded(
                         child: _buildGridCell(subject, dayOfWeek, period),
@@ -611,7 +786,7 @@ class HomeScreenState extends State<HomeScreen> {
                     ..._periods.map((period) {
                       final key = '${dayOfWeek}_$period';
                       final subjectId = widget.store.userTimetable[key];
-                      final subject = subjectId != null ? KulasisDataset.findById(subjectId) : null;
+                      final subject = subjectId != null ? _registeredById[subjectId] : null;
 
                       return Expanded(
                         child: _buildGridCell(subject, dayOfWeek, period),
