@@ -1,0 +1,58 @@
+{
+  "flutter": {
+    "platforms": {
+      "android": {
+        "default": {
+          "projectId": "kyodai-sns",
+          "appId": "1:932624635949:android:cd43745f8e5a9a1c1ac0a4",
+          "fileOutput": "android/app/google-services.json"
+        }
+      },
+      "dart": {
+        "lib/firebase_options.dart": {
+          "projectId": "kyodai-sns",
+          "configurations": {
+            "android": "1:932624635949:android:cd43745f8e5a9a1c1ac0a4",
+            "ios": "1:932624635949:ios:1dde612567476a5e1ac0a4",
+            "web": "1:932624635949:web:34f33e93087e2b641ac0a4"
+          }
+        }
+      }
+    }
+  },
+  "hosting": {
+    "site": "kyodai-info",
+    "public": "build/web",
+    "ignore": [
+      "firebase.json",
+      "**/.*",
+      "**/node_modules/**"
+    ],
+    "headers": [
+      {
+        "source": "**/!(index.html|flutter_bootstrap.js|flutter_service_worker.js)",
+        "headers": [
+          {
+            "key": "Cache-Control",
+            "value": "max-age=31536000, immutable"
+          }
+        ]
+      },
+      {
+        "source": "@(index.html|flutter_bootstrap.js|flutter_service_worker.js)",
+        "headers": [
+          {
+            "key": "Cache-Control",
+            "value": "max-age=0, no-cache, no-store, must-revalidate"
+          }
+        ]
+      }
+    ],
+    "rewrites": [
+      {
+        "source": "**",
+        "destination": "/index.html"
+      }
+    ]
+  }
+}

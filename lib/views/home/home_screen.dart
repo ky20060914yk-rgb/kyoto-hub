@@ -1,0 +1,808 @@
+import 'package:flutter/material.dart';
+import '../../services/app_store.dart';
+import '../../services/kulasis_dataset.dart';
+import '../../models/subject.dart';
+import '../course/course_detail_screen.dart';
+import '../timetable/timetable_registration_screen.dart';
+
+class HomeScreen extends StatefulWidget {
+  final AppStore store;
+
+  const HomeScreen({super.key, required this.store});
+
+  @override
+  State<HomeScreen> createState() => HomeScreenState();
+}
+
+class HomeScreenState extends State<HomeScreen> {
+  final _searchController = TextEditingController();
+  String _searchQuery = '';
+  bool _isGridView = true;
+  bool _isTransposed = false;
+
+  final List<String> _days = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri'];
+  final List<String> _dayLabels = ['月', '火', '水', '木', '金'];
+  final List<int> _periods = [1, 2, 3, 4, 5];
+
+  void resetSearch() {
+    _searchController.clear();
+    setState(() {
+      _searchQuery = '';
+    });
+  }
+
+  void _openOnboardingEditor() {
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => TimetableRegistrationScreen(store: widget.store, isOnboarding: false),
+      ),
+    ).then((_) {
+      setState(() {});
+    });
+  }
+
+  void _showPointExplanationDialog() {
+    showDialog(
+      context: context,
+      builder: (context) {
+        return AlertDialog(
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+          title: Row(
+            children: const [
+              Icon(Icons.stars_rounded, color: Color(0xFFFBBF24), size: 24),
+              SizedBox(width: 8),
+              Text('ポイント制度のルール', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+            ],
+          ),
+          content: SingleChildScrollView(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const Text('京大InfoHubでは、良質な資料を共有し合うコミュニティを維持するため、以下のポイント制度を採用しています。', style: TextStyle(fontSize: 12.5, color: Color(0xFF475569))),
+                const SizedBox(height: 12),
+                _buildRuleSection('獲得する', [
+                  '👤 メール認証完了ボーナス: +30 pt',
+                  '✉️ 招待コード経由での登録: 双方に +10 pt',
+                  '📤 過去問のアップロード: +5 pt\n(※2021年以降のもの。1日3回まで付与)',
+                  '🎁 ダウンロードマイルストーン:\n 自分の資料が 5DL されると +5 pt\n 自分の資料が 10DL されると +10 pt',
+                  '🤝 リクエストの解決: 依頼者が設定した報酬ptを獲得',
+                  '🪙 資料DLロイヤリティ: 自分の資料がDLされるたびに、消費ポイントの80%が即座に還元 (例: 過去問なら +4 pt)',
+                ], const Color(0xFF10B981)),
+                const SizedBox(height: 12),
+                _buildRuleSection('消費する', [
+                  '📄 過去問のダウンロード: 5 pt',
+                  '💡 テスト対策資料などのDL: 0 〜 20 pt',
+                  '❓ 過去問リクエストの作成: 1 pt ＋ 任意の設定報酬pt',
+                  '🎁 リクエスト依頼者特典: 自分のリクエストに回答された資料は無料でDLできます！',
+                ], const Color(0xFFEF4444)),
+                const SizedBox(height: 12),
+                _buildRuleSection('その他の制限', [
+                  '⚠️ 古い過去問 (2020年以前): アップロード時の+5ptは付与されません (DLロイヤリティとマイルストーン報酬のみ対象)。',
+                  '⚠️ 同一年度の重複禁止: 同一科目の同じ年度の過去問は、重複してアップロードできません。',
+                  '⚠️ 通報ペナルティ: 転載や無関係なアップロードが3回通報されると自動削除され、獲得ポイントが全額没収されます。',
+                ], const Color(0xFF64748B)),
+              ],
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: const Text('閉じる', style: TextStyle(fontWeight: FontWeight.bold, color: Color(0xFF0F4C81))),
+            ),
+          ],
+        );
+      },
+    );
+  }
+
+  Widget _buildRuleSection(String title, List<String> rules, Color badgeColor) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Container(
+          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+          decoration: BoxDecoration(
+            color: badgeColor.withAlpha(20),
+            borderRadius: BorderRadius.circular(4),
+          ),
+          child: Text(
+            title,
+            style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: badgeColor),
+          ),
+        ),
+        const SizedBox(height: 6),
+        ...rules.map((rule) => Padding(
+              padding: const EdgeInsets.only(left: 4, bottom: 4),
+              child: Text(
+                rule,
+                style: const TextStyle(fontSize: 11.5, color: Color(0xFF334155), height: 1.35),
+              ),
+            )),
+      ],
+    );
+  }
+
+  void _showDirectRegisterDialog(Subject subject) {
+    String selectedDay = 'Mon';
+    int selectedPeriod = 1;
+    final days = {'Mon': '月曜', 'Tue': '火曜', 'Wed': '水曜', 'Thu': '木曜', 'Fri': '金曜'};
+    final periods = [1, 2, 3, 4, 5];
+
+    showDialog(
+      context: context,
+      builder: (context) {
+        return StatefulBuilder(
+          builder: (context, setDialogState) {
+            return AlertDialog(
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+              title: const Text('時間割に登録', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+              content: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text('『${subject.name}』を時間割のどのコマに登録しますか？', style: const TextStyle(fontSize: 13, color: Color(0xFF475569))),
+                  const SizedBox(height: 16),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: DropdownButtonFormField<String>(
+                          value: selectedDay,
+                          decoration: const InputDecoration(labelText: '曜日', border: OutlineInputBorder()),
+                          items: days.entries.map((e) => DropdownMenuItem(value: e.key, child: Text(e.value))).toList(),
+                          onChanged: (val) {
+                            if (val != null) setDialogState(() => selectedDay = val);
+                          },
+                        ),
+                      ),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: DropdownButtonFormField<int>(
+                          value: selectedPeriod,
+                          decoration: const InputDecoration(labelText: '時限', border: OutlineInputBorder()),
+                          items: periods.map((p) => DropdownMenuItem(value: p, child: Text('$p限'))).toList(),
+                          onChanged: (val) {
+                            if (val != null) setDialogState(() => selectedPeriod = val);
+                          },
+                        ),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+              actions: [
+                TextButton(
+                  child: const Text('キャンセル', style: TextStyle(color: Colors.grey)),
+                  onPressed: () => Navigator.pop(context),
+                ),
+                TextButton(
+                  child: const Text('登録する', style: TextStyle(color: Color(0xFF0F4C81), fontWeight: FontWeight.bold)),
+                  onPressed: () {
+                    widget.store.registerTimetableSubject(selectedDay, selectedPeriod, subject.id);
+                    Navigator.pop(context);
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      SnackBar(content: Text('『${subject.name}』を時間割に登録しました。')),
+                    );
+                    setState(() {});
+                  },
+                ),
+              ],
+            );
+          },
+        );
+      },
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final registeredSubjects = widget.store.getRegisteredSubjects();
+
+    final searchResults = _searchQuery.isEmpty
+        ? <Subject>[]
+        : KulasisDataset.sampleSubjects.where((s) {
+            final query = _searchQuery.toLowerCase();
+            return s.name.toLowerCase().contains(query) ||
+                s.lecturer.toLowerCase().contains(query) ||
+                s.faculty.toLowerCase().contains(query);
+          }).toList();
+
+    return Scaffold(
+      backgroundColor: const Color(0xFFF8FAFC),
+      appBar: AppBar(
+        backgroundColor: Colors.white,
+        elevation: 0.5,
+        title: Row(
+          children: [
+            Container(
+              padding: const EdgeInsets.all(6),
+              decoration: BoxDecoration(
+                color: const Color(0xFF0F4C81).withAlpha(20),
+                shape: BoxShape.circle,
+              ),
+              child: const Icon(Icons.school_rounded, color: Color(0xFF0F4C81), size: 20),
+            ),
+            const SizedBox(width: 10),
+            const Text(
+              '京大InfoHub',
+              style: TextStyle(color: Color(0xFF1E293B), fontWeight: FontWeight.bold, fontSize: 18),
+            ),
+          ],
+        ),
+        actions: [
+          GestureDetector(
+            onTap: _showPointExplanationDialog,
+            child: Container(
+              margin: const EdgeInsets.only(right: 16),
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+              decoration: BoxDecoration(
+                gradient: const LinearGradient(colors: [Color(0xFF0F4C81), Color(0xFF1E5B94)]),
+                borderRadius: BorderRadius.circular(20),
+              ),
+              child: Row(
+                children: [
+                  const Icon(Icons.stars_rounded, color: Color(0xFFFBBF24), size: 16),
+                  const SizedBox(width: 4),
+                  Text(
+                    '${widget.store.currentUser?.points ?? 0} pt',
+                    style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 13),
+                  ),
+                  const SizedBox(width: 4),
+                  const Icon(Icons.help_outline_rounded, color: Colors.white70, size: 13),
+                ],
+              ),
+            ),
+          ),
+        ],
+      ),
+      body: SingleChildScrollView(
+        padding: const EdgeInsets.all(16.0),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            // Top Search Bar
+            Container(
+              decoration: BoxDecoration(
+                color: Colors.white,
+                borderRadius: BorderRadius.circular(12),
+                boxShadow: [
+                  BoxShadow(color: Colors.black.withAlpha(8), blurRadius: 10, offset: const Offset(0, 2)),
+                ],
+              ),
+              child: TextField(
+                controller: _searchController,
+                onChanged: (val) {
+                  setState(() {
+                    _searchQuery = val.trim();
+                  });
+                },
+                decoration: InputDecoration(
+                  hintText: '科目名・教員名・学部で検索 (未登録科目も可能)',
+                  hintStyle: const TextStyle(fontSize: 13, color: Color(0xFF94A3B8)),
+                  prefixIcon: const Icon(Icons.search_rounded, color: Color(0xFF0F4C81)),
+                  suffixIcon: _searchQuery.isNotEmpty
+                      ? IconButton(
+                          icon: const Icon(Icons.clear_rounded, size: 18),
+                          onPressed: () {
+                            _searchController.clear();
+                            setState(() {
+                              _searchQuery = '';
+                            });
+                          },
+                        )
+                      : null,
+                  border: InputBorder.none,
+                  contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+                ),
+              ),
+            ),
+            const SizedBox(height: 20),
+
+            // Main Content Area
+            if (_searchQuery.isNotEmpty)
+              _buildSearchResults(searchResults)
+            else
+              _buildRegisteredTimetableGrid(registeredSubjects),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildSearchResults(List<Subject> searchResults) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          children: [
+            const Text('全KULASIS科目からの検索結果', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Color(0xFF1E293B))),
+            const SizedBox(width: 8),
+            Text('${searchResults.length} 件', style: const TextStyle(color: Color(0xFF64748B), fontSize: 13)),
+          ],
+        ),
+        const SizedBox(height: 12),
+
+        if (searchResults.isEmpty)
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.all(24),
+            decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(12)),
+            child: const Center(child: Text('該当する科目がみつかりませんでした', style: TextStyle(color: Color(0xFF94A3B8)))),
+          )
+        else
+          ListView.builder(
+            shrinkWrap: true,
+            physics: const NeverScrollableScrollPhysics(),
+            itemCount: searchResults.length,
+            itemBuilder: (context, index) {
+              final sub = searchResults[index];
+              return Card(
+                margin: const EdgeInsets.only(bottom: 8),
+                elevation: 0,
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(10),
+                  side: const BorderSide(color: Color(0xFFE2E8F0)),
+                ),
+                child: ListTile(
+                  title: Text(sub.name, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15)),
+                  subtitle: Text('${sub.faculty} • ${sub.timeSlotLabel} • 担当: ${sub.lecturer}'),
+                  trailing: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      IconButton(
+                        icon: const Icon(Icons.calendar_today_rounded, color: Color(0xFF0F4C81), size: 20),
+                        tooltip: '時間割に直接追加',
+                        onPressed: () => _showDirectRegisterDialog(sub),
+                      ),
+                      const Icon(Icons.chevron_right_rounded, color: Color(0xFF0F4C81)),
+                    ],
+                  ),
+                  onTap: () {
+                    Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                        builder: (_) => CourseDetailScreen(store: widget.store, subject: sub),
+                      ),
+                    );
+                  },
+                ),
+              );
+            },
+          ),
+      ],
+    );
+  }
+
+  Widget _buildRegisteredTimetableGrid(List<Subject> registeredSubjects) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          children: [
+            const Text('あなたの時間割', style: TextStyle(fontSize: 17, fontWeight: FontWeight.bold, color: Color(0xFF1E293B))),
+            Row(
+              children: [
+                // Swapped axes toggle (縦横切替)
+                if (_isGridView)
+                  TextButton.icon(
+                    onPressed: () {
+                      setState(() {
+                        _isTransposed = !_isTransposed;
+                      });
+                    },
+                    style: TextButton.styleFrom(
+                      foregroundColor: const Color(0xFF0F4C81),
+                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                    ),
+                    icon: const Icon(Icons.swap_vertical_circle_outlined, size: 16),
+                    label: const Text('縦横切替', style: TextStyle(fontSize: 11.5, fontWeight: FontWeight.bold)),
+                  ),
+                const SizedBox(width: 6),
+                // Grid view / Card list view toggle
+                TextButton.icon(
+                  onPressed: () {
+                    setState(() {
+                      _isGridView = !_isGridView;
+                    });
+                  },
+                  style: TextButton.styleFrom(
+                    foregroundColor: const Color(0xFF64748B),
+                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                  ),
+                  icon: Icon(_isGridView ? Icons.view_list_rounded : Icons.grid_on_rounded, size: 16),
+                  label: Text(_isGridView ? 'リスト表示' : 'グリッド表示', style: const TextStyle(fontSize: 11.5)),
+                ),
+              ],
+            ),
+          ],
+        ),
+        const SizedBox(height: 12),
+
+        if (registeredSubjects.isEmpty)
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.all(24),
+            decoration: BoxDecoration(
+              color: Colors.white,
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(color: const Color(0xFFE2E8F0)),
+            ),
+            child: Column(
+              children: [
+                const Icon(Icons.calendar_today_outlined, size: 36, color: Color(0xFFCBD5E1)),
+                const SizedBox(height: 8),
+                const Text('登録済みの科目がありません', style: TextStyle(fontWeight: FontWeight.bold, color: Color(0xFF64748B))),
+                const SizedBox(height: 4),
+                const Text('上の検索バーから検索するか、下の「時間割登録」を行ってください。', style: TextStyle(fontSize: 12, color: Color(0xFF94A3B8)), textAlign: TextAlign.center),
+                const SizedBox(height: 16),
+                ElevatedButton.icon(
+                  onPressed: _openOnboardingEditor,
+                  icon: const Icon(Icons.edit_calendar_rounded, size: 18),
+                  label: const Text('時間割を一括登録・編集', style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold)),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: const Color(0xFF0F4C81),
+                    foregroundColor: Colors.white,
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                  ),
+                ),
+              ],
+            ),
+          )
+        else ...[
+          if (_isGridView)
+            _buildTimetableWeeklyGrid(registeredSubjects)
+          else
+            _buildRegisteredCardList(registeredSubjects),
+          
+          const SizedBox(height: 16),
+          Center(
+            child: OutlinedButton.icon(
+              onPressed: _openOnboardingEditor,
+              icon: const Icon(Icons.edit_calendar_rounded, size: 16),
+              label: const Text('時間割を一括登録・編集', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
+              style: OutlinedButton.styleFrom(
+                foregroundColor: const Color(0xFF0F4C81),
+                side: const BorderSide(color: Color(0xFF0F4C81)),
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+              ),
+            ),
+          ),
+        ],
+      ],
+    );
+  }
+
+  Widget _buildTimetableWeeklyGrid(List<Subject> registeredSubjects) {
+    if (!_isTransposed) {
+      // Days are columns, Periods are rows
+      return Container(
+        decoration: BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: const Color(0xFFE2E8F0)),
+        ),
+        child: Column(
+          children: [
+            // Days Header
+            Container(
+              height: 44,
+              decoration: const BoxDecoration(
+                color: Color(0xFFF1F5F9),
+                borderRadius: BorderRadius.vertical(top: Radius.circular(12)),
+              ),
+              child: Row(
+                children: [
+                  const SizedBox(
+                    width: 28,
+                    child: Center(
+                      child: Text('限', style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: Color(0xFF64748B))),
+                    ),
+                  ),
+                  ...List.generate(5, (dIdx) {
+                    return Expanded(
+                      child: Center(
+                        child: Text(
+                          _dayLabels[dIdx],
+                          style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 12, color: Color(0xFF334155)),
+                        ),
+                      ),
+                    );
+                  }),
+                ],
+              ),
+            ),
+            // Period Rows
+            ..._periods.map((period) {
+              return Container(
+                height: 80,
+                decoration: const BoxDecoration(
+                  border: Border(top: BorderSide(color: Color(0xFFE2E8F0), width: 0.5)),
+                ),
+                child: Row(
+                  children: [
+                    SizedBox(
+                      width: 28,
+                      child: Center(
+                        child: Text(
+                          '$period',
+                          style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 11, color: Color(0xFF64748B)),
+                        ),
+                      ),
+                    ),
+                    ...List.generate(5, (dIdx) {
+                      final dayOfWeek = _days[dIdx];
+                      final key = '${dayOfWeek}_$period';
+                      final subjectId = widget.store.userTimetable[key];
+                      final subject = subjectId != null ? KulasisDataset.findById(subjectId) : null;
+
+                      return Expanded(
+                        child: _buildGridCell(subject, dayOfWeek, period),
+                      );
+                    }),
+                  ],
+                ),
+              );
+            }).toList(),
+          ],
+        ),
+      );
+    } else {
+      // Swapped: Periods are columns, Days are rows
+      return Container(
+        decoration: BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: const Color(0xFFE2E8F0)),
+        ),
+        child: Column(
+          children: [
+            // Periods Header
+            Container(
+              height: 44,
+              decoration: const BoxDecoration(
+                color: Color(0xFFF1F5F9),
+                borderRadius: BorderRadius.vertical(top: Radius.circular(12)),
+              ),
+              child: Row(
+                children: [
+                  const SizedBox(
+                    width: 28,
+                    child: Center(
+                      child: Text('曜', style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: Color(0xFF64748B))),
+                    ),
+                  ),
+                  ...List.generate(5, (pIdx) {
+                    return Expanded(
+                      child: Center(
+                        child: Text(
+                          '${_periods[pIdx]}',
+                          style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 12, color: Color(0xFF334155)),
+                        ),
+                      ),
+                    );
+                  }),
+                ],
+              ),
+            ),
+            // Day Rows
+            ...List.generate(5, (dIdx) {
+              final dayOfWeek = _days[dIdx];
+              final dayLabel = _dayLabels[dIdx];
+
+              return Container(
+                height: 80,
+                decoration: const BoxDecoration(
+                  border: Border(top: BorderSide(color: Color(0xFFE2E8F0), width: 0.5)),
+                ),
+                child: Row(
+                  children: [
+                    SizedBox(
+                      width: 28,
+                      child: Center(
+                        child: Text(
+                          dayLabel,
+                          style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 11, color: Color(0xFF64748B)),
+                        ),
+                      ),
+                    ),
+                    ..._periods.map((period) {
+                      final key = '${dayOfWeek}_$period';
+                      final subjectId = widget.store.userTimetable[key];
+                      final subject = subjectId != null ? KulasisDataset.findById(subjectId) : null;
+
+                      return Expanded(
+                        child: _buildGridCell(subject, dayOfWeek, period),
+                      );
+                    }).toList(),
+                  ],
+                ),
+              );
+            }),
+          ],
+        ),
+      );
+    }
+  }
+
+  Widget _buildGridCell(Subject? subject, String dayOfWeek, int period) {
+    final postCount = subject != null ? widget.store.posts.where((p) => p.subjectId == subject.id && p.requestId == null).length : 0;
+
+    return GestureDetector(
+      onTap: () {
+        if (subject != null) {
+          Navigator.push(
+            context,
+            MaterialPageRoute(
+              builder: (_) => CourseDetailScreen(store: widget.store, subject: subject),
+            ),
+          ).then((_) {
+            setState(() {});
+          });
+        } else {
+          _openOnboardingEditor();
+        }
+      },
+      child: Container(
+        margin: const EdgeInsets.all(2),
+        decoration: BoxDecoration(
+          color: subject != null ? const Color(0xFF0F4C81).withAlpha(15) : const Color(0xFFF8FAFC),
+          borderRadius: BorderRadius.circular(6),
+          border: Border.all(
+            color: subject != null ? const Color(0xFF0F4C81).withAlpha(40) : const Color(0xFFE2E8F0),
+            width: 0.8,
+          ),
+        ),
+        padding: const EdgeInsets.all(2),
+        child: subject != null
+            ? Stack(
+                children: [
+                  Center(
+                    child: Padding(
+                      padding: const EdgeInsets.only(bottom: 6.0),
+                      child: Text(
+                        subject.name,
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                        textAlign: TextAlign.center,
+                        style: const TextStyle(
+                          fontSize: 11.0,
+                          fontWeight: FontWeight.bold,
+                          color: Color(0xFF0F4C81),
+                          height: 1.15,
+                        ),
+                      ),
+                    ),
+                  ),
+                  if (postCount > 0)
+                    Positioned(
+                      bottom: 0,
+                      right: 0,
+                      left: 0,
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(vertical: 0.5),
+                        decoration: BoxDecoration(
+                          color: const Color(0xFF10B981).withAlpha(25),
+                          borderRadius: BorderRadius.circular(4),
+                        ),
+                        child: Text(
+                          '$postCount件',
+                          textAlign: TextAlign.center,
+                          style: const TextStyle(
+                            fontSize: 9.0,
+                            fontWeight: FontWeight.bold,
+                            color: Color(0xFF059669),
+                          ),
+                        ),
+                      ),
+                    ),
+                ],
+              )
+            : const Center(
+                child: Icon(
+                  Icons.add_rounded,
+                  size: 14,
+                  color: Color(0xFFCBD5E1),
+                ),
+              ),
+      ),
+    );
+  }
+
+  Widget _buildRegisteredCardList(List<Subject> registeredSubjects) {
+    return GridView.builder(
+      shrinkWrap: true,
+      physics: const NeverScrollableScrollPhysics(),
+      gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+        crossAxisCount: 2,
+        childAspectRatio: 2.2,
+        crossAxisSpacing: 8,
+        mainAxisSpacing: 8,
+      ),
+      itemCount: registeredSubjects.length,
+      itemBuilder: (context, index) {
+        final sub = registeredSubjects[index];
+        final postCount = widget.store.posts.where((p) => p.subjectId == sub.id && p.requestId == null).length;
+
+        return GestureDetector(
+          onTap: () {
+            Navigator.push(
+              context,
+              MaterialPageRoute(
+                builder: (_) => CourseDetailScreen(store: widget.store, subject: sub),
+              ),
+            ).then((_) {
+              setState(() {});
+            });
+          },
+          child: Container(
+            padding: const EdgeInsets.all(10),
+            decoration: BoxDecoration(
+              color: Colors.white,
+              borderRadius: BorderRadius.circular(10),
+              border: Border.all(color: const Color(0xFFE2E8F0)),
+              boxShadow: [
+                BoxShadow(color: Colors.black.withAlpha(3), blurRadius: 4, offset: const Offset(0, 1)),
+              ],
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFF0F4C81).withAlpha(15),
+                        borderRadius: BorderRadius.circular(4),
+                      ),
+                      child: Text(
+                        sub.timeSlotLabel,
+                        style: const TextStyle(fontSize: 8.5, fontWeight: FontWeight.bold, color: Color(0xFF0F4C81)),
+                      ),
+                    ),
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
+                      decoration: BoxDecoration(
+                        color: postCount > 0 ? const Color(0xFF10B981).withAlpha(20) : const Color(0xFFF1F5F9),
+                        borderRadius: BorderRadius.circular(4),
+                      ),
+                      child: Text(
+                        '$postCount 件',
+                        style: TextStyle(
+                          fontSize: 8.5,
+                          fontWeight: FontWeight.bold,
+                          color: postCount > 0 ? const Color(0xFF10B981) : const Color(0xFF94A3B8),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+                Text(
+                  sub.name,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                    fontSize: 14,
+                    fontWeight: FontWeight.bold,
+                    color: Color(0xFF1E293B),
+                  ),
+                ),
+                Text(
+                  '担当: ${sub.lecturer}',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(fontSize: 11, color: Color(0xFF64748B)),
+                ),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+  }
+}
