@@ -3,7 +3,10 @@ import { test, before, beforeEach, after } from 'node:test';
 import {
   initializeTestEnvironment, assertFails, assertSucceeds,
 } from '@firebase/rules-unit-testing';
-import { setDoc, getDoc, updateDoc, deleteDoc, doc } from 'firebase/firestore';
+import {
+  setDoc, getDoc, updateDoc, deleteDoc, doc,
+  getDocs, query, where, collection,
+} from 'firebase/firestore';
 
 let env;
 
@@ -24,10 +27,18 @@ const KU = { sub: 'u1', email: 'a@st.kyoto-u.ac.jp', email_verified: true };
 const KU2 = { sub: 'u2', email: 'd@st.kyoto-u.ac.jp', email_verified: true };
 const KU_UNVERIFIED = { sub: 'u2', email: 'b@st.kyoto-u.ac.jp', email_verified: false };
 const OUTSIDER = { sub: 'u3', email: 'c@gmail.com', email_verified: true };
-// R5 guards against a suffix-only match: this address is NOT a KU address even
-// though it ends in the KU domain string when the pattern is not start-anchored.
-const SPOOFER = { sub: 'u4', email: 'evil@evil.com@st.kyoto-u.ac.jp.attacker.com', email_verified: true };
-const SPOOFER_PREFIX = { sub: 'u5', email: 'evil@evil.com/a@st.kyoto-u.ac.jp', email_verified: true };
+// R5 regression pair. Both end in / contain the KU domain string and would slip
+// past a pattern that is not start-anchored or that allows '@' in the local
+// part; the anchored `^[^@]+@st[.]kyoto-u[.]ac[.]jp$` rejects both.
+//   SPOOFER        — ends in the KU domain exactly, but carries an extra '@',
+//                    so the local part is not a single mailbox name.
+//   SPOOFER_SUFFIX — the KU domain is only a substring; the real domain is
+//                    attacker.com.
+const SPOOFER = { sub: 'u4', email: 'evil@evil.com@st.kyoto-u.ac.jp', email_verified: true };
+const SPOOFER_SUFFIX = { sub: 'u5', email: 'a@st.kyoto-u.ac.jp.attacker.com', email_verified: true };
+// M1: mail domains are case-insensitive, so an upper-cased KU address is the
+// same mailbox and must be accepted.
+const KU_UPPERCASE = { sub: 'u6', email: 'E@ST.KYOTO-U.AC.JP', email_verified: true };
 
 const asKu = () => env.authenticatedContext('u1', KU).firestore();
 const asKu2 = () => env.authenticatedContext('u2', KU2).firestore();
@@ -47,7 +58,24 @@ beforeEach(async () => {
     await setDoc(doc(db, 'posts/seed_u1'), {
       authorId: 'u1', university_id: 'kyoto_u', title: 't', reports: [], downloadCount: 0,
     });
-    await setDoc(doc(db, 'requests/req_u1'), { authorId: 'u1', university_id: 'kyoto_u', title: 'r' });
+    // Three reports already stored -> eligible for auto-moderation deletion.
+    await setDoc(doc(db, 'posts/reported_u1'), {
+      authorId: 'u1', university_id: 'kyoto_u', title: 't', reports: ['a', 'b', 'c'], downloadCount: 0,
+    });
+    // Download-counter fixtures: one with no reward claimed yet, one that has
+    // already claimed the 5-download reward.
+    await setDoc(doc(db, 'posts/dl_u1'), {
+      authorId: 'u1', university_id: 'kyoto_u', title: 't', reports: [],
+      downloadCount: 4, is5DownloadsRewarded: false, is10DownloadsRewarded: false,
+    });
+    await setDoc(doc(db, 'posts/dl_rewarded_u1'), {
+      authorId: 'u1', university_id: 'kyoto_u', title: 't', reports: [],
+      downloadCount: 7, is5DownloadsRewarded: true, is10DownloadsRewarded: false,
+    });
+    await setDoc(doc(db, 'requests/req_u1'), {
+      authorId: 'u1', university_id: 'kyoto_u', title: 'r',
+      isFulfilled: false, fulfilledPostId: null,
+    });
     await setDoc(doc(db, 'textbook_requests/tb_u1'), {
       requesterId: 'u1', university_id: 'kyoto_u', status: 'open',
     });
@@ -158,14 +186,21 @@ test('non-KU email cannot create a post even if verified', async () => {
   await assertFails(setDoc(doc(db, 'posts/p3'), { authorId: 'u3', university_id: 'kyoto_u' }));
 });
 
-test('suffix-spoofed KU address cannot create a post (R5 anchoring)', async () => {
+test('address with an extra @ before the KU domain cannot create a post (R5 anchoring)', async () => {
   const db = env.authenticatedContext('u4', SPOOFER).firestore();
   await assertFails(setDoc(doc(db, 'posts/p_spoof'), { authorId: 'u4', university_id: 'kyoto_u' }));
 });
 
-test('address with an extra @ before the KU domain cannot create a post (R5 anchoring)', async () => {
-  const db = env.authenticatedContext('u5', SPOOFER_PREFIX).firestore();
+test('address whose real domain only ends with the KU domain cannot create a post (R5 anchoring)', async () => {
+  const db = env.authenticatedContext('u5', SPOOFER_SUFFIX).firestore();
   await assertFails(setDoc(doc(db, 'posts/p_spoof2'), { authorId: 'u5', university_id: 'kyoto_u' }));
+});
+
+test('an upper-cased KU address is still a KU address (M1)', async () => {
+  const db = env.authenticatedContext('u6', KU_UPPERCASE).firestore();
+  await assertSucceeds(setDoc(doc(db, 'posts/p_upper'), {
+    authorId: 'u6', university_id: 'kyoto_u', title: 't',
+  }));
 });
 
 test('cannot create a post attributed to someone else', async () => {
@@ -186,6 +221,53 @@ test('non-author may only touch the reports field of a post', async () => {
   await assertFails(deleteDoc(doc(db, 'posts/seed_u1')));
 });
 
+test('an author cannot rewrite a post out of its stream or reassign it (M5)', async () => {
+  const db = asKu();
+  await assertFails(updateDoc(doc(db, 'posts/seed_u1'), { authorId: 'u2' }));
+  await assertFails(updateDoc(doc(db, 'posts/seed_u1'), { university_id: 'osaka_u' }));
+});
+
+test('only a verified KU user may flag a post (I4)', async () => {
+  const unverified = env.authenticatedContext('u2', KU_UNVERIFIED).firestore();
+  await assertFails(updateDoc(doc(unverified, 'posts/seed_u1'), { reports: ['u2'] }));
+  const outsider = env.authenticatedContext('u3', OUTSIDER).firestore();
+  await assertFails(updateDoc(doc(outsider, 'posts/seed_u1'), { reports: ['u3'] }));
+});
+
+test('a post with 3+ reports can be auto-deleted by a verified KU non-author (I2)', async () => {
+  await assertSucceeds(deleteDoc(doc(asKu2(), 'posts/reported_u1')));
+});
+
+test('a non-author cannot delete a post below the report threshold (I2)', async () => {
+  await assertFails(deleteDoc(doc(asKu2(), 'posts/seed_u1')));
+  const outsider = env.authenticatedContext('u3', OUTSIDER).firestore();
+  await assertFails(deleteDoc(doc(outsider, 'posts/reported_u1')));
+});
+
+test('a downloader may increment downloadCount by exactly one (I5)', async () => {
+  await assertSucceeds(updateDoc(doc(asKu2(), 'posts/dl_u1'), {
+    downloadCount: 5, is5DownloadsRewarded: true, is10DownloadsRewarded: false,
+  }));
+});
+
+test('a downloader cannot jump downloadCount (I5)', async () => {
+  const db = asKu2();
+  await assertFails(updateDoc(doc(db, 'posts/dl_u1'), { downloadCount: 14 }));
+  await assertFails(updateDoc(doc(db, 'posts/dl_u1'), { downloadCount: 3 }));
+});
+
+test('a downloader cannot un-flip a reward flag (I5)', async () => {
+  await assertFails(updateDoc(doc(asKu2(), 'posts/dl_rewarded_u1'), {
+    downloadCount: 8, is5DownloadsRewarded: false,
+  }));
+});
+
+test('the download-counter carve-out does not smuggle other fields (I5)', async () => {
+  await assertFails(updateDoc(doc(asKu2(), 'posts/dl_u1'), {
+    downloadCount: 5, title: 'vandalised',
+  }));
+});
+
 // --- requests ----------------------------------------------------------------
 
 test('requests: verified author only for create, author only for update/delete', async () => {
@@ -200,6 +282,18 @@ test('requests: verified author only for create, author only for update/delete',
   await assertFails(updateDoc(doc(asKu2(), 'requests/req_u1'), { title: 'vandalised' }));
   await assertFails(deleteDoc(doc(asKu2(), 'requests/req_u1')));
   await assertSucceeds(deleteDoc(doc(mine, 'requests/req_u1')));
+});
+
+test('a fulfiller may mark a request solved and nothing else (I3)', async () => {
+  const db = asKu2();
+  await assertSucceeds(updateDoc(doc(db, 'requests/req_u1'), {
+    isFulfilled: true, fulfilledPostId: 'p_new',
+  }));
+  await assertFails(updateDoc(doc(db, 'requests/req_u1'), {
+    isFulfilled: true, fulfilledPostId: 'p_new', title: 'vandalised',
+  }));
+  const outsider = env.authenticatedContext('u3', OUTSIDER).firestore();
+  await assertFails(updateDoc(doc(outsider, 'requests/req_u1'), { isFulfilled: true }));
 });
 
 test('unverified user cannot create a request', async () => {
@@ -287,6 +381,41 @@ test('inquiries are write-only for signed-in users and readable by nobody', asyn
   await assertFails(setDoc(doc(asAnon(), 'inquiries/i_anon'), { body: 'spam' }));
   await assertFails(updateDoc(doc(asKu(), 'inquiries/i_1'), { body: 'edited' }));
   await assertFails(deleteDoc(doc(asKu(), 'inquiries/i_1')));
+});
+
+// --- queries -----------------------------------------------------------------
+// Rules gate queries, they do not filter them: a listen is allowed only when the
+// rule can be satisfied for every document the query could return. These mirror
+// the exact `where` shapes the client streams use.
+
+test('transactions: a user may listen only to their own ledger', async () => {
+  const db = asKu();
+  await assertSucceeds(getDocs(query(
+    collection(db, 'transactions'),
+    where('university_id', '==', 'kyoto_u'),
+    where('userId', '==', 'u1'),
+  )));
+  await assertFails(getDocs(query(
+    collection(db, 'transactions'),
+    where('university_id', '==', 'kyoto_u'),
+    where('userId', '==', 'u2'),
+  )));
+});
+
+for (const name of ['posts', 'requests', 'textbook_requests', 'talk_rooms', 'courses']) {
+  test(`${name}: the university-scoped stream query is allowed`, async () => {
+    await assertSucceeds(getDocs(query(
+      collection(asKu(), name),
+      where('university_id', '==', 'kyoto_u'),
+    )));
+  });
+}
+
+test('users: the invitation-code lookup query is allowed', async () => {
+  await assertSucceeds(getDocs(query(
+    collection(asKu(), 'users'),
+    where('invitationCode', '==', 'KUXXXX'),
+  )));
 });
 
 // --- catch-all ---------------------------------------------------------------
