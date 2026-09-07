@@ -17,22 +17,57 @@ service cloud.firestore {
         && request.auth.token.email_verified == true;
     }
 
+    // A Kyoto University *address*, verified or not (I3). Reads are gated on
+    // this rather than on `signedIn()`, because anyone can mint a Firebase
+    // account through the Auth REST API and would otherwise be able to read
+    // every collection in the project. `email_verified` is deliberately NOT
+    // required here: a student who has signed up but not yet clicked the
+    // confirmation link must still be able to browse the catalog and the
+    // streams — only *writes* demand kuVerified().
+    function kuDomain() {
+      return signedIn()
+        && request.auth.token.email is string
+        && request.auth.token.email.lower().matches('^[^@]+@st[.]kyoto-u[.]ac[.]jp$');
+    }
+
     function owns(uid) { return signedIn() && request.auth.uid == uid; }
 
-    // Course catalog: readable by any signed-in user. Custom-course creation is
-    // allowed for verified users (validated); no edits/deletes.
-    match /courses/{id} {
-      allow read: if signedIn();
+    // Course catalog: readable by any KU address. Custom-course creation is
+    // allowed for verified users; the validation below is the *shape the reader
+    // requires* (C1) — CourseRepository casts `id` and `period`, so a doc that
+    // is missing `id` or carries a non-int `period` would poison the whole
+    // catalog load. `id` is pinned to the document id so the two can never
+    // diverge. No edits/deletes.
+    match /courses/{courseId} {
+      allow read: if kuDomain();
       allow create: if kuVerified()
         && request.resource.data.name is string
         && request.resource.data.name.size() > 0
-        && request.resource.data.university_id == 'kyoto_u';
+        && request.resource.data.university_id == 'kyoto_u'
+        && request.resource.data.id == courseId
+        && request.resource.data.period is int
+        && request.resource.data.period >= 1 && request.resource.data.period <= 5
+        && request.resource.data.dayOfWeek in ['Mon', 'Tue', 'Wed', 'Thu', 'Fri']
+        && request.resource.data.lecturer is string
+        && request.resource.data.faculty is string
+        && request.resource.data.courseKey is string;
       allow update, delete: if false;
     }
 
-    // Per-user documents.
+    // Catalog metadata (`meta/catalog` carries `version`), read once per session
+    // by CourseRepository to decide whether its Firestore cache is stale. Only
+    // the seeding script writes it, and that runs through the Admin SDK, which
+    // bypasses rules entirely.
+    match /meta/{doc} {
+      allow read: if kuDomain();
+      allow write: if false;
+    }
+
+    // Per-user documents. The `owns` disjunct is kept alongside `kuDomain()` so
+    // that getUserProfile(uid) still works on the sign-in path, before the ID
+    // token carrying the email claim has necessarily been refreshed.
     match /users/{uid} {
-      allow read: if signedIn();
+      allow read: if owns(uid) || kuDomain();
       allow create, update: if owns(uid);
       allow delete: if false;
     }
@@ -71,7 +106,7 @@ service cloud.firestore {
     // auto-moderation threshold. Reports are only ever cleared by removing the
     // whole document through the moderation delete path below.
     match /posts/{id} {
-      allow read: if signedIn();
+      allow read: if kuDomain();
       allow create: if kuVerified() && request.resource.data.authorId == request.auth.uid;
       allow update: if signedIn()
         && ((resource.data.authorId == request.auth.uid
@@ -101,7 +136,7 @@ service cloud.firestore {
     // The author owns the request; a *fulfiller* (anyone verified) may mark it
     // solved, and nothing else — mirrors the `posts.reports` carve-out (I3).
     match /requests/{id} {
-      allow read: if signedIn();
+      allow read: if kuDomain();
       allow create: if kuVerified() && request.resource.data.authorId == request.auth.uid;
       allow update: if signedIn()
         && (resource.data.authorId == request.auth.uid
@@ -112,20 +147,26 @@ service cloud.firestore {
     }
 
     match /textbook_requests/{id} {
-      allow read: if signedIn();
+      allow read: if kuDomain();
       allow create: if kuVerified() && request.resource.data.requesterId == request.auth.uid;
       allow update: if kuVerified();   // responder flips status; tightened in Phase 3
       allow delete: if false;
     }
 
+    // A talk room is a two-party chat. Either participant may update it, but the
+    // message log is append-only (M6): without the `hasAll` clause a participant
+    // could replace `messages` wholesale and erase the other party's side of the
+    // conversation — the same treatment `posts.reports` gets above.
     match /talk_rooms/{id} {
-      allow read: if signedIn();
+      allow read: if kuDomain();
       allow create: if kuVerified()
         && (request.resource.data.lenderId == request.auth.uid
             || request.resource.data.borrowerId == request.auth.uid);
       allow update: if signedIn()
         && (resource.data.lenderId == request.auth.uid
-            || resource.data.borrowerId == request.auth.uid);
+            || resource.data.borrowerId == request.auth.uid)
+        && request.resource.data.get('messages', [])
+             .hasAll(resource.data.get('messages', []));
       allow delete: if false;
     }
 

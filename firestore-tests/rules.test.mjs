@@ -43,6 +43,61 @@ const KU_UPPERCASE = { sub: 'u6', email: 'E@ST.KYOTO-U.AC.JP', email_verified: t
 const asKu = () => env.authenticatedContext('u1', KU).firestore();
 const asKu2 = () => env.authenticatedContext('u2', KU2).firestore();
 const asAnon = () => env.unauthenticatedContext().firestore();
+const asOutsider = () => env.authenticatedContext('u3', OUTSIDER).firestore();
+const asKuUnverified = () => env.authenticatedContext('u2', KU_UNVERIFIED).firestore();
+
+// The full course shape the reader (CourseRepository._fromDoc) needs (C1).
+const validCourse = (id, over = {}) => ({
+  id,
+  courseKey: '解析学|山田太郎',
+  name: '解析学',
+  faculty: '全学共通',
+  lecturer: '山田 太郎',
+  dayOfWeek: 'Mon',
+  period: 3,
+  category: '全学共通科目',
+  university_id: 'kyoto_u',
+  ...over,
+});
+
+// The exact document `MaterialRequest.toMap()` produces — the client marks a
+// request solved by re-`set()`ing this whole map, not by a two-key update (I4).
+const fullRequest = (over = {}) => ({
+  id: 'req_full',
+  university_id: 'kyoto_u',
+  subjectId: 'c_1',
+  subjectName: '線形代数',
+  authorId: 'u1',
+  authorName: '匿名京大生',
+  category: 'past_exam',
+  year: 2024,
+  title: '線形代数の過去問がほしい',
+  description: '2023年度のものを探しています',
+  costSpent: 1,
+  rewardPoints: 10,
+  isFulfilled: false,
+  fulfilledPostId: null,
+  createdAt: '2026-09-01T00:00:00.000',
+  ...over,
+});
+
+// The exact document `TextbookRequest.toMap()` produces — the responder path in
+// `app_store.respondToTextbookRequest()` is likewise a full set() (I4).
+const fullTextbookRequest = (over = {}) => ({
+  id: 'tb_full',
+  university_id: 'kyoto_u',
+  requesterId: 'u1',
+  requesterName: '匿名京大生',
+  subjectId: 'c_1',
+  subjectName: '線形代数',
+  bookTitle: '線形代数入門',
+  status: 'open',
+  responderId: null,
+  responderName: null,
+  talkRoomId: null,
+  createdAt: '2026-09-01T00:00:00.000',
+  ...over,
+});
 
 // Seed baseline documents with rules bypassed so read/update tests exercise the
 // rule under test rather than a missing-document condition.
@@ -51,6 +106,7 @@ beforeEach(async () => {
   await env.withSecurityRulesDisabled(async (ctx) => {
     const db = ctx.firestore();
     await setDoc(doc(db, 'courses/c_1'), { name: '線形代数', university_id: 'kyoto_u' });
+    await setDoc(doc(db, 'meta/catalog'), { version: 3 });
     await setDoc(doc(db, 'users/u1'), { displayName: 'me', university_id: 'kyoto_u' });
     await setDoc(doc(db, 'users/u2'), { displayName: 'other', university_id: 'kyoto_u' });
     await setDoc(doc(db, 'user_timetables/u1'), { user_id: 'u1', university_id: 'kyoto_u', timetable: {} });
@@ -85,11 +141,19 @@ beforeEach(async () => {
       authorId: 'u1', university_id: 'kyoto_u', title: 'r',
       isFulfilled: false, fulfilledPostId: null,
     });
+    await setDoc(doc(db, 'requests/req_full'), fullRequest());
     await setDoc(doc(db, 'textbook_requests/tb_u1'), {
       requesterId: 'u1', university_id: 'kyoto_u', status: 'open',
     });
+    await setDoc(doc(db, 'textbook_requests/tb_full'), fullTextbookRequest());
     await setDoc(doc(db, 'talk_rooms/room_1'), {
       lenderId: 'u1', borrowerId: 'u2', university_id: 'kyoto_u', messages: [],
+    });
+    // Append-only fixture (M6): a room that already carries two messages.
+    await setDoc(doc(db, 'talk_rooms/room_chat'), {
+      lenderId: 'u1', borrowerId: 'u2', university_id: 'kyoto_u',
+      warningNotice: '',
+      messages: [{ id: 'm1', text: 'hello' }, { id: 'm2', text: 'reply' }],
     });
     await setDoc(doc(db, 'transactions/tx_u1'), {
       userId: 'u1', university_id: 'kyoto_u', amount: 5, type: 'upload_reward',
@@ -105,31 +169,102 @@ test('anonymous cannot read courses', async () => {
   await assertFails(getDoc(doc(asAnon(), 'courses/c_1')));
 });
 
-test('any signed-in user can read courses', async () => {
+test('a KU user can read courses', async () => {
   await assertSucceeds(getDoc(doc(asKu(), 'courses/c_1')));
 });
 
 test('verified KU user can create a valid course', async () => {
-  await assertSucceeds(setDoc(doc(asKu(), 'courses/c_new'), {
-    name: '解析学', university_id: 'kyoto_u',
-  }));
+  await assertSucceeds(setDoc(doc(asKu(), 'courses/c_new'), validCourse('c_new')));
 });
 
 test('course create is rejected with an empty name', async () => {
-  await assertFails(setDoc(doc(asKu(), 'courses/c_empty'), {
-    name: '', university_id: 'kyoto_u',
-  }));
+  await assertFails(setDoc(doc(asKu(), 'courses/c_empty'), validCourse('c_empty', { name: '' })));
 });
 
 test('course create is rejected for another university', async () => {
-  await assertFails(setDoc(doc(asKu(), 'courses/c_other'), {
-    name: 'x', university_id: 'osaka_u',
-  }));
+  await assertFails(setDoc(doc(asKu(), 'courses/c_other'),
+    validCourse('c_other', { university_id: 'osaka_u' })));
 });
 
 test('unverified user cannot create a course', async () => {
-  const db = env.authenticatedContext('u2', KU_UNVERIFIED).firestore();
-  await assertFails(setDoc(doc(db, 'courses/c_unverified'), { name: 'x', university_id: 'kyoto_u' }));
+  await assertFails(setDoc(doc(asKuUnverified(), 'courses/c_unverified'),
+    validCourse('c_unverified')));
+});
+
+// --- courses: the create shape must satisfy the reader (C1) ------------------
+//
+// CourseRepository._fromDoc is now defensive, but the rules are the only thing
+// that keeps a *new* doc from being written in a shape the catalog cannot use.
+
+test('course create is rejected when `id` is missing (C1)', async () => {
+  const data = validCourse('c_noid');
+  delete data.id;
+  await assertFails(setDoc(doc(asKu(), 'courses/c_noid'), data));
+});
+
+test('course create is rejected when `id` does not match the document id (C1)', async () => {
+  await assertFails(setDoc(doc(asKu(), 'courses/c_mismatch'), validCourse('c_something_else')));
+});
+
+test('course create is rejected for an out-of-range period (C1)', async () => {
+  await assertFails(setDoc(doc(asKu(), 'courses/c_p0'), validCourse('c_p0', { period: 0 })));
+  await assertFails(setDoc(doc(asKu(), 'courses/c_p6'), validCourse('c_p6', { period: 6 })));
+});
+
+test('course create is rejected when `period` is not an int (C1)', async () => {
+  await assertFails(setDoc(doc(asKu(), 'courses/c_pstr'), validCourse('c_pstr', { period: '2' })));
+  await assertFails(setDoc(doc(asKu(), 'courses/c_pnum'), validCourse('c_pnum', { period: 2.5 })));
+});
+
+test('course create is rejected for a weekend dayOfWeek (C1)', async () => {
+  await assertFails(setDoc(doc(asKu(), 'courses/c_sat'), validCourse('c_sat', { dayOfWeek: 'Sat' })));
+});
+
+test('course create is rejected when `courseKey` is missing (C1)', async () => {
+  const data = validCourse('c_nokey');
+  delete data.courseKey;
+  await assertFails(setDoc(doc(asKu(), 'courses/c_nokey'), data));
+});
+
+// --- reads require a KU-domain address (I3) ----------------------------------
+//
+// Anyone can mint a Firebase account through the Auth REST API; before this the
+// only @st.kyoto-u.ac.jp check lived in the Flutter client, so such an account
+// could read every collection.
+
+const KU_READABLE = [
+  ['courses', 'courses/c_1'],
+  ['posts', 'posts/seed_u1'],
+  ['requests', 'requests/req_u1'],
+  ['textbook_requests', 'textbook_requests/tb_u1'],
+  ['talk_rooms', 'talk_rooms/room_1'],
+  ['users', 'users/u1'],
+  ['meta', 'meta/catalog'],
+];
+
+for (const [label, path] of KU_READABLE) {
+  test(`${label}: an outsider Firebase account cannot read (I3)`, async () => {
+    await assertFails(getDoc(doc(asOutsider(), path)));
+  });
+
+  test(`${label}: an unverified KU address can still read (I3)`, async () => {
+    await assertSucceeds(getDoc(doc(asKuUnverified(), path)));
+  });
+}
+
+test('an outsider cannot run the university-scoped stream queries either (I3)', async () => {
+  for (const name of ['posts', 'requests', 'textbook_requests', 'talk_rooms', 'courses']) {
+    await assertFails(getDocs(query(
+      collection(asOutsider(), name),
+      where('university_id', '==', 'kyoto_u'),
+    )));
+  }
+});
+
+test('catalog metadata is read-only, even for a verified KU user', async () => {
+  await assertSucceeds(getDoc(doc(asKu(), 'meta/catalog')));
+  await assertFails(setDoc(doc(asKu(), 'meta/catalog'), { version: 99 }));
+  await assertFails(updateDoc(doc(asKu(), 'meta/catalog'), { version: 99 }));
 });
 
 test('nobody can update or delete a course', async () => {
@@ -349,6 +484,36 @@ test('a fulfiller may mark a request solved and nothing else (I3)', async () => 
   await assertFails(updateDoc(doc(outsider, 'requests/req_u1'), { isFulfilled: true }));
 });
 
+// --- requests: the *real* fulfilment write is a full-document set (I4) -------
+//
+// `app_store.addPost()` marks a request solved through
+// `_firestore.createMaterialRequest(requests[i].copyWith(...))`, which is a
+// `set()` of the entire MaterialRequest.toMap(), not a two-key `update()`. The
+// `hasOnly` carve-out is evaluated on `diff().affectedKeys()`, so a full write
+// whose other fields are byte-identical is still allowed — these tests pin that
+// down against the exact document shape the client sends.
+
+test('a fulfiller may re-set the WHOLE request document with only the fulfilment fields changed (I4)', async () => {
+  await assertSucceeds(setDoc(doc(asKu2(), 'requests/req_full'),
+    fullRequest({ isFulfilled: true, fulfilledPostId: 'post_123' })));
+});
+
+test('a full-document fulfilment write that also edits the title is rejected (I4)', async () => {
+  await assertFails(setDoc(doc(asKu2(), 'requests/req_full'),
+    fullRequest({ isFulfilled: true, fulfilledPostId: 'post_123', title: 'vandalised' })));
+});
+
+test('an unchanged full-document re-set by a non-author is allowed, a changed one is not (I4)', async () => {
+  await assertSucceeds(setDoc(doc(asKu2(), 'requests/req_full'), fullRequest()));
+  await assertFails(setDoc(doc(asKu2(), 'requests/req_full'),
+    fullRequest({ rewardPoints: 9999 })));
+});
+
+test('an outsider cannot land the full-document fulfilment write (I4)', async () => {
+  await assertFails(setDoc(doc(asOutsider(), 'requests/req_full'),
+    fullRequest({ isFulfilled: true, fulfilledPostId: 'post_123' })));
+});
+
 test('unverified user cannot create a request', async () => {
   const db = env.authenticatedContext('u2', KU_UNVERIFIED).firestore();
   await assertFails(setDoc(doc(db, 'requests/req_unverified'), {
@@ -374,6 +539,25 @@ test('another verified KU user can flip a textbook request status, outsiders can
   await assertFails(updateDoc(doc(outsider, 'textbook_requests/tb_u1'), { status: 'matched' }));
 });
 
+// `app_store.respondToTextbookRequest()` re-sets the whole TextbookRequest map
+// with status/responderId/responderName/talkRoomId filled in (I4).
+test('a responder may land the full-document textbook response write (I4)', async () => {
+  await assertSucceeds(setDoc(doc(asKu2(), 'textbook_requests/tb_full'), fullTextbookRequest({
+    status: 'matched', responderId: 'u2', responderName: '貸主', talkRoomId: 'room_9',
+  })));
+});
+
+test('an outsider cannot land the full-document textbook response write (I4)', async () => {
+  await assertFails(setDoc(doc(asOutsider(), 'textbook_requests/tb_full'), fullTextbookRequest({
+    status: 'matched', responderId: 'u3', talkRoomId: 'room_9',
+  })));
+});
+
+test('an unverified KU user cannot land the textbook response write (I4)', async () => {
+  await assertFails(setDoc(doc(asKuUnverified(), 'textbook_requests/tb_full'),
+    fullTextbookRequest({ status: 'matched', responderId: 'u2' })));
+});
+
 test('textbook requests cannot be deleted', async () => {
   await assertFails(deleteDoc(doc(asKu(), 'textbook_requests/tb_u1')));
 });
@@ -391,9 +575,42 @@ test('talk room can only be created by a participant', async () => {
 
 test('only participants can post messages into a talk room', async () => {
   await assertSucceeds(updateDoc(doc(asKu(), 'talk_rooms/room_1'), { messages: [{ text: 'hi' }] }));
-  await assertSucceeds(updateDoc(doc(asKu2(), 'talk_rooms/room_1'), { messages: [{ text: 'yo' }] }));
-  const outsider = env.authenticatedContext('u3', OUTSIDER).firestore();
-  await assertFails(updateDoc(doc(outsider, 'talk_rooms/room_1'), { messages: [{ text: 'spy' }] }));
+  // The log is append-only, so u2 must carry u1's message forward (M6).
+  await assertSucceeds(updateDoc(doc(asKu2(), 'talk_rooms/room_1'), {
+    messages: [{ text: 'hi' }, { text: 'yo' }],
+  }));
+  await assertFails(updateDoc(doc(asOutsider(), 'talk_rooms/room_1'), { messages: [{ text: 'spy' }] }));
+});
+
+// --- talk_rooms: the message log is append-only (M6) --------------------------
+//
+// Either participant could previously replace `messages` wholesale and delete
+// the other party's side of the conversation.
+
+test('a participant may append to the message log (M6)', async () => {
+  await assertSucceeds(updateDoc(doc(asKu(), 'talk_rooms/room_chat'), {
+    messages: [
+      { id: 'm1', text: 'hello' }, { id: 'm2', text: 'reply' }, { id: 'm3', text: 'and more' },
+    ],
+  }));
+});
+
+test('a participant cannot clear or shorten the message log (M6)', async () => {
+  const db = asKu2();
+  await assertFails(updateDoc(doc(db, 'talk_rooms/room_chat'), { messages: [] }));
+  await assertFails(updateDoc(doc(db, 'talk_rooms/room_chat'), {
+    messages: [{ id: 'm1', text: 'hello' }],
+  }));
+});
+
+test('a participant cannot rewrite an existing message (M6)', async () => {
+  await assertFails(updateDoc(doc(asKu(), 'talk_rooms/room_chat'), {
+    messages: [{ id: 'm1', text: 'tampered' }, { id: 'm2', text: 'reply' }],
+  }));
+});
+
+test('an unrelated field may still be updated while the log is preserved (M6)', async () => {
+  await assertSucceeds(updateDoc(doc(asKu(), 'talk_rooms/room_chat'), { warningNotice: 'x' }));
 });
 
 test('talk rooms cannot be deleted', async () => {
