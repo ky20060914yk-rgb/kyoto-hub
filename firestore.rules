@@ -1,8 +1,97 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
+
+    function signedIn() { return request.auth != null; }
+
+    // A verified Kyoto University student. The email pattern is start-anchored
+    // and forbids a further '@', so an address such as
+    // "evil@evil.com@st.kyoto-u.ac.jp" or "a@st.kyoto-u.ac.jp.attacker.com"
+    // cannot pass as a KU address.
+    function kuVerified() {
+      return signedIn()
+        && request.auth.token.email is string
+        && request.auth.token.email.matches('^[^@]+@st[.]kyoto-u[.]ac[.]jp$')
+        && request.auth.token.email_verified == true;
+    }
+
+    function owns(uid) { return signedIn() && request.auth.uid == uid; }
+
+    // Course catalog: readable by any signed-in user. Custom-course creation is
+    // allowed for verified users (validated); no edits/deletes.
+    match /courses/{id} {
+      allow read: if signedIn();
+      allow create: if kuVerified()
+        && request.resource.data.name is string
+        && request.resource.data.name.size() > 0
+        && request.resource.data.university_id == 'kyoto_u';
+      allow update, delete: if false;
+    }
+
+    // Per-user documents.
+    match /users/{uid} {
+      allow read: if signedIn();
+      allow create, update: if owns(uid);
+      allow delete: if false;
+    }
+
+    // Timetables are private: the app only ever reads or writes the caller's
+    // own document, so nobody else may see it.
+    match /user_timetables/{uid} {
+      allow read, write: if owns(uid);
+    }
+
+    // User-generated content: readable by signed-in users, created by verified
+    // KU users as themselves, edited/removed by the author. Any signed-in user
+    // may append to `reports` (and nothing else) to flag a post.
+    match /posts/{id} {
+      allow read: if signedIn();
+      allow create: if kuVerified() && request.resource.data.authorId == request.auth.uid;
+      allow update: if signedIn()
+        && (resource.data.authorId == request.auth.uid
+            || request.resource.data.diff(resource.data).affectedKeys().hasOnly(['reports']));
+      allow delete: if signedIn() && resource.data.authorId == request.auth.uid;
+    }
+
+    match /requests/{id} {
+      allow read: if signedIn();
+      allow create: if kuVerified() && request.resource.data.authorId == request.auth.uid;
+      allow update, delete: if signedIn() && resource.data.authorId == request.auth.uid;
+    }
+
+    match /textbook_requests/{id} {
+      allow read: if signedIn();
+      allow create: if kuVerified() && request.resource.data.requesterId == request.auth.uid;
+      allow update: if kuVerified();   // responder flips status; tightened in Phase 3
+      allow delete: if false;
+    }
+
+    match /talk_rooms/{id} {
+      allow read: if signedIn();
+      allow create: if kuVerified()
+        && (request.resource.data.lenderId == request.auth.uid
+            || request.resource.data.borrowerId == request.auth.uid);
+      allow update: if signedIn()
+        && (resource.data.lenderId == request.auth.uid
+            || resource.data.borrowerId == request.auth.uid);
+      allow delete: if false;
+    }
+
+    match /transactions/{id} {
+      allow read: if signedIn() && resource.data.userId == request.auth.uid;
+      allow create: if kuVerified();   // client-authored ledger; server-authored in Phase 2
+      allow update, delete: if false;
+    }
+
+    // Write-only mailbox: users file inquiries, only the console/admin reads.
+    match /inquiries/{id} {
+      allow read: if false;
+      allow create: if signedIn();
+      allow update, delete: if false;
+    }
+
     match /{document=**} {
-      allow read, write: if request.auth != null;
+      allow read, write: if false;
     }
   }
 }
