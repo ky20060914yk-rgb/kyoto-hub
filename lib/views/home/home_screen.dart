@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart' show setEquals;
 import 'package:flutter/material.dart';
 import '../../services/app_store.dart';
 import '../../models/subject.dart';
@@ -27,31 +28,70 @@ class HomeScreenState extends State<HomeScreen> {
   List<Subject> _registeredSubjects = [];
   Map<String, Subject> _registeredById = {};
   bool _loadingTimetable = true;
+  String? _timetableError;
+  int _timetableSeq = 0;
+  // The set of course ids the last refresh was started for. Used to decide
+  // whether an AppStore notification actually changed the timetable.
+  Set<String> _lastTimetableIds = {};
 
   List<Subject> _searchResults = [];
   bool _isSearching = false;
   int _searchSeq = 0;
+  String? _searchError;
 
   @override
   void initState() {
     super.initState();
+    // HomeScreen is held behind a GlobalKey, so initState runs once. The store
+    // may populate userTimetable *after* we mount (Firestore sync), so listen
+    // for changes instead of relying on load ordering.
+    widget.store.addListener(_onStoreChanged);
     _refreshRegistered();
   }
 
   @override
   void dispose() {
+    widget.store.removeListener(_onStoreChanged);
     _searchController.dispose();
     super.dispose();
   }
 
+  Set<String> _currentTimetableIds() =>
+      widget.store.userTimetable.values.toSet();
+
+  void _onStoreChanged() {
+    // Only refetch when the registered course ids actually changed — the store
+    // notifies for many unrelated reasons (points, posts, requests…).
+    if (setEquals(_currentTimetableIds(), _lastTimetableIds)) return;
+    _refreshRegistered();
+  }
+
   Future<void> _refreshRegistered() async {
-    final list = await widget.store.getRegisteredSubjects();
-    if (!mounted) return;
+    final seq = ++_timetableSeq;
+    // Recorded up-front (success *and* failure) so a persistent failure cannot
+    // turn every store notification into another refresh attempt.
+    _lastTimetableIds = _currentTimetableIds();
     setState(() {
-      _registeredSubjects = list;
-      _registeredById = {for (final s in list) s.id: s};
-      _loadingTimetable = false;
+      _loadingTimetable = true;
+      _timetableError = null;
     });
+    try {
+      final list = await widget.store.getRegisteredSubjects();
+      if (!mounted || seq != _timetableSeq) return;
+      setState(() {
+        _registeredSubjects = list;
+        _registeredById = {for (final s in list) s.id: s};
+      });
+    } catch (_) {
+      if (!mounted || seq != _timetableSeq) return;
+      setState(() {
+        _timetableError = '時間割の読み込みに失敗しました。通信環境を確認して再試行してください。';
+      });
+    } finally {
+      if (mounted && seq == _timetableSeq) {
+        setState(() => _loadingTimetable = false);
+      }
+    }
   }
 
   Future<void> _runSearch(String query) async {
@@ -60,16 +100,65 @@ class HomeScreenState extends State<HomeScreen> {
       setState(() {
         _searchResults = [];
         _isSearching = false;
+        _searchError = null;
       });
       return;
     }
-    setState(() => _isSearching = true);
-    final results = await widget.store.courses.search(query);
-    if (!mounted || seq != _searchSeq) return;
     setState(() {
-      _searchResults = results;
-      _isSearching = false;
+      _isSearching = true;
+      _searchError = null;
     });
+    try {
+      final results = await widget.store.courses.search(query);
+      if (!mounted || seq != _searchSeq) return;
+      setState(() => _searchResults = results);
+    } catch (_) {
+      if (!mounted || seq != _searchSeq) return;
+      setState(() {
+        _searchResults = [];
+        _searchError = '検索に失敗しました。通信環境を確認して再試行してください。';
+      });
+    } finally {
+      if (mounted && seq == _searchSeq) {
+        setState(() => _isSearching = false);
+      }
+    }
+  }
+
+  Widget _buildErrorCard(String message, VoidCallback onRetry) {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(24),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: const Color(0xFFE2E8F0)),
+      ),
+      child: Column(
+        children: [
+          const Icon(Icons.cloud_off_rounded, size: 36, color: Color(0xFFCBD5E1)),
+          const SizedBox(height: 8),
+          const Text('読み込みに失敗しました', style: TextStyle(fontWeight: FontWeight.bold, color: Color(0xFF64748B))),
+          const SizedBox(height: 4),
+          Text(
+            message,
+            style: const TextStyle(fontSize: 12, color: Color(0xFF94A3B8)),
+            textAlign: TextAlign.center,
+          ),
+          const SizedBox(height: 16),
+          ElevatedButton.icon(
+            onPressed: onRetry,
+            icon: const Icon(Icons.refresh_rounded, size: 18),
+            label: const Text('再試行', style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold)),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: const Color(0xFF0F4C81),
+              foregroundColor: Colors.white,
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+            ),
+          ),
+        ],
+      ),
+    );
   }
 
   void resetSearch() {
@@ -345,6 +434,8 @@ class HomeScreenState extends State<HomeScreen> {
                 padding: EdgeInsets.symmetric(vertical: 48),
                 child: Center(child: CircularProgressIndicator()),
               )
+            else if (_timetableError != null)
+              _buildErrorCard(_timetableError!, _refreshRegistered)
             else
               _buildRegisteredTimetableGrid(_registeredSubjects),
           ],
@@ -373,6 +464,8 @@ class HomeScreenState extends State<HomeScreen> {
             decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(12)),
             child: const Center(child: CircularProgressIndicator()),
           )
+        else if (_searchError != null)
+          _buildErrorCard(_searchError!, () => _runSearch(_searchQuery))
         else if (searchResults.isEmpty)
           Container(
             width: double.infinity,

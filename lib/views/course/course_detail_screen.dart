@@ -290,6 +290,9 @@ class _CourseDetailScreenState extends State<CourseDetailScreen> with SingleTick
                                   }
                                 }
 
+                                final messenger = ScaffoldMessenger.of(context);
+                                final navigator = Navigator.of(context);
+
                                 // Show spinner
                                 showDialog(
                                   context: context,
@@ -304,10 +307,10 @@ class _CourseDetailScreenState extends State<CourseDetailScreen> with SingleTick
                                   pickedFile!.bytes,
                                 );
 
-                                Navigator.pop(context); // Close spinner
+                                navigator.pop(); // Close spinner
 
                                 if (uploadedName == null) {
-                                  ScaffoldMessenger.of(context).showSnackBar(
+                                  messenger.showSnackBar(
                                     SnackBar(content: Text(widget.store.lastNoticeMessage ?? 'ファイルのアップロードに失敗しました。')),
                                   );
                                   return;
@@ -323,9 +326,9 @@ class _CourseDetailScreenState extends State<CourseDetailScreen> with SingleTick
                                   downloadCost: category == PostCategory.pastExam ? 5 : customCost.round(),
                                   requestId: requestId,
                                 );
-                                Navigator.pop(context);
-                                setState(() {});
-                                ScaffoldMessenger.of(context).showSnackBar(
+                                navigator.pop();
+                                if (mounted) setState(() {});
+                                messenger.showSnackBar(
                                   SnackBar(content: Text(widget.store.lastNoticeMessage ?? '投稿を公開しました！')),
                                 );
                               },
