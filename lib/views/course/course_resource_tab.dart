@@ -65,7 +65,7 @@ class _CourseResourceTabState extends State<CourseResourceTab> {
         final isSelected = cat == selected;
         return ChoiceChip(
           label: Text(
-            cat == PostCategory.testPrep ? 'テスト対策' : cat.label,
+            cat.label,
             style: TextStyle(
               fontSize: 12,
               fontWeight: FontWeight.bold,
@@ -83,6 +83,29 @@ class _CourseResourceTabState extends State<CourseResourceTab> {
           onSelected: (_) => onChanged(cat),
         );
       }).toList(),
+    );
+  }
+
+  /// The read-only stand-in for [_categoryPicker] when the category is fixed
+  /// (answering a request: the answer must match the request's own category).
+  Widget _lockedCategoryChip(PostCategory category) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
+      decoration: BoxDecoration(
+        color: _brand,
+        borderRadius: BorderRadius.circular(8),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          const Icon(Icons.lock_outline, size: 13, color: Colors.white),
+          const SizedBox(width: 5),
+          Text(
+            category.label,
+            style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Colors.white),
+          ),
+        ],
+      ),
     );
   }
 
@@ -200,7 +223,24 @@ class _CourseResourceTabState extends State<CourseResourceTab> {
                     // Category picker (was the tab selection before Task 8)
                     const Text('カテゴリ', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
                     const SizedBox(height: 6),
-                    _categoryPicker(category, (cat) => setModalState(() => category = cat)),
+                    // An answer to a request (`requestId != null`) must carry
+                    // the request's own category, so the picker is locked.
+                    if (requestId == null)
+                      _categoryPicker(category, (cat) {
+                        setModalState(() {
+                          // The slider default only matters outside pastExam
+                          // (which is a fixed 5pt). Both header buttons now
+                          // open on 過去問, seeding customCost at 5.0 — so
+                          // crossing OUT of pastExam has to restore the 10pt
+                          // default the non-pastExam form used to get.
+                          if (category == PostCategory.pastExam && cat != PostCategory.pastExam) {
+                            customCost = 10.0;
+                          }
+                          category = cat;
+                        });
+                      })
+                    else
+                      _lockedCategoryChip(category),
                     const SizedBox(height: 16),
 
                     if (category == PostCategory.pastExam) ...[
@@ -443,10 +483,13 @@ class _CourseResourceTabState extends State<CourseResourceTab> {
                   children: [
                     Text('【${category.label}】のリクエスト投稿', style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
                     const SizedBox(height: 4),
-                    Text(
-                      '※ 過去問リクエストには手数料1ptが消費されます',
-                      style: TextStyle(fontSize: 11, color: Colors.grey[600]),
-                    ),
+                    // The 1pt fee is charged on past-exam requests only (`cost`
+                    // above is 0 otherwise), so the notice tracks the picker.
+                    if (category == PostCategory.pastExam)
+                      Text(
+                        '※ 過去問リクエストには手数料1ptが消費されます',
+                        style: TextStyle(fontSize: 11, color: Colors.grey[600]),
+                      ),
                     const SizedBox(height: 16),
 
                     // Category picker (was the tab selection before Task 8)
