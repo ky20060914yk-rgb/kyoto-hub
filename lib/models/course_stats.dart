@@ -1,0 +1,165 @@
+import 'review.dart';
+
+/// Per-course roll-up stored at `course_stats/{courseKey}`.
+///
+/// Phase 1 has no Cloud Functions, so this is maintained client-side:
+/// `ReviewService` reads the doc inside a Firestore transaction, calls
+/// [applyReview], and writes it back with `set(merge: true)` of [toMap].
+///
+/// **Merge safety (ruling P2):** [toMap] deliberately OMITS `pastExamPostCount`
+/// and `resourcePostCount`. Those are maintained on the same doc by
+/// `bumpPostCount` via `FieldValue.increment`, so if a review write emitted
+/// them it would clobber a concurrent increment. [fromMap] still READS them
+/// (they live in the doc from `bumpPostCount`) and [applyReview] never touches
+/// them (Task 8 owns them).
+class CourseStats {
+  final String courseKey;
+  final String universityId;
+  final int reviewCount;
+  final int ratingSum; // Σ rating over all reviews
+  final Map<String, int> rakutanCounts; // {'raku': n, 'futsu': n, 'muzu': n}
+  final Map<String, int> attendanceCounts; // keyed by Attendance.value
+  final Map<String, int> gradingCounts; // keyed by GradingStyle.value
+  final Map<String, int> pastExamCounts; // keyed by PastExamUsefulness.value
+  final Map<String, int> bringInCounts; // keyed by BringIn.value
+  final int pastExamPostCount; // # of PostCategory.pastExam posts
+  final int resourcePostCount; // # of testPrep + other posts
+  final DateTime? lastReviewAt;
+
+  const CourseStats({
+    required this.courseKey,
+    this.universityId = 'kyoto_u',
+    this.reviewCount = 0,
+    this.ratingSum = 0,
+    this.rakutanCounts = const {},
+    this.attendanceCounts = const {},
+    this.gradingCounts = const {},
+    this.pastExamCounts = const {},
+    this.bringInCounts = const {},
+    this.pastExamPostCount = 0,
+    this.resourcePostCount = 0,
+    this.lastReviewAt,
+  });
+
+  double get avgRating => reviewCount == 0 ? 0 : ratingSum / reviewCount;
+
+  /// 0..100. Higher = easier credit. Blend of rakutan mix, avg rating,
+  /// attendance lightness. Pure function of the counts.
+  double get rakutanScore {
+    if (reviewCount == 0) return 50;
+    final rakuFrac = (rakutanCounts['raku'] ?? 0) / reviewCount;
+    final muzuFrac = (rakutanCounts['muzu'] ?? 0) / reviewCount;
+    final lightFrac = (attendanceCounts['none'] ?? 0) / reviewCount +
+        0.5 * ((attendanceCounts['light'] ?? 0) / reviewCount);
+    final base = 50 +
+        35 * (rakuFrac - muzuFrac) + // -35..+35
+        10 * (avgRating - 3) / 2 + // -10..+10
+        10 * (lightFrac - 0.5); // -5..+5
+    return base.clamp(0, 100).toDouble();
+  }
+
+  static CourseStats empty(String courseKey) => CourseStats(
+        courseKey: courseKey,
+        universityId: '',
+        rakutanCounts: const {'raku': 0, 'futsu': 0, 'muzu': 0},
+        attendanceCounts: const {'none': 0, 'light': 0, 'heavy': 0},
+        gradingCounts: const {
+          'exam_only': 0,
+          'exam_report': 0,
+          'report_mainly': 0,
+          'attendance_heavy': 0,
+        },
+        pastExamCounts: const {
+          'as_is': 0,
+          'similar': 0,
+          'trend_only': 0,
+          'not_useful': 0,
+        },
+        bringInCounts: const {'no': 0, 'yes': 0, 'na': 0},
+      );
+
+  /// Returns a new [CourseStats] with [review] added (`delta = 1`) or removed
+  /// (`delta = -1`). When [previous] is supplied (an edit), its contribution is
+  /// first subtracted, then [review] is added, so the review is never
+  /// double-counted.
+  ///
+  /// Bucket maps and [reviewCount] are clamped at `>= 0`.
+  /// `pastExamPostCount` / `resourcePostCount` are left untouched (Task 8).
+  /// `lastReviewAt` is set to `review.updatedAt` whenever a review is added.
+  CourseStats applyReview(Review review, {required int delta, Review? previous}) {
+    if (previous != null) {
+      return _apply(previous, -1)._apply(review, 1);
+    }
+    return _apply(review, delta);
+  }
+
+  CourseStats _apply(Review review, int delta) {
+    return CourseStats(
+      courseKey: courseKey,
+      universityId: universityId.isEmpty ? review.universityId : universityId,
+      reviewCount: _clamp(reviewCount + delta),
+      ratingSum: _clamp(ratingSum + delta * review.rating),
+      rakutanCounts: _bump(rakutanCounts, review.rakutan.value, delta),
+      attendanceCounts: _bump(attendanceCounts, review.attendance.value, delta),
+      gradingCounts: _bump(gradingCounts, review.grading.value, delta),
+      pastExamCounts: _bump(pastExamCounts, review.pastExam.value, delta),
+      bringInCounts: _bump(bringInCounts, review.bringIn.value, delta),
+      pastExamPostCount: pastExamPostCount,
+      resourcePostCount: resourcePostCount,
+      lastReviewAt: delta == 1 ? review.updatedAt : lastReviewAt,
+    );
+  }
+
+  static int _clamp(int v) => v < 0 ? 0 : v;
+
+  static Map<String, int> _bump(Map<String, int> src, String key, int delta) {
+    final next = Map<String, int>.from(src);
+    next[key] = _clamp((next[key] ?? 0) + delta);
+    return next;
+  }
+
+  /// P2: post-count fields are intentionally omitted so a review write
+  /// (`set(merge: true)`) cannot clobber a concurrent `bumpPostCount`
+  /// `FieldValue.increment`.
+  Map<String, dynamic> toMap() {
+    return {
+      'courseKey': courseKey,
+      'university_id': universityId,
+      'reviewCount': reviewCount,
+      'ratingSum': ratingSum,
+      'rakutanCounts': rakutanCounts,
+      'attendanceCounts': attendanceCounts,
+      'gradingCounts': gradingCounts,
+      'pastExamCounts': pastExamCounts,
+      'bringInCounts': bringInCounts,
+      'lastReviewAt': lastReviewAt?.toIso8601String(),
+    };
+  }
+
+  factory CourseStats.fromMap(Map<String, dynamic> map) {
+    return CourseStats(
+      courseKey: (map['courseKey'] ?? '') as String,
+      universityId: (map['university_id'] ?? 'kyoto_u') as String,
+      reviewCount: (map['reviewCount'] ?? 0) as int,
+      ratingSum: (map['ratingSum'] ?? 0) as int,
+      rakutanCounts: _intMap(map['rakutanCounts']),
+      attendanceCounts: _intMap(map['attendanceCounts']),
+      gradingCounts: _intMap(map['gradingCounts']),
+      pastExamCounts: _intMap(map['pastExamCounts']),
+      bringInCounts: _intMap(map['bringInCounts']),
+      // P2: written by bumpPostCount, not by the review path — but always read.
+      pastExamPostCount: (map['pastExamPostCount'] ?? 0) as int,
+      resourcePostCount: (map['resourcePostCount'] ?? 0) as int,
+      lastReviewAt: map['lastReviewAt'] != null
+          ? DateTime.parse(map['lastReviewAt'] as String)
+          : null,
+    );
+  }
+
+  static Map<String, int> _intMap(dynamic raw) {
+    if (raw is! Map) return {};
+    return raw.map(
+      (key, value) => MapEntry('$key', (value as num?)?.toInt() ?? 0),
+    );
+  }
+}
