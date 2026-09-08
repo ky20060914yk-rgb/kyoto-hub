@@ -1,6 +1,6 @@
 // Authoritative recount of the `course_stats` post counters (Task 8 fix round 1).
 //
-// Task 8 started maintaining two counters on `course_stats/{courseKey}`:
+// Task 8 started maintaining two counters on `course_stats/{slug(courseKey)}`:
 //
 //   pastExamPostCount  — # of posts with category 'past_exam'
 //   resourcePostCount  — # of posts with category 'test_prep' or 'other'
@@ -101,10 +101,19 @@ if (unresolved.length > 20) console.log(`  ... and ${unresolved.length - 20} mor
 
 // --- 3. write the recounted totals ------------------------------------------
 
+// C1: a courseKey may contain '/' (17 courses in the deployed catalog do), and
+// '/' is a path separator in a document id — `.doc('a/b|c')` THROWS ("document
+// path must point to a document"), which would abort this script before any
+// batch commit and leave nothing written. This is the exact same escape the
+// client applies in `Review.slug` ('%' first, so the mapping stays injective);
+// the two must stay in sync or the backfill would write to a doc the app never
+// reads.
+const slug = (s) => s.replace(/%/g, '%25').replace(/\//g, '%2F');
+
 const writes = [];
 for (const [courseKey, totals] of byCourseKey) {
   writes.push([
-    db.collection('course_stats').doc(courseKey),
+    db.collection('course_stats').doc(slug(courseKey)),
     {
       courseKey,
       university_id: universityId,

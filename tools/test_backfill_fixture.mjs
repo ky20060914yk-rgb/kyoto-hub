@@ -25,6 +25,15 @@ const COURSE_KEY = '線形代数a|山田太郎';
 const COURSE_ID_2 = 'c_y';
 // A post pointing at a course that does not exist: must be skipped, not crash.
 const ORPHAN_ID = 'c_missing';
+// C1 — a courseKey containing '/'. 17 courses in the deployed catalog carry one
+// (`river/coastalengineering|後藤仁志`). '/' is a path separator in a document id,
+// so `db.collection('course_stats').doc(courseKey)` THREW while the script was
+// still building its ref list — before any batch.commit() — and the whole
+// backfill wrote NOTHING and exited non-zero. The script slugs the id now
+// (same escape as `Review.slug`), so it must write here.
+const COURSE_ID_3 = 'c_slash';
+const COURSE_KEY_SLASH = 'river/coastalengineering|後藤仁志';
+const COURSE_KEY_SLASH_SLUG = 'river%2Fcoastalengineering|後藤仁志';
 
 if (mode === 'seed') {
   await db.doc(`courses/${COURSE_ID}`).set({
@@ -48,6 +57,19 @@ if (mode === 'seed') {
   await db.doc('posts/p4').set({
     authorId: 'u2', university_id: 'kyoto_u', subjectId: ORPHAN_ID,
     category: 'past_exam', title: 'orphan',
+  });
+  // C1 fixture: a course whose courseKey has a '/', plus two posts on it.
+  await db.doc(`courses/${COURSE_ID_3}`).set({
+    id: COURSE_ID_3, courseKey: COURSE_KEY_SLASH, university_id: 'kyoto_u',
+    name: 'River/Coastal Engineering',
+  });
+  await db.doc('posts/p5').set({
+    authorId: 'u3', university_id: 'kyoto_u', subjectId: COURSE_ID_3,
+    category: 'past_exam', title: '2023期末',
+  });
+  await db.doc('posts/p6').set({
+    authorId: 'u3', university_id: 'kyoto_u', subjectId: COURSE_ID_3,
+    category: 'test_prep', title: 'まとめ',
   });
   // A stats doc that already carries review data AND a wrong (negative) counter
   // — the backfill must fix the counters and leave reviewCount alone.
@@ -82,9 +104,28 @@ eq('university_id', s.university_id, 'kyoto_u');
 eq('reviewCount preserved', s.reviewCount, 7);
 eq('ratingSum preserved', s.ratingSum, 28);
 
-// The orphan post must NOT have produced a stats doc of its own.
-const orphanStats = await db.collection('course_stats').get();
-eq('course_stats doc count', orphanStats.size, 1);
+// C1 — the slash course must have been written, under the SLUGGED document id,
+// and the script must not have thrown on its way there (a throw would have
+// aborted before any commit, so the assertions above would have failed too).
+const slashSnap = await db.doc(`course_stats/${COURSE_KEY_SLASH_SLUG}`).get();
+if (!slashSnap.exists) {
+  console.error(`FAILED: course_stats/${COURSE_KEY_SLASH_SLUG} was not written`);
+  process.exit(1);
+}
+const ss = slashSnap.data();
+eq('slash pastExamPostCount', ss.pastExamPostCount, 1);
+eq('slash resourcePostCount', ss.resourcePostCount, 1);
+// The RAW key stays in the field; only the document id is escaped.
+eq('slash courseKey field is unescaped', ss.courseKey, COURSE_KEY_SLASH);
+
+// The orphan post must NOT have produced a stats doc of its own; the two real
+// courseKeys must have produced exactly one doc each.
+const allStats = await db.collection('course_stats').get();
+eq('course_stats doc count', allStats.size, 2);
+// No document id may contain a path separator.
+for (const d of allStats.docs) {
+  eq(`doc id "${d.id}" has no /`, d.id.includes('/'), false);
+}
 
 if (failures.length > 0) {
   console.error('FAILED:');

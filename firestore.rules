@@ -184,7 +184,7 @@ service cloud.firestore {
     }
 
     // One structured review per (course, author). The document id is
-    // '<courseKey>_<authorId>', so a user physically cannot hold two reviews for
+    // '<courseSlug>_<authorId>', so a user physically cannot hold two reviews for
     // the same course, and the id encodes the author. Read by any KU address;
     // written only by its author, verified. A non-author may append exactly their
     // own uid to `helpfulBy` and nothing else (the same append-only shape as
@@ -192,17 +192,26 @@ service cloud.firestore {
     // `university_id` so a review cannot be reassigned, moved onto another
     // course or handed to another university after the fact, re-validates
     // `rating` on every edit, and forbids the author from touching `helpfulBy`
-    // at all — an author who wants to vote for their own review has to go
-    // through the append-only branch, which caps them at their own single uid.
-    // Because create additionally pins `helpfulBy` to the empty list, that cap
-    // is absolute: an author cannot seed votes at create time, and cannot reset
-    // an already-voted review by deleting and re-creating it. (`helpfulBy` is a
+    // at all. The append-only branch does not let them back in either: it now
+    // excludes the review's own author outright (I3), so an author cannot vote
+    // for themselves by any route. Because create additionally pins `helpfulBy`
+    // to the empty list, that exclusion is absolute: an author cannot seed votes
+    // at create time, and cannot reset an already-voted review by deleting and
+    // re-creating it. (`helpfulBy` is a
     // *benefit* to its author, unlike `posts.reports`, so unlike `reports` it
     // must never start non-empty.)
+    //
+    // C1 — the id is pinned to `courseSlug`, not `courseKey`. A courseKey may
+    // contain '/' (17 courses in the deployed catalog do) and a '/' in a
+    // document id splits the path, so `reviews/<courseKey>_<uid>` would be a
+    // 3-segment path this match block never sees (it falls through to the
+    // catch-all deny). `courseSlug` is the client-side escape ('/' -> '%2F',
+    // '%' -> '%25', see `Review.slug`); rules cannot compute it, so it is stored
+    // on the document and pinned on edit alongside `courseKey`.
     match /reviews/{reviewId} {
       allow read: if kuDomain();
       allow create: if kuVerified()
-        && reviewId == request.resource.data.courseKey + '_' + request.auth.uid
+        && reviewId == request.resource.data.courseSlug + '_' + request.auth.uid
         && request.resource.data.authorId == request.auth.uid
         && request.resource.data.university_id == 'kyoto_u'
         && request.resource.data.rating is int
@@ -212,11 +221,24 @@ service cloud.firestore {
         && ((resource.data.authorId == request.auth.uid
              && request.resource.data.authorId == resource.data.authorId
              && request.resource.data.courseKey == resource.data.courseKey
+             // C1: pinned alongside courseKey — the doc id is derived from the
+             // slug, so letting it drift would divorce the id from its field.
+             // `.get()` on both sides so a document written before C1 (which
+             // carries neither) is still editable rather than erroring out.
+             && request.resource.data.get('courseSlug', '')
+                  == resource.data.get('courseSlug', '')
              && request.resource.data.university_id == resource.data.university_id
              && request.resource.data.rating is int
              && request.resource.data.rating >= 1 && request.resource.data.rating <= 5
              && !request.resource.data.diff(resource.data).affectedKeys().hasAny(['helpfulBy']))
             || (kuVerified()
+                // I3: the author may not vote for their own review. `helpfulBy`
+                // feeds the マイページ 貢献 badge, so a self-vote is a user
+                // inflating their own score; unlike `posts.reports` (a cost the
+                // author may legitimately pay against themselves) there is no
+                // honest reason to allow it. The UI disables the button too, but
+                // this is the half that actually holds.
+                && resource.data.authorId != request.auth.uid
                 && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['helpfulBy'])
                 && request.resource.data.helpfulBy.size()
                      == resource.data.get('helpfulBy', []).size() + 1
@@ -240,7 +262,10 @@ service cloud.firestore {
     // whole point of the collection.)
     // Both create and update allow counter-only writes (e.g., bumpPostCount with
     // merge: true) that omit review fields, using .get() defaults for absent fields.
-    match /course_stats/{courseKey} {
+    // The document id is `Review.slug(courseKey)` (C1), not the raw courseKey —
+    // the wildcard is unused in the body, so no rule change follows from that,
+    // but the name should not claim otherwise.
+    match /course_stats/{statsId} {
       allow read: if kuDomain();
       allow create, update: if kuVerified()
         && request.resource.data.university_id == 'kyoto_u'

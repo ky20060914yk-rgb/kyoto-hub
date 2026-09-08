@@ -102,9 +102,15 @@ const fullTextbookRequest = (over = {}) => ({
 // A full, valid `Review.toMap()` document. The enum fields carry the real
 // `.value` strings the Dart model emits (rakutan/attendance/grading/pastExam/
 // bringIn), so a fixture can never pass a shape the client could not produce.
+// C1: `courseSlug` is `courseKey` with '/' -> '%2F' and '%' -> '%25' (the client
+// runs this in `Review.slug`; rules cannot compute it, so it is stored). The
+// create rule pins the doc id to `courseSlug + '_' + uid`, so a fixture that
+// overrides `courseKey` gets a matching slug by default.
+const slug = (s) => String(s).replace(/%/g, '%25').replace(/\//g, '%2F');
 const reviewDoc = (over = {}) => ({
   id: 'ck_u1',
   courseKey: 'ck',
+  courseSlug: slug(over.courseKey ?? 'ck'),
   courseName: '線形代数',
   university_id: 'kyoto_u',
   authorId: 'u1',
@@ -839,6 +845,57 @@ test('a non-author appends exactly their own uid to helpfulBy, once', async () =
 test('only a verified KU user may mark a review helpful', async () => {
   await assertFails(updateDoc(doc(asKuUnverified(), 'reviews/ck_u1'), { helpfulBy: ['u2'] }));
   await assertFails(updateDoc(doc(asOutsider(), 'reviews/ck_u1'), { helpfulBy: ['u3'] }));
+});
+
+// C1 — 17 courses in the deployed catalog have a '/' in their courseKey
+// (`問題発見型/解決型学習(fbl/pbl)1|…`, `river/coastalengineering|…`). '/' is a path
+// separator in a document id, so `reviews/<courseKey>_<uid>` was a 3-SEGMENT
+// path that this match block never saw — it fell through to the catch-all deny
+// and those courses were silently unreviewable. The id is pinned to `courseSlug`
+// instead, which the client escapes.
+test('C1: a review on a slash courseKey creates under its slugged doc id', async () => {
+  const db = asKu();
+  // 'x/y|z' -> 'x%2Fy|z'; the doc id is one segment, so the rule applies.
+  await assertSucceeds(setDoc(doc(db, 'reviews/x%2Fy|z_u1'),
+    reviewDoc({ id: 'x%2Fy|z_u1', courseKey: 'x/y|z', authorId: 'u1' })));
+  // The real catalog shape, end to end.
+  await assertSucceeds(setDoc(doc(db, 'reviews/river%2Fcoastalengineering|後藤仁志_u1'),
+    reviewDoc({
+      id: 'river%2Fcoastalengineering|後藤仁志_u1',
+      courseKey: 'river/coastalengineering|後藤仁志',
+      authorId: 'u1',
+    })));
+});
+
+test('C1: a review whose doc id does not match its courseSlug is refused', async () => {
+  const db = asKu();
+  // The raw (unescaped) key as the slug — the pre-fix shape.
+  await assertFails(setDoc(doc(db, 'reviews/x%2Fy|z_u1'),
+    reviewDoc({ id: 'x%2Fy|z_u1', courseKey: 'x/y|z', courseSlug: 'x/y|z' })));
+  // A slug that belongs to a different course: the id must encode the document
+  // it claims to be about.
+  await assertFails(setDoc(doc(db, 'reviews/x%2Fy|z_u1'),
+    reviewDoc({ id: 'x%2Fy|z_u1', courseKey: 'x/y|z', courseSlug: 'someoneelse' })));
+  // No slug at all (a client that skipped the escape).
+  const noSlug = reviewDoc({ id: 'x%2Fy|z_u1', courseKey: 'x/y|z' });
+  delete noSlug.courseSlug;
+  await assertFails(setDoc(doc(db, 'reviews/x%2Fy|z_u1'), noSlug));
+});
+
+test('C1: an author cannot drift courseSlug away from the doc id', async () => {
+  await assertFails(updateDoc(doc(asKu(), 'reviews/ck_u1'), { courseSlug: 'other' }));
+});
+
+// I3 — `helpfulBy` feeds the マイページ 貢献 badge, so a self-vote is a user
+// inflating their own score. The author is excluded from the append-only branch
+// outright (and the author branch already forbids touching `helpfulBy`), so
+// there is no route left.
+test('I3: the review author cannot append their own uid to helpfulBy', async () => {
+  // u1 authored reviews/ck_u1; the honest single-uid append shape is still
+  // refused because the caller IS the author.
+  await assertFails(updateDoc(doc(asKu(), 'reviews/ck_u1'), { helpfulBy: ['u1'] }));
+  // ...while the identical write from a non-author still succeeds.
+  await assertSucceeds(updateDoc(doc(asKu2(), 'reviews/ck_u1'), { helpfulBy: ['u2'] }));
 });
 
 test('author deletes their own review; a non-author cannot', async () => {
