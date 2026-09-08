@@ -11,6 +11,13 @@ import '../models/review.dart';
 /// then write both docs. The post counters on the same doc are owned by
 /// [bumpPostCount] via `FieldValue.increment` and are never emitted by the
 /// review path (see [CourseStats.toMap] — ruling P2).
+///
+/// **C1 — document ids are slugged.** A courseKey may contain '/' (17 courses
+/// in the deployed catalog do), which is a path separator in a Firestore
+/// document id. So every `course_stats` reference here is
+/// `_stats.doc(Review.slug(courseKey))` and every review reference is
+/// `_reviews.doc(Review.docId(...))`, which slugs too. The `where('courseKey')`
+/// queries are FIELD filters, not paths, so they keep the raw courseKey.
 class ReviewService {
   ReviewService(FirebaseFirestore firestore) : _fs = firestore;
 
@@ -63,9 +70,10 @@ class ReviewService {
           ..sort((a, b) => b.updatedAt.compareTo(a.updatedAt)));
   }
 
-  /// `course_stats/{courseKey}`, or [CourseStats.empty] if the doc is missing.
+  /// `course_stats/{slug(courseKey)}`, or [CourseStats.empty] if the doc is
+  /// missing.
   Future<CourseStats> getStats(String courseKey) async {
-    final snap = await _stats.doc(courseKey).get();
+    final snap = await _stats.doc(Review.slug(courseKey)).get();
     final data = snap.data();
     return snap.exists && data != null
         ? CourseStats.fromMap(data)
@@ -73,7 +81,7 @@ class ReviewService {
   }
 
   Stream<CourseStats> streamStats(String courseKey) {
-    return _stats.doc(courseKey).snapshots().map((snap) {
+    return _stats.doc(Review.slug(courseKey)).snapshots().map((snap) {
       final data = snap.data();
       return snap.exists && data != null
           ? CourseStats.fromMap(data)
@@ -85,7 +93,7 @@ class ReviewService {
   /// atomically.
   Future<void> submitReview(Review review) async {
     await _fs.runTransaction((tx) async {
-      final statsRef = _stats.doc(review.courseKey);
+      final statsRef = _stats.doc(Review.slug(review.courseKey));
       final reviewRef = _reviews.doc(review.id);
       final statsSnap = await tx.get(statsRef);
       final prevSnap = await tx.get(reviewRef);
@@ -115,7 +123,7 @@ class ReviewService {
   /// Remove the caller's review AND decrement `course_stats` atomically.
   Future<void> deleteReview(Review review) async {
     await _fs.runTransaction((tx) async {
-      final statsRef = _stats.doc(review.courseKey);
+      final statsRef = _stats.doc(Review.slug(review.courseKey));
       final reviewRef = _reviews.doc(review.id);
       final statsSnap = await tx.get(statsRef);
       final prevSnap = await tx.get(reviewRef);
@@ -162,7 +170,7 @@ class ReviewService {
     required bool isPastExam,
     required int delta,
   }) async {
-    await _stats.doc(courseKey).set({
+    await _stats.doc(Review.slug(courseKey)).set({
       'courseKey': courseKey,
       'university_id': 'kyoto_u',
       if (isPastExam)

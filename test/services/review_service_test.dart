@@ -151,6 +151,67 @@ void main() {
     expect(s.resourcePostCount, 1);
   });
 
+  // C1 — a courseKey with a '/' in it. 17 courses in the deployed catalog carry
+  // one, and '/' is a path separator in a Firestore document id: before the slug
+  // both `_stats.doc(courseKey)` and `_reviews.doc('<key>_<uid>')` built
+  // 3-segment paths, which throws client-side (an ErrorWidget on the default
+  // レビュー tab) and is uncovered by every rules match block.
+  group('C1 — courseKey containing /', () {
+    const slashKey = 'a/b|c/d';
+
+    test('submitReview writes well-formed (slash-free) document ids', () async {
+      final db = FakeFirebaseFirestore();
+      final svc = ReviewService(db);
+      await svc.submitReview(_review(slashKey, 'u1', rating: 5));
+
+      // The ids the write actually used — neither may contain a '/'.
+      expect((await db.doc('reviews/a%2Fb|c%2Fd_u1').get()).exists, isTrue);
+      expect((await db.doc('course_stats/a%2Fb|c%2Fd').get()).exists, isTrue);
+
+      // The raw courseKey stays on the document as the queryable field.
+      final stored = Review.fromMap((await db.doc('reviews/a%2Fb|c%2Fd_u1').get()).data()!);
+      expect(stored.courseKey, slashKey);
+      expect(stored.courseSlug, 'a%2Fb|c%2Fd');
+      // The create rule pins the doc id to `courseSlug + '_' + uid`.
+      expect(stored.id, '${stored.courseSlug}_u1');
+    });
+
+    test('getStats reads back the aggregate for a slash courseKey', () async {
+      final db = FakeFirebaseFirestore();
+      final svc = ReviewService(db);
+      await svc.submitReview(_review(slashKey, 'u1', rating: 5));
+      final stats = await svc.getStats(slashKey);
+      expect(stats.reviewCount, 1);
+      expect(stats.ratingSum, 5);
+      expect(stats.rakutanCounts['raku'], 1);
+    });
+
+    test('the whole review lifecycle survives a slash courseKey', () async {
+      final db = FakeFirebaseFirestore();
+      final svc = ReviewService(db);
+      await svc.submitReview(_review(slashKey, 'u1', rating: 5));
+
+      // Field-filtered queries keep the RAW key (they are not paths).
+      expect((await svc.streamReviewsForCourse(slashKey).first).length, 1);
+      expect((await svc.getMyReview(slashKey, 'u1'))!.rating, 5);
+      expect(await svc.streamStats(slashKey).first, isNotNull);
+
+      await svc.bumpPostCount(slashKey, isPastExam: true, delta: 1);
+      expect((await svc.getStats(slashKey)).pastExamPostCount, 1);
+
+      await svc.markHelpful(reviewId: Review.docId(slashKey, 'u1'), uid: 'u2');
+      expect((await svc.getMyReview(slashKey, 'u1'))!.helpfulBy, ['u2']);
+
+      await svc.deleteReview(_review(slashKey, 'u1'));
+      expect((await svc.getStats(slashKey)).reviewCount, 0);
+      // (The P2 merge — that the review path leaves `pastExamPostCount` alone —
+      // is NOT asserted here: fake_cloud_firestore ignores `SetOptions(merge)`
+      // on a `tx.set` inside a transaction, so it reads 0 in the fake for a
+      // plain courseKey too. Nothing slug-specific; see the P2 note on
+      // CourseStats.toMap for the real-Firestore contract.)
+    });
+  });
+
   // Controller ruling P5 — streamMyReview: Tasks 6/7 watch this instead of
   // re-fetching a Future on every rebuild.
   test('streamMyReview emits null when there is none, then the review', () async {

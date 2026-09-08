@@ -100,4 +100,70 @@ void main() {
   test('docId is deterministic', () {
     expect(Review.docId('微積a|山田', 'u9'), '微積a|山田_u9');
   });
+
+  // C1 — 17 courses in the deployed catalog have a '/' in their courseKey
+  // (`課題発見型/解決型学習(fbl/pbl)1|…`). '/' is a path separator in a Firestore
+  // document id, so an unescaped key produced a 3-segment path: `course_stats`
+  // threw client-side (an ErrorWidget on the default レビュー tab) and `reviews`
+  // fell through every match block to the catch-all deny.
+  group('C1 slug', () {
+    test('escapes / and %, % first so the mapping stays injective', () {
+      expect(Review.slug('a/b|c'), 'a%2Fb|c');
+      expect(Review.slug('50%off|x'), '50%25off|x');
+      // The pair that would collide if '/' were escaped before '%'.
+      expect(Review.slug('a/b'), isNot(Review.slug('a%2Fb')));
+      expect(Review.slug('a%2Fb'), 'a%252Fb');
+    });
+
+    test('leaves a key with neither character untouched', () {
+      expect(Review.slug('微積a|山田'), '微積a|山田');
+    });
+
+    test('every real deployed shape yields a single-segment doc id', () {
+      // Verbatim from tools/courses.json (the deployed catalog): 17 distinct
+      // courseKeys contain '/', and none contains '%' — so the escape is a
+      // no-op for every other key and round-trips for these.
+      const keys = [
+        '問題発見型/解決型学習(fbl/pbl)1|伊藤孝行',
+        'river/coastalengineering|後藤仁志',
+        'advancedtransculturalgamestudies(seg/vmc)|bjorn-olekamm',
+      ];
+      for (final k in keys) {
+        expect(Review.slug(k).contains('/'), isFalse, reason: k);
+        expect(Review.docId(k, 'u1').split('/').length, 1, reason: k);
+      }
+    });
+
+    test('docId slugs the courseKey', () {
+      expect(Review.docId('a/b|c/d', 'u1'), 'a%2Fb|c%2Fd_u1');
+    });
+  });
+
+  test('courseSlug defaults from courseKey and survives toMap/fromMap', () {
+    final r = Review(
+      id: Review.docId('a/b|c', 'u1'),
+      courseKey: 'a/b|c',
+      courseName: 'x',
+      authorId: 'u1',
+      authorName: 'n',
+      rating: 3,
+      rakutan: Rakutan.futsu,
+      attendance: Attendance.light,
+      grading: GradingStyle.examOnly,
+      pastExam: PastExamUsefulness.asIs,
+      bringIn: BringIn.na,
+      createdAt: DateTime(2024),
+      updatedAt: DateTime(2024),
+    );
+    expect(r.courseSlug, 'a%2Fb|c');
+    // The rule pins the doc id to `courseSlug + '_' + uid`, so these must agree.
+    expect(r.id, '${r.courseSlug}_u1');
+    expect(r.toMap()['courseSlug'], 'a%2Fb|c');
+    expect(Review.fromMap(r.toMap()).courseSlug, 'a%2Fb|c');
+  });
+
+  test('fromMap derives courseSlug for a document written before C1', () {
+    final back = Review.fromMap({'courseKey': 'a/b|c'}); // no courseSlug key
+    expect(back.courseSlug, 'a%2Fb|c');
+  });
 }

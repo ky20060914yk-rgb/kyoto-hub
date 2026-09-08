@@ -1,6 +1,10 @@
 import 'review.dart';
 
-/// Per-course roll-up stored at `course_stats/{courseKey}`.
+/// Per-course roll-up stored at `course_stats/{Review.slug(courseKey)}`.
+///
+/// C1: the document id is the SLUGGED key — a courseKey may contain '/', which
+/// is a path separator in a document id. The raw [courseKey] stays in the
+/// document as a field (and is what [applyReview] and every reader key on).
 ///
 /// Phase 1 has no Cloud Functions, so this is maintained client-side:
 /// `ReviewService` reads the doc inside a Firestore transaction, calls
@@ -53,7 +57,11 @@ class CourseStats {
         0.5 * ((attendanceCounts['light'] ?? 0) / reviewCount);
     final base = 50 +
         35 * (rakuFrac - muzuFrac) + // -35..+35
-        10 * (avgRating - 3) / 2 + // -10..+10
+        // M3: -15..+10, not -10..+10. `avgRating` is 0 when every stored review
+        // degraded to `rating: 0` (Review._rating), which is 2 points below the
+        // 1..5 floor this term was sized for. The final `.clamp(0, 100)` below
+        // is what keeps the score in range regardless.
+        10 * (avgRating - 3) / 2 + // -15..+10
         10 * (lightFrac - 0.5); // -5..+5
     return base.clamp(0, 100).toDouble();
   }
@@ -162,6 +170,12 @@ class CourseStats {
       // read as 0 until `tools/backfill_post_counts.mjs` recounts the doc.
       pastExamPostCount: _nonNeg(map['pastExamPostCount']),
       resourcePostCount: _nonNeg(map['resourcePostCount']),
+      // M5: this parses an ISO-8601 STRING, which is what `toMap` writes. A
+      // Firestore `Timestamp` would `toString()` to `Timestamp(seconds=…)` and
+      // `tryParse` to null — i.e. silently "no last review", not a crash.
+      // Nothing writes a Timestamp today; a Phase-2 Cloud Function that reaches
+      // for `FieldValue.serverTimestamp()` here must convert on read (or keep
+      // writing ISO strings) or this field will read as null forever.
       lastReviewAt: DateTime.tryParse((map['lastReviewAt'] ?? '').toString()),
     );
   }

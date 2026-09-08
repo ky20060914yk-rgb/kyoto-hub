@@ -206,8 +206,24 @@ extension BringInX on BringIn {
 }
 
 class Review {
-  final String id; // '${courseKey}_${authorId}'
+  final String id; // '${slug(courseKey)}_${authorId}'
   final String courseKey;
+
+  /// [courseKey] escaped so it is a legal Firestore document-id *component*.
+  ///
+  /// C1: a courseKey is `normalize(name)|normalize(lecturer)` and the
+  /// normaliser does not strip '/', so 17 courses in the deployed catalog carry
+  /// one (`問題発見型/解決型学習(fbl/pbl)1|…`). A '/' in a document id splits the
+  /// path into extra segments, which makes `reviews/<key>_<uid>` a 3-segment
+  /// path that no rule covers and `course_stats/<key>` an illegal collection
+  /// reference that THROWS client-side. Every document id derived from a
+  /// courseKey therefore goes through [slug]; the raw [courseKey] stays on the
+  /// document as the queryable field.
+  ///
+  /// Persisted (not merely derived) because the `reviews` create rule pins the
+  /// document id to `courseSlug + '_' + uid`: rules cannot run the escape
+  /// themselves, so the value has to be in the document.
+  final String courseSlug;
   final String courseName; // denormalised at write time (for マイページ / lists)
   final String universityId; // 'kyoto_u'
   final String authorId;
@@ -228,6 +244,7 @@ class Review {
   Review({
     required this.id,
     required this.courseKey,
+    String? courseSlug,
     required this.courseName,
     this.universityId = 'kyoto_u',
     required this.authorId,
@@ -244,7 +261,7 @@ class Review {
     this.helpfulBy = const [],
     required this.createdAt,
     required this.updatedAt,
-  });
+  }) : courseSlug = courseSlug ?? Review.slug(courseKey);
 
   int get helpfulCount => helpfulBy.length;
 
@@ -252,6 +269,7 @@ class Review {
     return {
       'id': id,
       'courseKey': courseKey,
+      'courseSlug': courseSlug,
       'courseName': courseName,
       'university_id': universityId,
       'authorId': authorId,
@@ -284,6 +302,10 @@ class Review {
     return Review(
       id: map['id']?.toString() ?? '',
       courseKey: map['courseKey']?.toString() ?? '',
+      // Documents written before C1 carry no `courseSlug`; derive it so an old
+      // document still round-trips to the same (slash-free) document id.
+      courseSlug: map['courseSlug']?.toString() ??
+          Review.slug(map['courseKey']?.toString() ?? ''),
       courseName: map['courseName']?.toString() ?? '',
       universityId: map['university_id']?.toString() ?? 'kyoto_u',
       authorId: map['authorId']?.toString() ?? '',
@@ -325,6 +347,7 @@ class Review {
   Review copyWith({
     String? id,
     String? courseKey,
+    String? courseSlug,
     String? courseName,
     String? universityId,
     String? authorId,
@@ -345,6 +368,10 @@ class Review {
     return Review(
       id: id ?? this.id,
       courseKey: courseKey ?? this.courseKey,
+      // An explicit slug wins; otherwise a courseKey change re-derives it and an
+      // untouched courseKey keeps the stored slug.
+      courseSlug: courseSlug ??
+          (courseKey != null ? Review.slug(courseKey) : this.courseSlug),
       courseName: courseName ?? this.courseName,
       universityId: universityId ?? this.universityId,
       authorId: authorId ?? this.authorId,
@@ -364,5 +391,16 @@ class Review {
     );
   }
 
-  static String docId(String courseKey, String uid) => '${courseKey}_$uid';
+  /// Injective escape so a courseKey containing '/' (or '%') is a valid
+  /// Firestore document-id component. '/' -> '%2F', '%' -> '%25'.
+  ///
+  /// '%' MUST be escaped first, otherwise the '%' the '/' escape introduces
+  /// would itself be escaped and two distinct keys ('a/b' and 'a%2Fb') could
+  /// collide. Escaping '%' first makes the mapping injective: distinct
+  /// courseKeys always produce distinct slugs.
+  static String slug(String courseKey) =>
+      courseKey.replaceAll('%', '%25').replaceAll('/', '%2F');
+
+  static String docId(String courseKey, String uid) =>
+      '${slug(courseKey)}_$uid';
 }

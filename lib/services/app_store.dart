@@ -1068,6 +1068,9 @@ class AppStore extends ChangeNotifier {
     final review = Review(
       id: Review.docId(courseKey, user.uid),
       courseKey: courseKey,
+      // C1: the `reviews` create rule pins the document id to
+      // `courseSlug + '_' + uid`, so the escaped key has to be ON the document.
+      courseSlug: Review.slug(courseKey),
       courseName: courseName,
       authorId: user.uid,
       authorName: user.displayName,
