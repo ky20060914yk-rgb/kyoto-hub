@@ -127,6 +127,32 @@ void main() {
     expect(ok.resourcePostCount, 2);
   });
 
+  test('score is stored, equals rakutanScore.round(), and survives toMap/fromMap', () {
+    var s = CourseStats.empty('ck');
+    expect(s.score, 50);
+    s = s.applyReview(_r('u1', rating: 5, rakutan: Rakutan.raku), delta: 1);
+    expect(s.score, s.rakutanScore.round());
+    expect(s.score, greaterThan(50));
+    final back = CourseStats.fromMap(s.toMap());
+    expect(back.score, s.score);
+  });
+
+  test('score recomputes when a review is removed', () {
+    var s = CourseStats.empty('ck')
+        .applyReview(_r('u1', rating: 5, rakutan: Rakutan.raku), delta: 1)
+        .applyReview(_r('u2', rating: 1, rakutan: Rakutan.muzu), delta: 1);
+    final twoReviewScore = s.score;
+    s = s.applyReview(_r('u2', rating: 1, rakutan: Rakutan.muzu), delta: -1);
+    expect(s.score, isNot(twoReviewScore));
+    expect(s.score, s.rakutanScore.round());
+  });
+
+  test('fromMap clamps a negative/NaN score to a sane value', () {
+    expect(CourseStats.fromMap({'score': -5}).score, 0);
+    expect(CourseStats.fromMap({'score': double.nan}).score, 0);
+    expect(CourseStats.fromMap({}).score, 50); // P-B2: absent -> 50 (neutral)
+  });
+
   // Merge safety: under `set(merge: true)` an explicit null is a write that
   // erases the stored value, so a stats doc with no timestamp must omit the key
   // rather than clobber a `lastReviewAt` a concurrent write recorded.
