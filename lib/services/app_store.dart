@@ -439,6 +439,28 @@ class AppStore extends ChangeNotifier {
       ..sort((a, b) => b.createdAt.compareTo(a.createdAt));
   }
 
+  /// Task 8: keep `course_stats`' post counters in step for the ranking.
+  ///
+  /// Deliberately **synchronous and fire-and-forget**. Resolving the courseKey
+  /// needs `courses.byId`, which calls `warmUp()` (rethrows on a failed catalog
+  /// load) and then a live `.get()` on a cache miss — so it can throw. If that
+  /// `await` sat in a caller's critical path it would abort the rest of the
+  /// mutation (point clawback, `notifyListeners()`) after the post had already
+  /// been deleted from Firestore. A missed bump only skews a future ranking.
+  void _bumpPostCountFor(Post post, int delta) {
+    () async {
+      final course = await courses.byId(post.subjectId).catchError((_) => null);
+      final ck = course?.courseKey ?? '';
+      if (ck.isEmpty) return;
+      await reviews.bumpPostCount(
+        ck,
+        isPastExam: post.category == PostCategory.pastExam,
+        delta: delta,
+      );
+    }()
+        .catchError((_) {});
+  }
+
   Future<bool> addPost({
     required String subjectId,
     required PostCategory category,
@@ -485,15 +507,7 @@ class AppStore extends ChangeNotifier {
     posts.insert(0, newPost);
     _firestore.createPost(newPost).catchError((_) {});
 
-    // Task 8: keep course_stats' post counters in step for the ranking.
-    // Fire-and-forget — a missed bump only skews a future ranking, it must
-    // never break the upload flow. (`sub` is the already-resolved course.)
-    final ck = sub?.courseKey ?? '';
-    if (ck.isNotEmpty) {
-      reviews
-          .bumpPostCount(ck, isPastExam: category == PostCategory.pastExam, delta: 1)
-          .catchError((_) {});
-    }
+    _bumpPostCountFor(newPost, 1);
 
     int bonusAmount = 0;
 
@@ -707,13 +721,7 @@ class AppStore extends ChangeNotifier {
     posts.removeAt(idx);
     await _firestore.deletePost(postId).catchError((_) {});
 
-    // Task 8: mirror the addPost bump. Fire-and-forget for the same reason.
-    final ck = (await courses.byId(post.subjectId))?.courseKey ?? '';
-    if (ck.isNotEmpty) {
-      reviews
-          .bumpPostCount(ck, isPastExam: post.category == PostCategory.pastExam, delta: -1)
-          .catchError((_) {});
-    }
+    _bumpPostCountFor(post, -1);
 
     if (currentUser != null && post.authorId == currentUser!.uid) {
       int deductPoints = 0;
@@ -779,6 +787,11 @@ class AppStore extends ChangeNotifier {
       // denied (the server would still see only two reports).
       await _firestore.updatePostReports(postId, updatedReports).catchError((_) {});
       await _firestore.deletePost(postId).catchError((_) {});
+
+      // Same counter bookkeeping as AppStore.deletePost: this branch removes
+      // the post without going through it, so the decrement has to be issued
+      // here too or the ranking counter drifts upward forever.
+      _bumpPostCountFor(post, -1);
 
       // Claw back points from uploader!
       final uploaderProfile = await _firestore.getUserProfile(post.authorId);
