@@ -183,6 +183,47 @@ service cloud.firestore {
       allow update, delete: if false;
     }
 
+    // One structured review per (course, author). The document id is
+    // '<courseKey>_<authorId>', so a user physically cannot hold two reviews for
+    // the same course, and the id encodes the author. Read by any KU address;
+    // written only by its author, verified. A non-author may append exactly their
+    // own uid to `helpfulBy` and nothing else (the same append-only shape as
+    // posts.reports). The author branch pins `authorId` and `courseKey` so a
+    // review cannot be reassigned or moved onto another course after the fact,
+    // and forbids it from touching `helpfulBy` at all — an author who wants to
+    // vote for their own review has to go through the append-only branch, which
+    // caps them at their own single uid.
+    match /reviews/{reviewId} {
+      allow read: if kuDomain();
+      allow create: if kuVerified()
+        && reviewId == request.resource.data.courseKey + '_' + request.auth.uid
+        && request.resource.data.authorId == request.auth.uid
+        && request.resource.data.university_id == 'kyoto_u'
+        && request.resource.data.rating is int
+        && request.resource.data.rating >= 1 && request.resource.data.rating <= 5;
+      allow update: if signedIn()
+        && ((resource.data.authorId == request.auth.uid
+             && request.resource.data.authorId == resource.data.authorId
+             && request.resource.data.courseKey == resource.data.courseKey
+             && !request.resource.data.diff(resource.data).affectedKeys().hasAny(['helpfulBy']))
+            || (kuVerified()
+                && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['helpfulBy'])
+                && request.resource.data.helpfulBy.size()
+                     == resource.data.get('helpfulBy', []).size() + 1
+                && request.resource.data.helpfulBy.hasAll(resource.data.get('helpfulBy', []))
+                && request.resource.data.helpfulBy.hasAny([request.auth.uid])
+                && !resource.data.get('helpfulBy', []).hasAny([request.auth.uid])));
+      allow delete: if signedIn() && resource.data.authorId == request.auth.uid;
+    }
+
+    // Per-course roll-up maintained client-side in the same transaction as a
+    // review write (Phase 1 has no Cloud Functions). Trust-based write, same tier
+    // as `transactions`; Phase 2 replaces it with a Function-authored aggregate.
+    match /course_stats/{courseKey} {
+      allow read: if kuDomain();
+      allow write: if kuVerified();
+    }
+
     match /{document=**} {
       allow read, write: if false;
     }

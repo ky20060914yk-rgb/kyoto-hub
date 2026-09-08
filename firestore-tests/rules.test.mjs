@@ -99,6 +99,31 @@ const fullTextbookRequest = (over = {}) => ({
   ...over,
 });
 
+// A full, valid `Review.toMap()` document. The enum fields carry the real
+// `.value` strings the Dart model emits (rakutan/attendance/grading/pastExam/
+// bringIn), so a fixture can never pass a shape the client could not produce.
+const reviewDoc = (over = {}) => ({
+  id: 'ck_u1',
+  courseKey: 'ck',
+  courseName: '線形代数',
+  university_id: 'kyoto_u',
+  authorId: 'u1',
+  authorName: '匿名京大生',
+  rating: 3,
+  rakutan: 'raku',
+  attendance: 'light',
+  grading: 'exam_report',
+  pastExam: 'similar',
+  bringIn: 'yes',
+  comment: '',
+  termTaken: '2025前期',
+  gradeTaken: 'A',
+  helpfulBy: [],
+  createdAt: '2026-09-01T00:00:00.000',
+  updatedAt: '2026-09-01T00:00:00.000',
+  ...over,
+});
+
 // Seed baseline documents with rules bypassed so read/update tests exercise the
 // rule under test rather than a missing-document condition.
 beforeEach(async () => {
@@ -159,6 +184,16 @@ beforeEach(async () => {
       userId: 'u1', university_id: 'kyoto_u', amount: 5, type: 'upload_reward',
     });
     await setDoc(doc(db, 'inquiries/i_1'), { userId: 'u1', university_id: 'kyoto_u', body: 'hi' });
+    // u1's review of course `ck`; the document id encodes both (`<courseKey>_<authorId>`).
+    await setDoc(doc(db, 'reviews/ck_u1'), reviewDoc());
+    // The "already helped by u2" fixture: the append-only carve-out means this
+    // state can only be reached by u2 itself, and u2 may not append again.
+    await setDoc(doc(db, 'reviews/ck2_u1'), reviewDoc({
+      id: 'ck2_u1', courseKey: 'ck2', helpfulBy: ['u2'],
+    }));
+    await setDoc(doc(db, 'course_stats/ck'), {
+      courseKey: 'ck', university_id: 'kyoto_u', reviewCount: 1, avgRating: 3.0,
+    });
     await setDoc(doc(db, 'secret_admin_stuff/s_1'), { university_id: 'kyoto_u' });
   });
 });
@@ -659,6 +694,133 @@ test('inquiries are write-only for signed-in users and readable by nobody', asyn
   await assertFails(setDoc(doc(asAnon(), 'inquiries/i_anon'), { body: 'spam' }));
   await assertFails(updateDoc(doc(asKu(), 'inquiries/i_1'), { body: 'edited' }));
   await assertFails(deleteDoc(doc(asKu(), 'inquiries/i_1')));
+});
+
+// --- reviews -----------------------------------------------------------------
+//
+// One review per (course, author): the document id is `<courseKey>_<authorId>`,
+// so the id itself is the uniqueness constraint and the create rule pins it to
+// the caller's uid. Reads are KU-domain; writes are the author's, verified.
+
+test('reviews: an unverified KU address can still read a review (I3)', async () => {
+  await assertSucceeds(getDoc(doc(asKuUnverified(), 'reviews/ck_u1')));
+});
+
+test('reviews: an outsider Firebase account cannot read (I3)', async () => {
+  await assertFails(getDoc(doc(asOutsider(), 'reviews/ck_u1')));
+  await assertFails(getDoc(doc(asAnon(), 'reviews/ck_u1')));
+});
+
+test('verified KU user creates their own review (doc id ends _<uid>)', async () => {
+  await assertSucceeds(setDoc(doc(asKu(), 'reviews/other_u1'),
+    reviewDoc({ id: 'other_u1', courseKey: 'other', authorId: 'u1' })));
+});
+
+test('cannot create a review whose doc id is not <courseKey>_<own uid>', async () => {
+  const db = asKu();
+  // Someone else's uid in the id.
+  await assertFails(setDoc(doc(db, 'reviews/other_u2'),
+    reviewDoc({ id: 'other_u2', courseKey: 'other', authorId: 'u1' })));
+  // The id does not encode the courseKey it carries — that would let one author
+  // hold several documents for the same course.
+  await assertFails(setDoc(doc(db, 'reviews/somethingelse_u1'),
+    reviewDoc({ id: 'somethingelse_u1', courseKey: 'other', authorId: 'u1' })));
+});
+
+test('cannot create a review with authorId != uid', async () => {
+  await assertFails(setDoc(doc(asKu(), 'reviews/other_u1'),
+    reviewDoc({ id: 'other_u1', courseKey: 'other', authorId: 'u2' })));
+});
+
+test('unverified KU user cannot create a review', async () => {
+  await assertFails(setDoc(doc(asKuUnverified(), 'reviews/other_u2'),
+    reviewDoc({ id: 'other_u2', courseKey: 'other', authorId: 'u2' })));
+  await assertFails(setDoc(doc(asOutsider(), 'reviews/other_u3'),
+    reviewDoc({ id: 'other_u3', courseKey: 'other', authorId: 'u3' })));
+});
+
+test('review create is rejected for an out-of-range rating', async () => {
+  const db = asKu();
+  await assertFails(setDoc(doc(db, 'reviews/r6_u1'),
+    reviewDoc({ id: 'r6_u1', courseKey: 'r6', rating: 6 })));
+  await assertFails(setDoc(doc(db, 'reviews/r0_u1'),
+    reviewDoc({ id: 'r0_u1', courseKey: 'r0', rating: 0 })));
+});
+
+test('review create is rejected when `rating` is not an int', async () => {
+  const db = asKu();
+  await assertFails(setDoc(doc(db, 'reviews/rs_u1'),
+    reviewDoc({ id: 'rs_u1', courseKey: 'rs', rating: 'x' })));
+  await assertFails(setDoc(doc(db, 'reviews/rf_u1'),
+    reviewDoc({ id: 'rf_u1', courseKey: 'rf', rating: 4.5 })));
+});
+
+test('review create is rejected for another university', async () => {
+  await assertFails(setDoc(doc(asKu(), 'reviews/ou_u1'),
+    reviewDoc({ id: 'ou_u1', courseKey: 'ou', university_id: 'osaka_u' })));
+});
+
+test('author edits their own review; a non-author cannot edit its body', async () => {
+  await assertSucceeds(updateDoc(doc(asKu(), 'reviews/ck_u1'), { rating: 5, comment: 'edit' }));
+  const other = asKu2();
+  await assertFails(updateDoc(doc(other, 'reviews/ck_u1'), { comment: 'hax' }));
+  await assertFails(updateDoc(doc(other, 'reviews/ck_u1'), { helpfulBy: ['u2'], comment: 'hax' }));
+});
+
+test('an author cannot reassign their review or move its courseKey', async () => {
+  const db = asKu();
+  await assertFails(updateDoc(doc(db, 'reviews/ck_u1'), { authorId: 'u2' }));
+  await assertFails(updateDoc(doc(db, 'reviews/ck_u1'), { courseKey: 'ck2' }));
+});
+
+// The author is not exempt from the append-only carve-out: writing `helpfulBy`
+// leaves the author branch (which forbids the field outright) and has to satisfy
+// the same one-own-uid append everyone else does. So an author cannot stuff the
+// array — the most they can do is the single self-vote below, exactly as an
+// author of a post can file the first `reports` entry against themselves.
+test('an author cannot stuff helpfulBy on their own review', async () => {
+  const db = asKu();
+  await assertFails(updateDoc(doc(db, 'reviews/ck_u1'), { helpfulBy: ['a', 'b', 'c'] }));
+  await assertFails(updateDoc(doc(db, 'reviews/ck_u1'), { helpfulBy: ['someone_else'] }));
+  await assertFails(updateDoc(doc(db, 'reviews/ck_u1'), { helpfulBy: ['u1'], comment: 'x' }));
+  // ...but an ordinary edit that leaves `helpfulBy` alone still works.
+  await assertSucceeds(updateDoc(doc(db, 'reviews/ck_u1'), { comment: 'x' }));
+});
+
+test('a non-author appends exactly their own uid to helpfulBy, once', async () => {
+  const db = asKu2();
+  await assertSucceeds(updateDoc(doc(db, 'reviews/ck_u1'), { helpfulBy: ['u2'] }));
+  // Someone else's uid, several at a time, or a shrink are all refused.
+  await assertFails(updateDoc(doc(db, 'reviews/ck2_u1'), { helpfulBy: ['u2', 'u9'] }));
+  await assertFails(updateDoc(doc(db, 'reviews/ck2_u1'), { helpfulBy: ['u2'] }));
+  await assertFails(updateDoc(doc(db, 'reviews/ck2_u1'), { helpfulBy: [] }));
+  await assertFails(updateDoc(doc(asKu(), 'reviews/ck2_u1'), { helpfulBy: ['u2', 'u9'] }));
+});
+
+test('only a verified KU user may mark a review helpful', async () => {
+  await assertFails(updateDoc(doc(asKuUnverified(), 'reviews/ck_u1'), { helpfulBy: ['u2'] }));
+  await assertFails(updateDoc(doc(asOutsider(), 'reviews/ck_u1'), { helpfulBy: ['u3'] }));
+});
+
+test('author deletes their own review; a non-author cannot', async () => {
+  await assertFails(deleteDoc(doc(asKu2(), 'reviews/ck_u1')));
+  await assertFails(deleteDoc(doc(asOutsider(), 'reviews/ck_u1')));
+  await assertSucceeds(deleteDoc(doc(asKu(), 'reviews/ck_u1')));
+});
+
+// --- course_stats ------------------------------------------------------------
+
+test('course_stats: KU-domain reads, KU-verified writes, outsider denied both', async () => {
+  const ku = asKu();
+  await assertSucceeds(getDoc(doc(ku, 'course_stats/ck')));
+  await assertSucceeds(setDoc(doc(ku, 'course_stats/ck'), {
+    courseKey: 'ck', university_id: 'kyoto_u', reviewCount: 2,
+  }, { merge: true }));
+  await assertSucceeds(getDoc(doc(asKuUnverified(), 'course_stats/ck')));
+  await assertFails(setDoc(doc(asKuUnverified(), 'course_stats/ck'), { reviewCount: 9 }, { merge: true }));
+  const out = asOutsider();
+  await assertFails(getDoc(doc(out, 'course_stats/ck')));
+  await assertFails(setDoc(doc(out, 'course_stats/ck'), { reviewCount: 999 }, { merge: true }));
 });
 
 // --- queries -----------------------------------------------------------------
