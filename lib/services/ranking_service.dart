@@ -82,6 +82,7 @@ class RankingService {
             ? b.score.compareTo(a.score)
             : b.reviewCount.compareTo(a.reviewCount));
       case RankingKind.mostReviewed:
+        p.removeWhere((s) => s.reviewCount < 1);
         p.sort((a, b) => b.reviewCount.compareTo(a.reviewCount));
       case RankingKind.mostPastExams:
         p.removeWhere((s) => s.pastExamPostCount <= 0);

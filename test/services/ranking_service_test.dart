@@ -64,7 +64,8 @@ void main() {
         .doc('easy|a')
         .set({'reviewCount': 999}, SetOptions(merge: true));
     final again = await r.ranking(RankingKind.mostReviewed);
-    expect(again.first.courseKey, 'easy|a'); // still 10, not 999 — served from the memoised pool
+    // Assert the stale value (10, not 999) to prove the pool was not re-read
+    expect(again.firstWhere((s) => s.courseKey == 'easy|a').reviewCount, 10);
   });
 
   // RULING P-B4: a course with past exams but ZERO reviews must still surface in
@@ -95,5 +96,41 @@ void main() {
     // ...and it is NOT in the rakutan ranking (reviewCount 0 < 3 floor).
     final rakutan = await r.ranking(RankingKind.rakutan);
     expect(rakutan.map((s) => s.courseKey), isNot(contains('exam|z')));
+  });
+
+  test('M1: zero-review course does NOT appear in mostReviewed', () async {
+    final db = FakeFirebaseFirestore();
+    Future<void> put(String ck,
+            {required int reviews, required int score, int pastExams = 0}) =>
+        db.collection('course_stats').doc(ck).set({
+          'courseKey': ck,
+          'university_id': 'kyoto_u',
+          'reviewCount': reviews,
+          'ratingSum': reviews * 3,
+          'score': score,
+          'pastExamPostCount': pastExams,
+          'resourcePostCount': 0,
+        });
+    await put('a', reviews: 10, score: 90);
+    await put('zero', reviews: 0, score: 50, pastExams: 5);
+
+    final r = RankingService(db);
+    final mostReviewed = await r.ranking(RankingKind.mostReviewed);
+    expect(mostReviewed.map((s) => s.courseKey), isNot(contains('zero')));
+
+    final mostPastExams = await r.ranking(RankingKind.mostPastExams);
+    expect(mostPastExams.map((s) => s.courseKey), contains('zero'));
+  });
+
+  test('M2: ranking() operates on a copy, not the shared pool', () async {
+    final r = RankingService(await _db());
+
+    // First call rakutan, which filters out reviewCount < 3 (removes 'quiet|d' with 1)
+    await r.ranking(RankingKind.rakutan);
+
+    // Then call mostReviewed - should still include 'quiet|d' (reviewCount: 1 >= 1)
+    final mostReviewed = await r.ranking(RankingKind.mostReviewed);
+    expect(mostReviewed.map((s) => s.courseKey), contains('quiet|d'),
+        reason: 'quiet|d should still be in mostReviewed even after rakutan filtered it');
   });
 }
