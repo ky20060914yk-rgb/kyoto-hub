@@ -238,12 +238,20 @@ service cloud.firestore {
     // would silently zero a course's history. (This is *not* the `transactions`
     // tier: `transactions` forbids update as well as delete; here update is the
     // whole point of the collection.)
+    // Create requires full shape (reviewCount/ratingSum). Update allows counter-only
+    // writes (e.g., bumpPostCount with merge: true) that omit review fields entirely.
     match /course_stats/{courseKey} {
       allow read: if kuDomain();
-      allow create, update: if kuVerified()
+      allow create: if kuVerified()
         && request.resource.data.university_id == 'kyoto_u'
         && request.resource.data.reviewCount is int && request.resource.data.reviewCount >= 0
         && request.resource.data.ratingSum is int && request.resource.data.ratingSum >= 0;
+      allow update: if kuVerified()
+        && request.resource.data.university_id == 'kyoto_u'
+        && request.resource.data.get('reviewCount', 0) is int
+        && request.resource.data.get('reviewCount', 0) >= 0
+        && request.resource.data.get('ratingSum', 0) is int
+        && request.resource.data.get('ratingSum', 0) >= 0;
       allow delete: if false;
     }
 

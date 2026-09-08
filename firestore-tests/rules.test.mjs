@@ -885,6 +885,24 @@ test('course_stats writes are shape-guarded and deletion is forbidden', async ()
   await assertFails(deleteDoc(doc(asKu2(), 'course_stats/ck')));
 });
 
+// Counter-only writes (e.g., bumpPostCount) must succeed when omitting reviewCount/ratingSum,
+// so long as they include university_id and the write is a merge update.
+test('course_stats: counter-only merge writes succeed without reviewCount/ratingSum', async () => {
+  const ku = asKu();
+  // First, create the doc with full shape (as the review path would).
+  await assertSucceeds(setDoc(doc(ku, 'course_stats/ck_counter'), {
+    courseKey: 'ck_counter', university_id: 'kyoto_u', reviewCount: 0, ratingSum: 0,
+  }));
+  // Then, bumpPostCount writes only counter fields with merge: true.
+  await assertSucceeds(setDoc(doc(ku, 'course_stats/ck_counter'), {
+    courseKey: 'ck_counter', university_id: 'kyoto_u', pastExamPostCount: 1,
+  }, { merge: true }));
+  // Another counter field update, same pattern.
+  await assertSucceeds(setDoc(doc(ku, 'course_stats/ck_counter'), {
+    resourcePostCount: 3,
+  }, { merge: true }));
+});
+
 // --- queries -----------------------------------------------------------------
 // Rules gate queries, they do not filter them: a listen is allowed only when the
 // rule can be satisfied for every document the query could return. These mirror

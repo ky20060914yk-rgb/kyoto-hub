@@ -60,7 +60,7 @@ class CourseStats {
 
   static CourseStats empty(String courseKey) => CourseStats(
         courseKey: courseKey,
-        universityId: '',
+        universityId: 'kyoto_u',
         rakutanCounts: const {'raku': 0, 'futsu': 0, 'muzu': 0},
         attendanceCounts: const {'none': 0, 'light': 0, 'heavy': 0},
         gradingCounts: const {
