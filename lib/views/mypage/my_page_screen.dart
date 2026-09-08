@@ -44,6 +44,10 @@ class _MyPageScreenState extends State<MyPageScreen> {
         child: StreamBuilder<List<Review>>(
           stream: _myReviewsStream,
           builder: (context, snapshot) {
+            // I1: `data ?? []` folds a stream error into an honest-looking zero
+            // — 「レビュー 0件」 and no badge — which reads as "your contributions
+            // were wiped", not "we could not load them". Name the failure.
+            if (snapshot.hasError) return const _ContributionError();
             final list = snapshot.data ?? const <Review>[];
             final reviews = list.length;
             final helpful = list.fold<int>(0, (a, r) => a + r.helpfulCount);
@@ -634,6 +638,54 @@ class _MyPageScreenState extends State<MyPageScreen> {
           ],
         ),
       ),
+    );
+  }
+}
+
+/// I1: what the 貢献 card renders when `streamMyReviews` fails.
+///
+/// Distinct from the zero state on purpose — 「レビュー 0件」 with no badge is
+/// indistinguishable from "your contributions are gone", so a load failure has
+/// to say so. The stream is created once in `initState`, so the honest recovery
+/// is reopening the page rather than an in-place retry button.
+class _ContributionError extends StatelessWidget {
+  const _ContributionError();
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const Text(
+          'あなたの貢献',
+          style: TextStyle(
+              fontSize: 16,
+              fontWeight: FontWeight.bold,
+              color: Color(0xFF1E293B)),
+        ),
+        const SizedBox(height: 12),
+        Row(
+          children: [
+            const Icon(Icons.cloud_off_rounded, size: 18, color: Color(0xFFCBD5E1)),
+            const SizedBox(width: 8),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: const [
+                  Text('読み込みに失敗しました',
+                      style: TextStyle(
+                          fontSize: 13,
+                          fontWeight: FontWeight.bold,
+                          color: Color(0xFF64748B))),
+                  SizedBox(height: 2),
+                  Text('通信環境を確認して、画面を開き直してください。',
+                      style: TextStyle(fontSize: 11, color: Color(0xFF94A3B8))),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ],
     );
   }
 }

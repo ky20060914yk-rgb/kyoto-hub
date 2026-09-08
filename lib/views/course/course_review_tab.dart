@@ -73,6 +73,13 @@ class _CourseReviewTabState extends State<CourseReviewTab> {
             return StreamBuilder<List<Review>>(
               stream: _reviews$,
               builder: (context, snap) {
+                // I1: an error must never degrade into 「まだレビューがありません」 —
+                // that invites the reader to write "the first" review on a
+                // course that may already have many. Only the LIST stream is
+                // fatal here; if `_mine$` alone fails the list is still true, it
+                // just loses the "yours pinned to the top" ordering, and the
+                // write button below reports that failure itself.
+                if (snap.hasError) return const _InlineError();
                 if (snap.connectionState == ConnectionState.waiting) {
                   return const Padding(
                     padding: EdgeInsets.symmetric(vertical: 32),
@@ -133,6 +140,10 @@ class _SummaryCard extends StatelessWidget {
     return StreamBuilder<CourseStats>(
       stream: stats$,
       builder: (context, snap) {
+        // I1: BEFORE the null-as-loading branch. On a stream error `data` stays
+        // null forever, so without this the card spins for the rest of the
+        // session.
+        if (snap.hasError) return const _InlineError();
         final stats = snap.data;
         return _CardShell(
           child: stats == null
@@ -355,6 +366,10 @@ class _WriteButton extends StatelessWidget {
     return StreamBuilder<Review?>(
       stream: mine$,
       builder: (context, snap) {
+        // I1: `null` legitimately means "no review yet" on this stream, so an
+        // error would otherwise render 「レビューを書く」 to someone who already has
+        // one — and the write would then land as an unintended overwrite.
+        if (snap.hasError) return const _InlineError(compact: true);
         final mine = snap.data;
         if (mine == null) {
           return SizedBox(
@@ -504,23 +519,45 @@ class _ReviewCard extends StatelessWidget {
                       tapTargetSize: MaterialTapTargetSize.shrinkWrap,
                     ),
                   ),
-                TextButton.icon(
-                  onPressed: (alreadyHelpful || !canHelpful) ? null : onHelpful,
-                  icon: Icon(
-                    alreadyHelpful
-                        ? Icons.thumb_up
-                        : Icons.thumb_up_outlined,
-                    size: 14,
-                  ),
-                  label: Text('${review.helpfulCount}',
-                      style: const TextStyle(fontSize: 12)),
-                  style: TextButton.styleFrom(
-                    foregroundColor: alreadyHelpful ? _brand : _muted,
+                // I3: the author may not vote for their own review — `helpfulBy`
+                // feeds the マイページ 貢献 badge, so a self-vote is self-inflation.
+                // The durable half of this is the `reviews` update rule, which
+                // excludes the author from the append-only branch; here the
+                // count is still shown, just as an inert label rather than a
+                // button that would fail with PERMISSION_DENIED.
+                if (isMine)
+                  Padding(
                     padding: const EdgeInsets.symmetric(horizontal: 6),
-                    minimumSize: Size.zero,
-                    tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        const Icon(Icons.thumb_up_outlined,
+                            size: 14, color: _muted),
+                        const SizedBox(width: 4),
+                        Text('${review.helpfulCount}',
+                            style: const TextStyle(fontSize: 12, color: _muted)),
+                      ],
+                    ),
+                  )
+                else
+                  TextButton.icon(
+                    onPressed:
+                        (alreadyHelpful || !canHelpful) ? null : onHelpful,
+                    icon: Icon(
+                      alreadyHelpful
+                          ? Icons.thumb_up
+                          : Icons.thumb_up_outlined,
+                      size: 14,
+                    ),
+                    label: Text('${review.helpfulCount}',
+                        style: const TextStyle(fontSize: 12)),
+                    style: TextButton.styleFrom(
+                      foregroundColor: alreadyHelpful ? _brand : _muted,
+                      padding: const EdgeInsets.symmetric(horizontal: 6),
+                      minimumSize: Size.zero,
+                      tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                    ),
                   ),
-                ),
               ],
             ),
           ],
@@ -568,6 +605,70 @@ class _CardShell extends StatelessWidget {
         border: Border.all(color: _border),
       ),
       child: child,
+    );
+  }
+}
+
+/// I1: what a review [StreamBuilder] renders when its stream FAILS.
+///
+/// Every stream on this tab used to fold an error into a benign state — the
+/// summary card treated `data == null` as "still loading" and span a spinner
+/// forever, and the list rendered 「まだレビューがありません」, telling the reader to
+/// write the first review on a course that may already have dozens. A stream
+/// error here is ordinary (offline, a rules change, a missing index), so it has
+/// to be *named*, not disguised as an empty or pending state.
+///
+/// There is no retry button: the streams are created once in [initState]
+/// (ruling P5), so the honest recovery is reopening the screen — which is what
+/// the hint says.
+class _InlineError extends StatelessWidget {
+  const _InlineError({this.compact = false});
+
+  final bool compact;
+
+  @override
+  Widget build(BuildContext context) {
+    final row = Row(
+      mainAxisSize: MainAxisSize.min,
+      mainAxisAlignment: MainAxisAlignment.center,
+      children: [
+        const Icon(Icons.cloud_off_rounded, size: 18, color: Color(0xFFCBD5E1)),
+        const SizedBox(width: 8),
+        Flexible(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Text(
+                '読み込みに失敗しました',
+                style: TextStyle(
+                    fontSize: 13,
+                    fontWeight: FontWeight.bold,
+                    color: Color(0xFF64748B)),
+              ),
+              if (!compact) ...[
+                const SizedBox(height: 2),
+                const Text(
+                  '通信環境を確認して、画面を開き直してください。',
+                  style: TextStyle(fontSize: 11, color: Color(0xFF94A3B8)),
+                ),
+              ],
+            ],
+          ),
+        ),
+      ],
+    );
+    if (compact) {
+      return Padding(
+        padding: const EdgeInsets.symmetric(vertical: 10),
+        child: row,
+      );
+    }
+    return _CardShell(
+      child: Padding(
+        padding: const EdgeInsets.symmetric(vertical: 12),
+        child: Center(child: row),
+      ),
     );
   }
 }
