@@ -4,6 +4,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'firebase_options.dart';
 import 'repositories/course_repository.dart';
 import 'services/app_store.dart';
+import 'services/review_service.dart';
 import 'views/auth/signup_screen.dart';
 import 'views/navigation_root_screen.dart';
 
@@ -29,7 +30,10 @@ class KyotoExamHubApp extends StatefulWidget {
 }
 
 class _KyotoExamHubAppState extends State<KyotoExamHubApp> {
-  final AppStore _store = AppStore(CourseRepository(FirebaseFirestore.instance));
+  final AppStore _store = AppStore(
+    CourseRepository(FirebaseFirestore.instance),
+    ReviewService(FirebaseFirestore.instance),
+  );
 
   @override
   Widget build(BuildContext context) {

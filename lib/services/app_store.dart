@@ -10,8 +10,10 @@ import '../models/textbook_request.dart';
 import '../models/talk_room.dart';
 import '../models/transaction.dart';
 import '../models/inquiry.dart';
+import '../models/review.dart';
 import '../repositories/course_repository.dart';
 import 'firestore_service.dart';
+import 'review_service.dart';
 import '../firebase_options.dart';
 import '../utils/download_helper.dart';
 import 'package:firebase_storage/firebase_storage.dart' as fb_storage;
@@ -19,6 +21,9 @@ import 'package:firebase_storage/firebase_storage.dart' as fb_storage;
 class AppStore extends ChangeNotifier {
   /// Course catalog, backed by the Firestore `courses` collection.
   final CourseRepository courses;
+
+  /// Firestore data layer for the review layer (Plan A).
+  final ReviewService reviews;
 
   final FirestoreService _firestore = FirestoreService();
   final fb_auth.FirebaseAuth _firebaseAuth = fb_auth.FirebaseAuth.instance;
@@ -42,7 +47,7 @@ class AppStore extends ChangeNotifier {
     notifyListeners();
   }
 
-  AppStore(this.courses) {
+  AppStore(this.courses, this.reviews) {
     // _initSampleData(); // Commented out for production release
     _initFirebaseSync();
   }
@@ -1000,6 +1005,89 @@ class AppStore extends ChangeNotifier {
     lastNoticeMessage = category == 'report'
         ? '通報を受け付けました。運営にて確認いたします。'
         : 'お問い合わせを送信しました。運営からの連絡をお待ちください。';
+    notifyListeners();
+  }
+
+  // --- Review layer (Plan A) -------------------------------------------------
+
+  /// Create or edit the signed-in user's review for a course. Returns whether
+  /// the write landed; on failure [lastNoticeMessage] carries the reason.
+  Future<bool> submitReview({
+    required String courseKey,
+    required String courseName,
+    required int rating,
+    required Rakutan rakutan,
+    required Attendance attendance,
+    required GradingStyle grading,
+    required PastExamUsefulness pastExam,
+    required BringIn bringIn,
+    required String comment,
+    String? termTaken,
+    String? gradeTaken,
+  }) async {
+    final user = currentUser;
+    if (user == null) return false;
+    if (!user.isVerified) {
+      lastNoticeMessage = 'メール認証の完了後にレビューを投稿できます。';
+      notifyListeners();
+      return false;
+    }
+    final existing = await reviews.getMyReview(courseKey, user.uid);
+    final now = DateTime.now();
+    final review = Review(
+      id: Review.docId(courseKey, user.uid),
+      courseKey: courseKey,
+      courseName: courseName,
+      authorId: user.uid,
+      authorName: user.displayName,
+      rating: rating,
+      rakutan: rakutan,
+      attendance: attendance,
+      grading: grading,
+      pastExam: pastExam,
+      bringIn: bringIn,
+      comment: comment.trim(),
+      termTaken: termTaken,
+      gradeTaken: gradeTaken,
+      helpfulBy: existing?.helpfulBy ?? const [],
+      createdAt: existing?.createdAt ?? now,
+      updatedAt: now,
+    );
+    try {
+      await reviews.submitReview(review);
+      lastNoticeMessage =
+          existing == null ? 'レビューを投稿しました！' : 'レビューを更新しました。';
+      notifyListeners();
+      return true;
+    } catch (e) {
+      lastNoticeMessage = 'レビューの保存に失敗しました。通信環境を確認してください。';
+      notifyListeners();
+      return false;
+    }
+  }
+
+  /// Remove the signed-in user's review for [courseKey], if any.
+  Future<void> deleteMyReview(String courseKey) async {
+    final user = currentUser;
+    if (user == null) return;
+    final existing = await reviews.getMyReview(courseKey, user.uid);
+    if (existing == null) return;
+    try {
+      await reviews.deleteReview(existing);
+      lastNoticeMessage = 'レビューを削除しました。';
+    } catch (_) {
+      lastNoticeMessage = 'レビューの削除に失敗しました。';
+    }
+    notifyListeners();
+  }
+
+  /// Mark a review as helpful (best-effort; idempotent in [ReviewService]).
+  Future<void> markReviewHelpful(String reviewId) async {
+    final user = currentUser;
+    if (user == null || !user.isVerified) return;
+    try {
+      await reviews.markHelpful(reviewId: reviewId, uid: user.uid);
+    } catch (_) {/* best-effort */}
     notifyListeners();
   }
 
