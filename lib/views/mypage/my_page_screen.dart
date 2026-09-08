@@ -5,7 +5,9 @@ import '../../services/app_store.dart';
 import '../../models/post.dart';
 import '../../models/review.dart';
 import '../auth/signup_screen.dart';
+import '../contact/contact_screen.dart';
 import '../course/review_form_sheet.dart';
+import '../textbook/textbook_lending_screen.dart';
 import '../timetable/timetable_registration_screen.dart';
 
 class MyPageScreen extends StatefulWidget {
@@ -635,6 +637,43 @@ class _MyPageScreenState extends State<MyPageScreen> {
                   );
                 },
               ),
+            const SizedBox(height: 24),
+
+            // Secondary features kept reachable without a dedicated bottom-nav tab
+            // (Phase 1: nav is さがす / 時間割 / マイページ).
+            const Text('その他', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Color(0xFF1E293B))),
+            const SizedBox(height: 10),
+            Card(
+              elevation: 0,
+              color: Colors.white,
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(12),
+                side: const BorderSide(color: Color(0xFFE2E8F0)),
+              ),
+              child: Column(
+                children: [
+                  ListTile(
+                    leading: const Icon(Icons.help_outline_rounded, color: Color(0xFF0F4C81)),
+                    title: const Text('お問い合わせ・不具合報告', style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600, color: Color(0xFF1E293B))),
+                    trailing: const Icon(Icons.chevron_right, color: Color(0xFF94A3B8)),
+                    onTap: () => Navigator.push(
+                      context,
+                      MaterialPageRoute(builder: (_) => ContactScreen(store: widget.store)),
+                    ),
+                  ),
+                  const Divider(height: 1, color: Color(0xFFE2E8F0)),
+                  ListTile(
+                    leading: const Icon(Icons.menu_book_outlined, color: Color(0xFF0F4C81)),
+                    title: const Text('参考書の貸し借り', style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600, color: Color(0xFF1E293B))),
+                    trailing: const Icon(Icons.chevron_right, color: Color(0xFF94A3B8)),
+                    onTap: () => Navigator.push(
+                      context,
+                      MaterialPageRoute(builder: (_) => TextbookLendingScreen(store: widget.store)),
+                    ),
+                  ),
+                ],
+              ),
+            ),
           ],
         ),
       ),
