@@ -127,6 +127,38 @@ void main() {
     expect(ok.resourcePostCount, 2);
   });
 
+  test('score is stored, equals rakutanScore.round(), and survives toMap/fromMap', () {
+    var s = CourseStats.empty('ck');
+    expect(s.score, 50);
+    s = s.applyReview(_r('u1', rating: 5, rakutan: Rakutan.raku), delta: 1);
+    expect(s.score, s.rakutanScore.round());
+    expect(s.score, greaterThan(50));
+    final back = CourseStats.fromMap(s.toMap());
+    expect(back.score, s.score);
+  });
+
+  test('score recomputes when a review is removed', () {
+    var s = CourseStats.empty('ck')
+        .applyReview(_r('u1', rating: 5, rakutan: Rakutan.raku), delta: 1)
+        .applyReview(_r('u2', rating: 1, rakutan: Rakutan.muzu), delta: 1);
+    final twoReviewScore = s.score;
+    s = s.applyReview(_r('u2', rating: 1, rakutan: Rakutan.muzu), delta: -1);
+    expect(s.score, isNot(twoReviewScore));
+    expect(s.score, s.rakutanScore.round());
+  });
+
+  // I3 + M9: `score` is a 0..100 snapshot of `rakutanScore`. The `course_stats`
+  // rules do NOT shape-guard `score`, so a crafted write must be clamped on
+  // read (an unbounded value pins a course to #1 in 楽単ランキング). Non-numeric
+  // and non-finite values fall back to the neutral 50, not 0.
+  test('fromMap clamps score into 0..100 and falls back to 50', () {
+    expect(CourseStats.fromMap({'score': 999999}).score, 100); // upper clamp
+    expect(CourseStats.fromMap({'score': -5}).score, 0); // lower clamp
+    expect(CourseStats.fromMap({'score': 'abc'}).score, 50); // non-numeric
+    expect(CourseStats.fromMap({'score': double.nan}).score, 50); // non-finite
+    expect(CourseStats.fromMap({}).score, 50); // absent -> neutral (P-B2)
+  });
+
   // Merge safety: under `set(merge: true)` an explicit null is a write that
   // erases the stored value, so a stats doc with no timestamp must omit the key
   // rather than clobber a `lastReviewAt` a concurrent write recorded.

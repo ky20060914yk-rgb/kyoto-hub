@@ -14,6 +14,7 @@ import '../models/review.dart';
 import '../repositories/course_repository.dart';
 import 'firestore_service.dart';
 import 'review_service.dart';
+import 'ranking_service.dart';
 import '../firebase_options.dart';
 import '../utils/download_helper.dart';
 import 'package:firebase_storage/firebase_storage.dart' as fb_storage;
@@ -24,6 +25,9 @@ class AppStore extends ChangeNotifier {
 
   /// Firestore data layer for the review layer (Plan A).
   final ReviewService reviews;
+
+  /// Client-side rankings over course_stats pool.
+  final RankingService ranking;
 
   final FirestoreService _firestore = FirestoreService();
   final fb_auth.FirebaseAuth _firebaseAuth = fb_auth.FirebaseAuth.instance;
@@ -47,7 +51,7 @@ class AppStore extends ChangeNotifier {
     notifyListeners();
   }
 
-  AppStore(this.courses, this.reviews) {
+  AppStore(this.courses, this.reviews, this.ranking) {
     // _initSampleData(); // Commented out for production release
     _initFirebaseSync();
   }

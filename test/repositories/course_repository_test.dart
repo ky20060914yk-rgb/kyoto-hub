@@ -250,4 +250,41 @@ void main() {
     await repo.warmUp();
     expect((await repo.forSlot('Mon', 2)).length, 2);
   });
+
+  test('byCourseKey returns a Subject for a known courseKey after warmUp', () async {
+    final repo = CourseRepository(await _seeded());
+    await repo.warmUp();
+    final s = repo.byCourseKey('微分積分学a|山田太郎');
+    expect(s, isNotNull);
+    expect(s!.courseKey, '微分積分学a|山田太郎');
+  });
+
+  test('byCourseKey returns null for an unknown courseKey and before warmUp', () async {
+    final repo = CourseRepository(await _seeded());
+    expect(repo.byCourseKey('nope|nobody'), isNull); // not warm yet
+    await repo.warmUp();
+    expect(repo.byCourseKey('nope|nobody'), isNull);
+  });
+
+  // M12 / P-B3: `_byCourseKey` is cleared alongside `_byId`/`_haystack`/
+  // `_missing` at the top of `_load`, so a reload never leaves a stale
+  // courseKey -> Subject mapping behind.
+  test('a reload clears _byCourseKey — no stale mapping survives', () async {
+    final db = await _seeded();
+    final repo = CourseRepository(db);
+    await repo.warmUp();
+    expect(repo.byCourseKey('微分積分学a|山田太郎'), isNotNull);
+
+    // The course is re-keyed in Firestore, then the catalog reloads.
+    await db.collection('courses').doc('c_1').set({
+      'id': 'c_1', 'courseKey': '微分積分学a|新任教員', 'name': '微分積分学A',
+      'faculty': '全学共通', 'lecturer': '新任 教員', 'dayOfWeek': 'Mon', 'period': 2,
+      'university_id': 'kyoto_u',
+    });
+    repo.resetForReload();
+    await repo.warmUp();
+
+    expect(repo.byCourseKey('微分積分学a|山田太郎'), isNull); // stale mapping gone
+    expect(repo.byCourseKey('微分積分学a|新任教員'), isNotNull); // new mapping present
+  });
 }

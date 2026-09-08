@@ -1,9 +1,8 @@
 import 'package:flutter/material.dart';
 import '../services/app_store.dart';
+import 'search/search_screen.dart';
 import 'home/home_screen.dart';
-import 'textbook/textbook_lending_screen.dart';
 import 'mypage/my_page_screen.dart';
-import 'contact/contact_screen.dart';
 
 class NavigationRootScreen extends StatefulWidget {
   final AppStore store;
@@ -16,7 +15,6 @@ class NavigationRootScreen extends StatefulWidget {
 
 class _NavigationRootScreenState extends State<NavigationRootScreen> {
   int _currentIndex = 0;
-  final GlobalKey<HomeScreenState> _homeKey = GlobalKey<HomeScreenState>();
   bool _isCheckingVerification = false;
 
   @override
@@ -41,10 +39,9 @@ class _NavigationRootScreenState extends State<NavigationRootScreen> {
     final isUnverified = user != null && !user.isVerified;
 
     final screens = [
-      HomeScreen(key: _homeKey, store: widget.store),
-      TextbookLendingScreen(store: widget.store),
+      SearchScreen(store: widget.store),
+      HomeScreen(store: widget.store),
       MyPageScreen(store: widget.store),
-      ContactScreen(store: widget.store),
     ];
 
     return Scaffold(
@@ -137,14 +134,7 @@ class _NavigationRootScreenState extends State<NavigationRootScreen> {
         ),
         child: BottomNavigationBar(
           currentIndex: _currentIndex,
-          onTap: (index) {
-            if (index == 0 && _currentIndex == 0) {
-              _homeKey.currentState?.resetSearch();
-            }
-            setState(() {
-              _currentIndex = index;
-            });
-          },
+          onTap: (index) => setState(() => _currentIndex = index),
           type: BottomNavigationBarType.fixed,
           backgroundColor: Colors.white,
           selectedItemColor: const Color(0xFF0F4C81),
@@ -153,24 +143,19 @@ class _NavigationRootScreenState extends State<NavigationRootScreen> {
           unselectedLabelStyle: const TextStyle(fontSize: 11),
           items: const [
             BottomNavigationBarItem(
-              icon: Icon(Icons.home_outlined),
-              activeIcon: Icon(Icons.home_rounded),
-              label: 'ホーム',
+              icon: Icon(Icons.search_outlined),
+              activeIcon: Icon(Icons.search_rounded),
+              label: 'さがす',
             ),
             BottomNavigationBarItem(
-              icon: Icon(Icons.menu_book_outlined),
-              activeIcon: Icon(Icons.menu_book_rounded),
-              label: '参考書',
+              icon: Icon(Icons.calendar_today_outlined),
+              activeIcon: Icon(Icons.calendar_today_rounded),
+              label: '時間割',
             ),
             BottomNavigationBarItem(
               icon: Icon(Icons.person_outline),
               activeIcon: Icon(Icons.person_rounded),
               label: 'マイページ',
-            ),
-            BottomNavigationBarItem(
-              icon: Icon(Icons.help_outline_rounded),
-              activeIcon: Icon(Icons.help_rounded),
-              label: 'お問い合わせ',
             ),
           ],
         ),

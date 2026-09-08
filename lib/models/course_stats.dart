@@ -30,6 +30,13 @@ class CourseStats {
   final int resourcePostCount; // # of testPrep + other posts
   final DateTime? lastReviewAt;
 
+  /// [rakutanScore] rounded to an int, snapshotted at the last [applyReview].
+  /// Stored so a Firestore ranking query can `orderBy('score', descending: true)`
+  /// (a getter cannot be indexed). `50` is the neutral value at 0 reviews,
+  /// matching [rakutanScore]. Left untouched by `bumpPostCount` — the score does
+  /// not depend on the post counts.
+  final int score;
+
   const CourseStats({
     required this.courseKey,
     this.universityId = 'kyoto_u',
@@ -43,6 +50,7 @@ class CourseStats {
     this.pastExamPostCount = 0,
     this.resourcePostCount = 0,
     this.lastReviewAt,
+    this.score = 50,
   });
 
   double get avgRating => reviewCount == 0 ? 0 : ratingSum / reviewCount;
@@ -84,6 +92,7 @@ class CourseStats {
           'not_useful': 0,
         },
         bringInCounts: const {'no': 0, 'yes': 0, 'na': 0},
+        score: 50,
       );
 
   /// Returns a new [CourseStats] with [review] added (`delta = 1`) or removed
@@ -102,7 +111,7 @@ class CourseStats {
   }
 
   CourseStats _apply(Review review, int delta) {
-    return CourseStats(
+    final next = CourseStats(
       courseKey: courseKey,
       universityId: universityId.isEmpty ? review.universityId : universityId,
       reviewCount: _clamp(reviewCount + delta),
@@ -116,7 +125,29 @@ class CourseStats {
       resourcePostCount: resourcePostCount,
       lastReviewAt: delta == 1 ? review.updatedAt : lastReviewAt,
     );
+    // The stored [score] is a rounded snapshot of the NEW instance's own
+    // live [rakutanScore] — so a ranking query stays in sync with the getter.
+    return next.copyWith(score: next.rakutanScore.round());
   }
+
+  /// Minimal copy — only [score] varies today (set by [_apply] after the new
+  /// aggregate is built, since [rakutanScore] can only be read off a finished
+  /// instance).
+  CourseStats copyWith({int? score}) => CourseStats(
+        courseKey: courseKey,
+        universityId: universityId,
+        reviewCount: reviewCount,
+        ratingSum: ratingSum,
+        rakutanCounts: rakutanCounts,
+        attendanceCounts: attendanceCounts,
+        gradingCounts: gradingCounts,
+        pastExamCounts: pastExamCounts,
+        bringInCounts: bringInCounts,
+        pastExamPostCount: pastExamPostCount,
+        resourcePostCount: resourcePostCount,
+        lastReviewAt: lastReviewAt,
+        score: score ?? this.score,
+      );
 
   static int _clamp(int v) => v < 0 ? 0 : v;
 
@@ -145,6 +176,9 @@ class CourseStats {
       // write that happens to carry no timestamp must omit the key rather than
       // clobber a `lastReviewAt` another write already recorded.
       if (lastReviewAt != null) 'lastReviewAt': lastReviewAt!.toIso8601String(),
+      // Rounded snapshot of `rakutanScore`, written on every review transaction
+      // so a ranking query can `orderBy('score', descending: true)`.
+      'score': score,
     };
   }
 
@@ -177,8 +211,18 @@ class CourseStats {
       // for `FieldValue.serverTimestamp()` here must convert on read (or keep
       // writing ISO strings) or this field will read as null forever.
       lastReviewAt: DateTime.tryParse((map['lastReviewAt'] ?? '').toString()),
+      score: _score(map['score']),
     );
   }
+
+  /// [score] is a 0..100 snapshot of [rakutanScore]. Absent or non-numeric ->
+  /// 50 (neutral, matches [rakutanScore] at 0 reviews; RULING P-B2). A stored
+  /// value outside 0..100 is clamped: the `course_stats` rules do NOT
+  /// shape-guard `score`, so a crafted write could otherwise pin a course to
+  /// the top of 楽単ランキング (badge overflow, and 科目詳細 — which shows the
+  /// honest `rakutanScore.round()` — would visibly disagree).
+  static int _score(dynamic raw) =>
+      (raw is num && raw.isFinite) ? raw.toInt().clamp(0, 100) : 50;
 
   /// A stored counter that is not a number at all (a string, a map, absent)
   /// reads as 0 rather than raising. `as num?` alone would still throw on a
