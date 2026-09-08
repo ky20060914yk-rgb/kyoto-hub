@@ -191,8 +191,11 @@ beforeEach(async () => {
     await setDoc(doc(db, 'reviews/ck2_u1'), reviewDoc({
       id: 'ck2_u1', courseKey: 'ck2', helpfulBy: ['u2'],
     }));
+    // The real `CourseStats.toMap()` shape: `reviewCount` / `ratingSum` are the
+    // two scalar counters the rule shape-guards, and every merge write has to
+    // leave the *merged* document satisfying that guard.
     await setDoc(doc(db, 'course_stats/ck'), {
-      courseKey: 'ck', university_id: 'kyoto_u', reviewCount: 1, avgRating: 3.0,
+      courseKey: 'ck', university_id: 'kyoto_u', reviewCount: 1, ratingSum: 3,
     });
     await setDoc(doc(db, 'secret_admin_stuff/s_1'), { university_id: 'kyoto_u' });
   });
@@ -760,11 +763,43 @@ test('review create is rejected for another university', async () => {
     reviewDoc({ id: 'ou_u1', courseKey: 'ou', university_id: 'osaka_u' })));
 });
 
+// I1: `helpfulBy` is a *benefit* to the review's author, so unlike `posts.reports`
+// it must start empty. Without the create-time pin an author could ship a review
+// with a pre-stuffed array, or delete-and-recreate to reset one they had already
+// been voted on — the append-only update branch alone does not cover either.
+test('review create must pin helpfulBy to the empty list', async () => {
+  const db = asKu();
+  await assertFails(setDoc(doc(db, 'reviews/hb1_u1'),
+    reviewDoc({ id: 'hb1_u1', courseKey: 'hb1', helpfulBy: ['x'] })));
+  await assertFails(setDoc(doc(db, 'reviews/hb2_u1'),
+    reviewDoc({ id: 'hb2_u1', courseKey: 'hb2', helpfulBy: ['u1', 'a', 'b'] })));
+  // A non-list is refused too (the reader would otherwise have to survive it).
+  await assertFails(setDoc(doc(db, 'reviews/hb3_u1'),
+    reviewDoc({ id: 'hb3_u1', courseKey: 'hb3', helpfulBy: 'nope' })));
+  // The honest shape still goes through.
+  await assertSucceeds(setDoc(doc(db, 'reviews/hb4_u1'),
+    reviewDoc({ id: 'hb4_u1', courseKey: 'hb4', helpfulBy: [] })));
+});
+
 test('author edits their own review; a non-author cannot edit its body', async () => {
   await assertSucceeds(updateDoc(doc(asKu(), 'reviews/ck_u1'), { rating: 5, comment: 'edit' }));
   const other = asKu2();
   await assertFails(updateDoc(doc(other, 'reviews/ck_u1'), { comment: 'hax' }));
   await assertFails(updateDoc(doc(other, 'reviews/ck_u1'), { helpfulBy: ['u2'], comment: 'hax' }));
+});
+
+// I2: the author-edit branch re-runs the create-time `rating` check and pins
+// `university_id`. Validating those only at create would let the author walk an
+// honest 1..5 review up to `rating: 99` (or off to another university) one edit
+// later — the same reason the `posts` author branch pins `university_id` (M5).
+test('an author edit re-validates rating and cannot change university_id', async () => {
+  const db = asKu();
+  await assertFails(updateDoc(doc(db, 'reviews/ck_u1'), { rating: 99 }));
+  await assertFails(updateDoc(doc(db, 'reviews/ck_u1'), { rating: 0 }));
+  await assertFails(updateDoc(doc(db, 'reviews/ck_u1'), { rating: 'x' }));
+  await assertFails(updateDoc(doc(db, 'reviews/ck_u1'), { rating: 4.5 }));
+  await assertFails(updateDoc(doc(db, 'reviews/ck_u1'), { university_id: 'osaka_u' }));
+  await assertSucceeds(updateDoc(doc(db, 'reviews/ck_u1'), { rating: 5 }));
 });
 
 test('an author cannot reassign their review or move its courseKey', async () => {
@@ -790,10 +825,14 @@ test('an author cannot stuff helpfulBy on their own review', async () => {
 test('a non-author appends exactly their own uid to helpfulBy, once', async () => {
   const db = asKu2();
   await assertSucceeds(updateDoc(doc(db, 'reviews/ck_u1'), { helpfulBy: ['u2'] }));
-  // Someone else's uid, several at a time, or a shrink are all refused.
+  // `ck2_u1` already carries u2's vote, so every further write BY u2 is refused
+  // by the one-vote-per-account clause (`!old.hasAny([uid])`) — whether it grows
+  // the array, leaves it alone, or shrinks it.
   await assertFails(updateDoc(doc(db, 'reviews/ck2_u1'), { helpfulBy: ['u2', 'u9'] }));
   await assertFails(updateDoc(doc(db, 'reviews/ck2_u1'), { helpfulBy: ['u2'] }));
   await assertFails(updateDoc(doc(db, 'reviews/ck2_u1'), { helpfulBy: [] }));
+  // ...and u1, who has NOT voted, still cannot append someone else's uid: the
+  // array grew by one but the new element is `u9`, not the caller.
   await assertFails(updateDoc(doc(asKu(), 'reviews/ck2_u1'), { helpfulBy: ['u2', 'u9'] }));
 });
 
@@ -814,13 +853,36 @@ test('course_stats: KU-domain reads, KU-verified writes, outsider denied both', 
   const ku = asKu();
   await assertSucceeds(getDoc(doc(ku, 'course_stats/ck')));
   await assertSucceeds(setDoc(doc(ku, 'course_stats/ck'), {
-    courseKey: 'ck', university_id: 'kyoto_u', reviewCount: 2,
+    courseKey: 'ck', university_id: 'kyoto_u', reviewCount: 2, ratingSum: 7,
   }, { merge: true }));
   await assertSucceeds(getDoc(doc(asKuUnverified(), 'course_stats/ck')));
   await assertFails(setDoc(doc(asKuUnverified(), 'course_stats/ck'), { reviewCount: 9 }, { merge: true }));
   const out = asOutsider();
   await assertFails(getDoc(doc(out, 'course_stats/ck')));
   await assertFails(setDoc(doc(out, 'course_stats/ck'), { reviewCount: 999 }, { merge: true }));
+});
+
+// I4: the write is trust-based on *values*, but not on *shape*. A crafted
+// aggregate must not be able to hand a reader a negative or non-numeric counter
+// (Task 7's ranking divides by `reviewCount`), nor move the doc to another
+// university, nor disappear — an aggregate has no owner entitled to delete it.
+test('course_stats writes are shape-guarded and deletion is forbidden', async () => {
+  const ku = asKu();
+  await assertFails(setDoc(doc(ku, 'course_stats/ck'), { reviewCount: -1 }, { merge: true }));
+  await assertFails(setDoc(doc(ku, 'course_stats/ck'), { ratingSum: -5 }, { merge: true }));
+  await assertFails(setDoc(doc(ku, 'course_stats/ck'), { reviewCount: 'many' }, { merge: true }));
+  await assertFails(setDoc(doc(ku, 'course_stats/ck'), { ratingSum: 3.5 }, { merge: true }));
+  await assertFails(setDoc(doc(ku, 'course_stats/ck'), { university_id: 'osaka_u' }, { merge: true }));
+  // A create that omits the guarded counters is refused as well.
+  await assertFails(setDoc(doc(ku, 'course_stats/fresh'), {
+    courseKey: 'fresh', university_id: 'kyoto_u',
+  }));
+  await assertSucceeds(setDoc(doc(ku, 'course_stats/fresh'), {
+    courseKey: 'fresh', university_id: 'kyoto_u', reviewCount: 0, ratingSum: 0,
+  }));
+  // Nobody deletes an aggregate — not even a verified KU account.
+  await assertFails(deleteDoc(doc(ku, 'course_stats/ck')));
+  await assertFails(deleteDoc(doc(asKu2(), 'course_stats/ck')));
 });
 
 // --- queries -----------------------------------------------------------------
