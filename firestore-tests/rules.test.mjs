@@ -99,6 +99,37 @@ const fullTextbookRequest = (over = {}) => ({
   ...over,
 });
 
+// A full, valid `Review.toMap()` document. The enum fields carry the real
+// `.value` strings the Dart model emits (rakutan/attendance/grading/pastExam/
+// bringIn), so a fixture can never pass a shape the client could not produce.
+// C1: `courseSlug` is `courseKey` with '/' -> '%2F' and '%' -> '%25' (the client
+// runs this in `Review.slug`; rules cannot compute it, so it is stored). The
+// create rule pins the doc id to `courseSlug + '_' + uid`, so a fixture that
+// overrides `courseKey` gets a matching slug by default.
+const slug = (s) => String(s).replace(/%/g, '%25').replace(/\//g, '%2F');
+const reviewDoc = (over = {}) => ({
+  id: 'ck_u1',
+  courseKey: 'ck',
+  courseSlug: slug(over.courseKey ?? 'ck'),
+  courseName: '線形代数',
+  university_id: 'kyoto_u',
+  authorId: 'u1',
+  authorName: '匿名京大生',
+  rating: 3,
+  rakutan: 'raku',
+  attendance: 'light',
+  grading: 'exam_report',
+  pastExam: 'similar',
+  bringIn: 'yes',
+  comment: '',
+  termTaken: '2025前期',
+  gradeTaken: 'A',
+  helpfulBy: [],
+  createdAt: '2026-09-01T00:00:00.000',
+  updatedAt: '2026-09-01T00:00:00.000',
+  ...over,
+});
+
 // Seed baseline documents with rules bypassed so read/update tests exercise the
 // rule under test rather than a missing-document condition.
 beforeEach(async () => {
@@ -159,6 +190,19 @@ beforeEach(async () => {
       userId: 'u1', university_id: 'kyoto_u', amount: 5, type: 'upload_reward',
     });
     await setDoc(doc(db, 'inquiries/i_1'), { userId: 'u1', university_id: 'kyoto_u', body: 'hi' });
+    // u1's review of course `ck`; the document id encodes both (`<courseKey>_<authorId>`).
+    await setDoc(doc(db, 'reviews/ck_u1'), reviewDoc());
+    // The "already helped by u2" fixture: the append-only carve-out means this
+    // state can only be reached by u2 itself, and u2 may not append again.
+    await setDoc(doc(db, 'reviews/ck2_u1'), reviewDoc({
+      id: 'ck2_u1', courseKey: 'ck2', helpfulBy: ['u2'],
+    }));
+    // The real `CourseStats.toMap()` shape: `reviewCount` / `ratingSum` are the
+    // two scalar counters the rule shape-guards, and every merge write has to
+    // leave the *merged* document satisfying that guard.
+    await setDoc(doc(db, 'course_stats/ck'), {
+      courseKey: 'ck', university_id: 'kyoto_u', reviewCount: 1, ratingSum: 3,
+    });
     await setDoc(doc(db, 'secret_admin_stuff/s_1'), { university_id: 'kyoto_u' });
   });
 });
@@ -659,6 +703,280 @@ test('inquiries are write-only for signed-in users and readable by nobody', asyn
   await assertFails(setDoc(doc(asAnon(), 'inquiries/i_anon'), { body: 'spam' }));
   await assertFails(updateDoc(doc(asKu(), 'inquiries/i_1'), { body: 'edited' }));
   await assertFails(deleteDoc(doc(asKu(), 'inquiries/i_1')));
+});
+
+// --- reviews -----------------------------------------------------------------
+//
+// One review per (course, author): the document id is `<courseKey>_<authorId>`,
+// so the id itself is the uniqueness constraint and the create rule pins it to
+// the caller's uid. Reads are KU-domain; writes are the author's, verified.
+
+test('reviews: an unverified KU address can still read a review (I3)', async () => {
+  await assertSucceeds(getDoc(doc(asKuUnverified(), 'reviews/ck_u1')));
+});
+
+test('reviews: an outsider Firebase account cannot read (I3)', async () => {
+  await assertFails(getDoc(doc(asOutsider(), 'reviews/ck_u1')));
+  await assertFails(getDoc(doc(asAnon(), 'reviews/ck_u1')));
+});
+
+test('verified KU user creates their own review (doc id ends _<uid>)', async () => {
+  await assertSucceeds(setDoc(doc(asKu(), 'reviews/other_u1'),
+    reviewDoc({ id: 'other_u1', courseKey: 'other', authorId: 'u1' })));
+});
+
+test('cannot create a review whose doc id is not <courseKey>_<own uid>', async () => {
+  const db = asKu();
+  // Someone else's uid in the id.
+  await assertFails(setDoc(doc(db, 'reviews/other_u2'),
+    reviewDoc({ id: 'other_u2', courseKey: 'other', authorId: 'u1' })));
+  // The id does not encode the courseKey it carries — that would let one author
+  // hold several documents for the same course.
+  await assertFails(setDoc(doc(db, 'reviews/somethingelse_u1'),
+    reviewDoc({ id: 'somethingelse_u1', courseKey: 'other', authorId: 'u1' })));
+});
+
+test('cannot create a review with authorId != uid', async () => {
+  await assertFails(setDoc(doc(asKu(), 'reviews/other_u1'),
+    reviewDoc({ id: 'other_u1', courseKey: 'other', authorId: 'u2' })));
+});
+
+test('unverified KU user cannot create a review', async () => {
+  await assertFails(setDoc(doc(asKuUnverified(), 'reviews/other_u2'),
+    reviewDoc({ id: 'other_u2', courseKey: 'other', authorId: 'u2' })));
+  await assertFails(setDoc(doc(asOutsider(), 'reviews/other_u3'),
+    reviewDoc({ id: 'other_u3', courseKey: 'other', authorId: 'u3' })));
+});
+
+test('review create is rejected for an out-of-range rating', async () => {
+  const db = asKu();
+  await assertFails(setDoc(doc(db, 'reviews/r6_u1'),
+    reviewDoc({ id: 'r6_u1', courseKey: 'r6', rating: 6 })));
+  await assertFails(setDoc(doc(db, 'reviews/r0_u1'),
+    reviewDoc({ id: 'r0_u1', courseKey: 'r0', rating: 0 })));
+});
+
+test('review create is rejected when `rating` is not an int', async () => {
+  const db = asKu();
+  await assertFails(setDoc(doc(db, 'reviews/rs_u1'),
+    reviewDoc({ id: 'rs_u1', courseKey: 'rs', rating: 'x' })));
+  await assertFails(setDoc(doc(db, 'reviews/rf_u1'),
+    reviewDoc({ id: 'rf_u1', courseKey: 'rf', rating: 4.5 })));
+});
+
+test('review create is rejected for another university', async () => {
+  await assertFails(setDoc(doc(asKu(), 'reviews/ou_u1'),
+    reviewDoc({ id: 'ou_u1', courseKey: 'ou', university_id: 'osaka_u' })));
+});
+
+// I1: `helpfulBy` is a *benefit* to the review's author, so unlike `posts.reports`
+// it must start empty. Without the create-time pin an author could ship a review
+// with a pre-stuffed array, or delete-and-recreate to reset one they had already
+// been voted on — the append-only update branch alone does not cover either.
+test('review create must pin helpfulBy to the empty list', async () => {
+  const db = asKu();
+  await assertFails(setDoc(doc(db, 'reviews/hb1_u1'),
+    reviewDoc({ id: 'hb1_u1', courseKey: 'hb1', helpfulBy: ['x'] })));
+  await assertFails(setDoc(doc(db, 'reviews/hb2_u1'),
+    reviewDoc({ id: 'hb2_u1', courseKey: 'hb2', helpfulBy: ['u1', 'a', 'b'] })));
+  // A non-list is refused too (the reader would otherwise have to survive it).
+  await assertFails(setDoc(doc(db, 'reviews/hb3_u1'),
+    reviewDoc({ id: 'hb3_u1', courseKey: 'hb3', helpfulBy: 'nope' })));
+  // The honest shape still goes through.
+  await assertSucceeds(setDoc(doc(db, 'reviews/hb4_u1'),
+    reviewDoc({ id: 'hb4_u1', courseKey: 'hb4', helpfulBy: [] })));
+});
+
+test('author edits their own review; a non-author cannot edit its body', async () => {
+  await assertSucceeds(updateDoc(doc(asKu(), 'reviews/ck_u1'), { rating: 5, comment: 'edit' }));
+  const other = asKu2();
+  await assertFails(updateDoc(doc(other, 'reviews/ck_u1'), { comment: 'hax' }));
+  await assertFails(updateDoc(doc(other, 'reviews/ck_u1'), { helpfulBy: ['u2'], comment: 'hax' }));
+});
+
+// I2: the author-edit branch re-runs the create-time `rating` check and pins
+// `university_id`. Validating those only at create would let the author walk an
+// honest 1..5 review up to `rating: 99` (or off to another university) one edit
+// later — the same reason the `posts` author branch pins `university_id` (M5).
+test('an author edit re-validates rating and cannot change university_id', async () => {
+  const db = asKu();
+  await assertFails(updateDoc(doc(db, 'reviews/ck_u1'), { rating: 99 }));
+  await assertFails(updateDoc(doc(db, 'reviews/ck_u1'), { rating: 0 }));
+  await assertFails(updateDoc(doc(db, 'reviews/ck_u1'), { rating: 'x' }));
+  await assertFails(updateDoc(doc(db, 'reviews/ck_u1'), { rating: 4.5 }));
+  await assertFails(updateDoc(doc(db, 'reviews/ck_u1'), { university_id: 'osaka_u' }));
+  await assertSucceeds(updateDoc(doc(db, 'reviews/ck_u1'), { rating: 5 }));
+});
+
+test('an author cannot reassign their review or move its courseKey', async () => {
+  const db = asKu();
+  await assertFails(updateDoc(doc(db, 'reviews/ck_u1'), { authorId: 'u2' }));
+  await assertFails(updateDoc(doc(db, 'reviews/ck_u1'), { courseKey: 'ck2' }));
+});
+
+// The author is not exempt from the append-only carve-out: writing `helpfulBy`
+// leaves the author branch (which forbids the field outright) and has to satisfy
+// the same one-own-uid append everyone else does. So an author cannot stuff the
+// array — the most they can do is the single self-vote below, exactly as an
+// author of a post can file the first `reports` entry against themselves.
+test('an author cannot stuff helpfulBy on their own review', async () => {
+  const db = asKu();
+  await assertFails(updateDoc(doc(db, 'reviews/ck_u1'), { helpfulBy: ['a', 'b', 'c'] }));
+  await assertFails(updateDoc(doc(db, 'reviews/ck_u1'), { helpfulBy: ['someone_else'] }));
+  await assertFails(updateDoc(doc(db, 'reviews/ck_u1'), { helpfulBy: ['u1'], comment: 'x' }));
+  // ...but an ordinary edit that leaves `helpfulBy` alone still works.
+  await assertSucceeds(updateDoc(doc(db, 'reviews/ck_u1'), { comment: 'x' }));
+});
+
+test('a non-author appends exactly their own uid to helpfulBy, once', async () => {
+  const db = asKu2();
+  await assertSucceeds(updateDoc(doc(db, 'reviews/ck_u1'), { helpfulBy: ['u2'] }));
+  // `ck2_u1` already carries u2's vote, so every further write BY u2 is refused
+  // by the one-vote-per-account clause (`!old.hasAny([uid])`) — whether it grows
+  // the array, leaves it alone, or shrinks it.
+  await assertFails(updateDoc(doc(db, 'reviews/ck2_u1'), { helpfulBy: ['u2', 'u9'] }));
+  await assertFails(updateDoc(doc(db, 'reviews/ck2_u1'), { helpfulBy: ['u2'] }));
+  await assertFails(updateDoc(doc(db, 'reviews/ck2_u1'), { helpfulBy: [] }));
+  // ...and u1, who has NOT voted, still cannot append someone else's uid: the
+  // array grew by one but the new element is `u9`, not the caller.
+  await assertFails(updateDoc(doc(asKu(), 'reviews/ck2_u1'), { helpfulBy: ['u2', 'u9'] }));
+});
+
+test('only a verified KU user may mark a review helpful', async () => {
+  await assertFails(updateDoc(doc(asKuUnverified(), 'reviews/ck_u1'), { helpfulBy: ['u2'] }));
+  await assertFails(updateDoc(doc(asOutsider(), 'reviews/ck_u1'), { helpfulBy: ['u3'] }));
+});
+
+// C1 — 17 courses in the deployed catalog have a '/' in their courseKey
+// (`問題発見型/解決型学習(fbl/pbl)1|…`, `river/coastalengineering|…`). '/' is a path
+// separator in a document id, so `reviews/<courseKey>_<uid>` was a 3-SEGMENT
+// path that this match block never saw — it fell through to the catch-all deny
+// and those courses were silently unreviewable. The id is pinned to `courseSlug`
+// instead, which the client escapes.
+test('C1: a review on a slash courseKey creates under its slugged doc id', async () => {
+  const db = asKu();
+  // 'x/y|z' -> 'x%2Fy|z'; the doc id is one segment, so the rule applies.
+  await assertSucceeds(setDoc(doc(db, 'reviews/x%2Fy|z_u1'),
+    reviewDoc({ id: 'x%2Fy|z_u1', courseKey: 'x/y|z', authorId: 'u1' })));
+  // The real catalog shape, end to end.
+  await assertSucceeds(setDoc(doc(db, 'reviews/river%2Fcoastalengineering|後藤仁志_u1'),
+    reviewDoc({
+      id: 'river%2Fcoastalengineering|後藤仁志_u1',
+      courseKey: 'river/coastalengineering|後藤仁志',
+      authorId: 'u1',
+    })));
+});
+
+test('C1: a review whose doc id does not match its courseSlug is refused', async () => {
+  const db = asKu();
+  // The raw (unescaped) key as the slug — the pre-fix shape.
+  await assertFails(setDoc(doc(db, 'reviews/x%2Fy|z_u1'),
+    reviewDoc({ id: 'x%2Fy|z_u1', courseKey: 'x/y|z', courseSlug: 'x/y|z' })));
+  // A slug that belongs to a different course: the id must encode the document
+  // it claims to be about.
+  await assertFails(setDoc(doc(db, 'reviews/x%2Fy|z_u1'),
+    reviewDoc({ id: 'x%2Fy|z_u1', courseKey: 'x/y|z', courseSlug: 'someoneelse' })));
+  // No slug at all (a client that skipped the escape).
+  const noSlug = reviewDoc({ id: 'x%2Fy|z_u1', courseKey: 'x/y|z' });
+  delete noSlug.courseSlug;
+  await assertFails(setDoc(doc(db, 'reviews/x%2Fy|z_u1'), noSlug));
+});
+
+test('C1: an author cannot drift courseSlug away from the doc id', async () => {
+  await assertFails(updateDoc(doc(asKu(), 'reviews/ck_u1'), { courseSlug: 'other' }));
+});
+
+// I3 — `helpfulBy` feeds the マイページ 貢献 badge, so a self-vote is a user
+// inflating their own score. The author is excluded from the append-only branch
+// outright (and the author branch already forbids touching `helpfulBy`), so
+// there is no route left.
+test('I3: the review author cannot append their own uid to helpfulBy', async () => {
+  // u1 authored reviews/ck_u1; the honest single-uid append shape is still
+  // refused because the caller IS the author.
+  await assertFails(updateDoc(doc(asKu(), 'reviews/ck_u1'), { helpfulBy: ['u1'] }));
+  // ...while the identical write from a non-author still succeeds.
+  await assertSucceeds(updateDoc(doc(asKu2(), 'reviews/ck_u1'), { helpfulBy: ['u2'] }));
+});
+
+test('author deletes their own review; a non-author cannot', async () => {
+  await assertFails(deleteDoc(doc(asKu2(), 'reviews/ck_u1')));
+  await assertFails(deleteDoc(doc(asOutsider(), 'reviews/ck_u1')));
+  await assertSucceeds(deleteDoc(doc(asKu(), 'reviews/ck_u1')));
+});
+
+// --- course_stats ------------------------------------------------------------
+
+test('course_stats: KU-domain reads, KU-verified writes, outsider denied both', async () => {
+  const ku = asKu();
+  await assertSucceeds(getDoc(doc(ku, 'course_stats/ck')));
+  await assertSucceeds(setDoc(doc(ku, 'course_stats/ck'), {
+    courseKey: 'ck', university_id: 'kyoto_u', reviewCount: 2, ratingSum: 7,
+  }, { merge: true }));
+  await assertSucceeds(getDoc(doc(asKuUnverified(), 'course_stats/ck')));
+  await assertFails(setDoc(doc(asKuUnverified(), 'course_stats/ck'), { reviewCount: 9 }, { merge: true }));
+  const out = asOutsider();
+  await assertFails(getDoc(doc(out, 'course_stats/ck')));
+  await assertFails(setDoc(doc(out, 'course_stats/ck'), { reviewCount: 999 }, { merge: true }));
+});
+
+// I4: the write is trust-based on *values*, but not on *shape*. A crafted
+// aggregate must not be able to hand a reader a negative or non-numeric counter
+// (Task 7's ranking divides by `reviewCount`), nor move the doc to another
+// university, nor disappear — an aggregate has no owner entitled to delete it.
+test('course_stats writes are shape-guarded and deletion is forbidden', async () => {
+  const ku = asKu();
+  await assertFails(setDoc(doc(ku, 'course_stats/ck'), { reviewCount: -1 }, { merge: true }));
+  await assertFails(setDoc(doc(ku, 'course_stats/ck'), { ratingSum: -5 }, { merge: true }));
+  await assertFails(setDoc(doc(ku, 'course_stats/ck'), { reviewCount: 'many' }, { merge: true }));
+  await assertFails(setDoc(doc(ku, 'course_stats/ck'), { ratingSum: 3.5 }, { merge: true }));
+  await assertFails(setDoc(doc(ku, 'course_stats/ck'), { university_id: 'osaka_u' }, { merge: true }));
+  // Counter-only creates are allowed (for bumpPostCount on fresh docs), but
+  // negative/non-int counters still fail.
+  await assertSucceeds(setDoc(doc(ku, 'course_stats/fresh'), {
+    courseKey: 'fresh', university_id: 'kyoto_u',
+  }));
+  await assertSucceeds(setDoc(doc(ku, 'course_stats/fresh'), {
+    courseKey: 'fresh', university_id: 'kyoto_u', reviewCount: 0, ratingSum: 0,
+  }));
+  // Nobody deletes an aggregate — not even a verified KU account.
+  await assertFails(deleteDoc(doc(ku, 'course_stats/ck')));
+  await assertFails(deleteDoc(doc(asKu2(), 'course_stats/ck')));
+});
+
+// Counter-only writes (e.g., bumpPostCount) must succeed when omitting reviewCount/ratingSum,
+// so long as they include university_id and the write is a merge update.
+test('course_stats: counter-only merge writes succeed without reviewCount/ratingSum', async () => {
+  const ku = asKu();
+  // First, create the doc with full shape (as the review path would).
+  await assertSucceeds(setDoc(doc(ku, 'course_stats/ck_counter'), {
+    courseKey: 'ck_counter', university_id: 'kyoto_u', reviewCount: 0, ratingSum: 0,
+  }));
+  // Then, bumpPostCount writes only counter fields with merge: true.
+  await assertSucceeds(setDoc(doc(ku, 'course_stats/ck_counter'), {
+    courseKey: 'ck_counter', university_id: 'kyoto_u', pastExamPostCount: 1,
+  }, { merge: true }));
+  // Another counter field update, same pattern.
+  await assertSucceeds(setDoc(doc(ku, 'course_stats/ck_counter'), {
+    resourcePostCount: 3,
+  }, { merge: true }));
+});
+
+// Counter-only CREATE (no prior doc) must succeed: when bumpPostCount fires on
+// a course that nobody has reviewed yet, course_stats/{courseKey} does not exist,
+// so the merge write is a create. It must pass with only counter fields.
+test('course_stats: a counter-only CREATE (no prior doc) succeeds', async () => {
+  const ku = asKu();
+  await assertSucceeds(setDoc(doc(ku, 'course_stats/ck_fresh_counter'),
+    { courseKey: 'ck_fresh_counter', university_id: 'kyoto_u', pastExamPostCount: 1 },
+    { merge: true }));
+});
+
+// Counter-only CREATE with an invalid reviewCount must fail: shape guards still apply.
+test('course_stats: a counter-only CREATE with invalid reviewCount fails', async () => {
+  const ku = asKu();
+  await assertFails(setDoc(doc(ku, 'course_stats/ck_fresh_invalid'),
+    { courseKey: 'ck_fresh_invalid', university_id: 'kyoto_u', pastExamPostCount: 1, reviewCount: -1 },
+    { merge: true }));
 });
 
 // --- queries -----------------------------------------------------------------

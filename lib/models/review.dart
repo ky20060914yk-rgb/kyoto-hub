@@ -1,0 +1,406 @@
+enum Rakutan { raku, futsu, muzu } // 楽 / 普通 / 難
+
+extension RakutanX on Rakutan {
+  String get value {
+    switch (this) {
+      case Rakutan.raku:
+        return 'raku';
+      case Rakutan.futsu:
+        return 'futsu';
+      case Rakutan.muzu:
+        return 'muzu';
+    }
+  }
+
+  String get label {
+    switch (this) {
+      case Rakutan.raku:
+        return '楽';
+      case Rakutan.futsu:
+        return '普通';
+      case Rakutan.muzu:
+        return '難';
+    }
+  }
+
+  static Rakutan fromString(String str) {
+    switch (str) {
+      case 'raku':
+        return Rakutan.raku;
+      case 'muzu':
+        return Rakutan.muzu;
+      case 'futsu':
+        return Rakutan.futsu;
+      default:
+        return Rakutan.futsu;
+    }
+  }
+}
+
+enum Attendance { none, light, heavy } // 取らない / 取る(ゆるい) / 毎回(重い)
+
+extension AttendanceX on Attendance {
+  String get value {
+    switch (this) {
+      case Attendance.none:
+        return 'none';
+      case Attendance.light:
+        return 'light';
+      case Attendance.heavy:
+        return 'heavy';
+    }
+  }
+
+  String get label {
+    switch (this) {
+      case Attendance.none:
+        return '取らない';
+      case Attendance.light:
+        return '取る(ゆるい)';
+      case Attendance.heavy:
+        return '毎回(重い)';
+    }
+  }
+
+  static Attendance fromString(String str) {
+    switch (str) {
+      case 'none':
+        return Attendance.none;
+      case 'heavy':
+        return Attendance.heavy;
+      case 'light':
+        return Attendance.light;
+      default:
+        return Attendance.light;
+    }
+  }
+}
+
+enum GradingStyle { examOnly, examReport, reportMainly, attendanceHeavy }
+
+extension GradingStyleX on GradingStyle {
+  String get value {
+    switch (this) {
+      case GradingStyle.examOnly:
+        return 'exam_only';
+      case GradingStyle.examReport:
+        return 'exam_report';
+      case GradingStyle.reportMainly:
+        return 'report_mainly';
+      case GradingStyle.attendanceHeavy:
+        return 'attendance_heavy';
+    }
+  }
+
+  String get label {
+    switch (this) {
+      case GradingStyle.examOnly:
+        return '試験のみ';
+      case GradingStyle.examReport:
+        return '試験＋レポート';
+      case GradingStyle.reportMainly:
+        return 'レポート中心';
+      case GradingStyle.attendanceHeavy:
+        return '出席重視';
+    }
+  }
+
+  static GradingStyle fromString(String str) {
+    switch (str) {
+      case 'exam_only':
+        return GradingStyle.examOnly;
+      case 'report_mainly':
+        return GradingStyle.reportMainly;
+      case 'attendance_heavy':
+        return GradingStyle.attendanceHeavy;
+      case 'exam_report':
+        return GradingStyle.examReport;
+      default:
+        return GradingStyle.examReport;
+    }
+  }
+}
+
+enum PastExamUsefulness { asIs, similar, trendOnly, notUseful }
+
+extension PastExamUsefulnessX on PastExamUsefulness {
+  String get value {
+    switch (this) {
+      case PastExamUsefulness.asIs:
+        return 'as_is';
+      case PastExamUsefulness.similar:
+        return 'similar';
+      case PastExamUsefulness.trendOnly:
+        return 'trend_only';
+      case PastExamUsefulness.notUseful:
+        return 'not_useful';
+    }
+  }
+
+  String get label {
+    switch (this) {
+      case PastExamUsefulness.asIs:
+        return 'そのまま出た';
+      case PastExamUsefulness.similar:
+        return '類題が出た';
+      case PastExamUsefulness.trendOnly:
+        return '傾向把握のみ';
+      case PastExamUsefulness.notUseful:
+        return '役に立たない';
+    }
+  }
+
+  static PastExamUsefulness fromString(String str) {
+    switch (str) {
+      case 'as_is':
+        return PastExamUsefulness.asIs;
+      case 'similar':
+        return PastExamUsefulness.similar;
+      case 'not_useful':
+        return PastExamUsefulness.notUseful;
+      case 'trend_only':
+        return PastExamUsefulness.trendOnly;
+      default:
+        return PastExamUsefulness.trendOnly;
+    }
+  }
+}
+
+enum BringIn { no, yes, na } // 不可 / 可 / 該当なし
+
+extension BringInX on BringIn {
+  String get value {
+    switch (this) {
+      case BringIn.no:
+        return 'no';
+      case BringIn.yes:
+        return 'yes';
+      case BringIn.na:
+        return 'na';
+    }
+  }
+
+  String get label {
+    switch (this) {
+      case BringIn.no:
+        return '不可';
+      case BringIn.yes:
+        return '可';
+      case BringIn.na:
+        return '該当なし';
+    }
+  }
+
+  static BringIn fromString(String str) {
+    switch (str) {
+      case 'no':
+        return BringIn.no;
+      case 'yes':
+        return BringIn.yes;
+      case 'na':
+        return BringIn.na;
+      default:
+        return BringIn.na;
+    }
+  }
+}
+
+class Review {
+  final String id; // '${slug(courseKey)}_${authorId}'
+  final String courseKey;
+
+  /// [courseKey] escaped so it is a legal Firestore document-id *component*.
+  ///
+  /// C1: a courseKey is `normalize(name)|normalize(lecturer)` and the
+  /// normaliser does not strip '/', so 17 courses in the deployed catalog carry
+  /// one (`問題発見型/解決型学習(fbl/pbl)1|…`). A '/' in a document id splits the
+  /// path into extra segments, which makes `reviews/<key>_<uid>` a 3-segment
+  /// path that no rule covers and `course_stats/<key>` an illegal collection
+  /// reference that THROWS client-side. Every document id derived from a
+  /// courseKey therefore goes through [slug]; the raw [courseKey] stays on the
+  /// document as the queryable field.
+  ///
+  /// Persisted (not merely derived) because the `reviews` create rule pins the
+  /// document id to `courseSlug + '_' + uid`: rules cannot run the escape
+  /// themselves, so the value has to be in the document.
+  final String courseSlug;
+  final String courseName; // denormalised at write time (for マイページ / lists)
+  final String universityId; // 'kyoto_u'
+  final String authorId;
+  final String authorName;
+  final int rating; // おすすめ度 1..5
+  final Rakutan rakutan;
+  final Attendance attendance;
+  final GradingStyle grading;
+  final PastExamUsefulness pastExam;
+  final BringIn bringIn;
+  final String comment; // free text, may be ''
+  final String? termTaken; // '2024前期' etc, optional
+  final String? gradeTaken; // 'S'..'F' etc, optional
+  final List<String> helpfulBy; // uids who marked 役に立った
+  final DateTime createdAt;
+  final DateTime updatedAt;
+
+  Review({
+    required this.id,
+    required this.courseKey,
+    String? courseSlug,
+    required this.courseName,
+    this.universityId = 'kyoto_u',
+    required this.authorId,
+    required this.authorName,
+    required this.rating,
+    required this.rakutan,
+    required this.attendance,
+    required this.grading,
+    required this.pastExam,
+    required this.bringIn,
+    this.comment = '',
+    this.termTaken,
+    this.gradeTaken,
+    this.helpfulBy = const [],
+    required this.createdAt,
+    required this.updatedAt,
+  }) : courseSlug = courseSlug ?? Review.slug(courseKey);
+
+  int get helpfulCount => helpfulBy.length;
+
+  Map<String, dynamic> toMap() {
+    return {
+      'id': id,
+      'courseKey': courseKey,
+      'courseSlug': courseSlug,
+      'courseName': courseName,
+      'university_id': universityId,
+      'authorId': authorId,
+      'authorName': authorName,
+      'rating': rating,
+      'rakutan': rakutan.value,
+      'attendance': attendance.value,
+      'grading': grading.value,
+      'pastExam': pastExam.value,
+      'bringIn': bringIn.value,
+      'comment': comment,
+      'termTaken': termTaken,
+      'gradeTaken': gradeTaken,
+      'helpfulBy': helpfulBy,
+      'createdAt': createdAt.toIso8601String(),
+      'updatedAt': updatedAt.toIso8601String(),
+    };
+  }
+
+  /// Total: never throws, whatever the document holds.
+  ///
+  /// A course's review list is one `where('courseKey', ...)` stream mapped
+  /// client-side, so a single malformed document must not be able to take the
+  /// whole list down for every reader. The rules validate identity, `rating`,
+  /// `university_id` and the initial `helpfulBy`, but the enum fields, the free
+  /// text and the timestamps are unvalidated — and a document written before
+  /// the current rules, or by the Admin SDK, is not covered at all. So every
+  /// field here degrades to a default rather than raising.
+  factory Review.fromMap(Map<String, dynamic> map) {
+    return Review(
+      id: map['id']?.toString() ?? '',
+      courseKey: map['courseKey']?.toString() ?? '',
+      // Documents written before C1 carry no `courseSlug`; derive it so an old
+      // document still round-trips to the same (slash-free) document id.
+      courseSlug: map['courseSlug']?.toString() ??
+          Review.slug(map['courseKey']?.toString() ?? ''),
+      courseName: map['courseName']?.toString() ?? '',
+      universityId: map['university_id']?.toString() ?? 'kyoto_u',
+      authorId: map['authorId']?.toString() ?? '',
+      authorName: map['authorName']?.toString() ?? '匿名京大生',
+      rating: _rating(map['rating']),
+      // `fromString` defaults on any unknown string; `?.toString() ?? ''` keeps
+      // a non-string (or absent) value from raising before it gets there.
+      rakutan: RakutanX.fromString(map['rakutan']?.toString() ?? ''),
+      attendance: AttendanceX.fromString(map['attendance']?.toString() ?? ''),
+      grading: GradingStyleX.fromString(map['grading']?.toString() ?? ''),
+      pastExam: PastExamUsefulnessX.fromString(map['pastExam']?.toString() ?? ''),
+      bringIn: BringInX.fromString(map['bringIn']?.toString() ?? ''),
+      comment: map['comment']?.toString() ?? '',
+      termTaken: map['termTaken']?.toString(),
+      gradeTaken: map['gradeTaken']?.toString(),
+      helpfulBy: map['helpfulBy'] is Iterable
+          ? List<String>.from(
+              (map['helpfulBy'] as Iterable).whereType<String>())
+          : const <String>[],
+      createdAt: _date(map['createdAt']),
+      updatedAt: _date(map['updatedAt']),
+    );
+  }
+
+  /// `rating` is non-nullable and rendered as 1..5 stars, so anything that is
+  /// not a whole number in range collapses to 0 ("unrated") instead of throwing
+  /// or painting an absurd row of stars.
+  static int _rating(dynamic raw) {
+    // `isFinite` guard: Firestore accepts NaN/Infinity as doubles and
+    // `double.nan.toInt()` throws `UnsupportedError` — that must not take the
+    // whole review list down for every reader.
+    final v = raw is int ? raw : ((raw is num && raw.isFinite) ? raw.toInt() : 0);
+    return v < 0 ? 0 : (v > 5 ? 5 : v);
+  }
+
+  static DateTime _date(dynamic raw) =>
+      DateTime.tryParse(raw?.toString() ?? '') ?? DateTime.now();
+
+  Review copyWith({
+    String? id,
+    String? courseKey,
+    String? courseSlug,
+    String? courseName,
+    String? universityId,
+    String? authorId,
+    String? authorName,
+    int? rating,
+    Rakutan? rakutan,
+    Attendance? attendance,
+    GradingStyle? grading,
+    PastExamUsefulness? pastExam,
+    BringIn? bringIn,
+    String? comment,
+    String? termTaken,
+    String? gradeTaken,
+    List<String>? helpfulBy,
+    DateTime? createdAt,
+    DateTime? updatedAt,
+  }) {
+    return Review(
+      id: id ?? this.id,
+      courseKey: courseKey ?? this.courseKey,
+      // An explicit slug wins; otherwise a courseKey change re-derives it and an
+      // untouched courseKey keeps the stored slug.
+      courseSlug: courseSlug ??
+          (courseKey != null ? Review.slug(courseKey) : this.courseSlug),
+      courseName: courseName ?? this.courseName,
+      universityId: universityId ?? this.universityId,
+      authorId: authorId ?? this.authorId,
+      authorName: authorName ?? this.authorName,
+      rating: rating ?? this.rating,
+      rakutan: rakutan ?? this.rakutan,
+      attendance: attendance ?? this.attendance,
+      grading: grading ?? this.grading,
+      pastExam: pastExam ?? this.pastExam,
+      bringIn: bringIn ?? this.bringIn,
+      comment: comment ?? this.comment,
+      termTaken: termTaken ?? this.termTaken,
+      gradeTaken: gradeTaken ?? this.gradeTaken,
+      helpfulBy: helpfulBy ?? this.helpfulBy,
+      createdAt: createdAt ?? this.createdAt,
+      updatedAt: updatedAt ?? this.updatedAt,
+    );
+  }
+
+  /// Injective escape so a courseKey containing '/' (or '%') is a valid
+  /// Firestore document-id component. '/' -> '%2F', '%' -> '%25'.
+  ///
+  /// '%' MUST be escaped first, otherwise the '%' the '/' escape introduces
+  /// would itself be escaped and two distinct keys ('a/b' and 'a%2Fb') could
+  /// collide. Escaping '%' first makes the mapping injective: distinct
+  /// courseKeys always produce distinct slugs.
+  static String slug(String courseKey) =>
+      courseKey.replaceAll('%', '%25').replaceAll('/', '%2F');
+
+  static String docId(String courseKey, String uid) =>
+      '${slug(courseKey)}_$uid';
+}

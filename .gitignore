@@ -51,3 +51,6 @@ app.*.map.json
 node_modules/
 tools/firestore-debug.log
 tools/firebase-debug.log
+
+# SDD scratch
+.superpowers/

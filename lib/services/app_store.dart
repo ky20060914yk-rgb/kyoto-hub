@@ -10,8 +10,10 @@ import '../models/textbook_request.dart';
 import '../models/talk_room.dart';
 import '../models/transaction.dart';
 import '../models/inquiry.dart';
+import '../models/review.dart';
 import '../repositories/course_repository.dart';
 import 'firestore_service.dart';
+import 'review_service.dart';
 import '../firebase_options.dart';
 import '../utils/download_helper.dart';
 import 'package:firebase_storage/firebase_storage.dart' as fb_storage;
@@ -19,6 +21,9 @@ import 'package:firebase_storage/firebase_storage.dart' as fb_storage;
 class AppStore extends ChangeNotifier {
   /// Course catalog, backed by the Firestore `courses` collection.
   final CourseRepository courses;
+
+  /// Firestore data layer for the review layer (Plan A).
+  final ReviewService reviews;
 
   final FirestoreService _firestore = FirestoreService();
   final fb_auth.FirebaseAuth _firebaseAuth = fb_auth.FirebaseAuth.instance;
@@ -42,7 +47,7 @@ class AppStore extends ChangeNotifier {
     notifyListeners();
   }
 
-  AppStore(this.courses) {
+  AppStore(this.courses, this.reviews) {
     // _initSampleData(); // Commented out for production release
     _initFirebaseSync();
   }
@@ -434,6 +439,28 @@ class AppStore extends ChangeNotifier {
       ..sort((a, b) => b.createdAt.compareTo(a.createdAt));
   }
 
+  /// Task 8: keep `course_stats`' post counters in step for the ranking.
+  ///
+  /// Deliberately **synchronous and fire-and-forget**. Resolving the courseKey
+  /// needs `courses.byId`, which calls `warmUp()` (rethrows on a failed catalog
+  /// load) and then a live `.get()` on a cache miss — so it can throw. If that
+  /// `await` sat in a caller's critical path it would abort the rest of the
+  /// mutation (point clawback, `notifyListeners()`) after the post had already
+  /// been deleted from Firestore. A missed bump only skews a future ranking.
+  void _bumpPostCountFor(Post post, int delta) {
+    () async {
+      final course = await courses.byId(post.subjectId).catchError((_) => null);
+      final ck = course?.courseKey ?? '';
+      if (ck.isEmpty) return;
+      await reviews.bumpPostCount(
+        ck,
+        isPastExam: post.category == PostCategory.pastExam,
+        delta: delta,
+      );
+    }()
+        .catchError((_) {});
+  }
+
   Future<bool> addPost({
     required String subjectId,
     required PostCategory category,
@@ -479,6 +506,8 @@ class AppStore extends ChangeNotifier {
 
     posts.insert(0, newPost);
     _firestore.createPost(newPost).catchError((_) {});
+
+    _bumpPostCountFor(newPost, 1);
 
     int bonusAmount = 0;
 
@@ -692,6 +721,8 @@ class AppStore extends ChangeNotifier {
     posts.removeAt(idx);
     await _firestore.deletePost(postId).catchError((_) {});
 
+    _bumpPostCountFor(post, -1);
+
     if (currentUser != null && post.authorId == currentUser!.uid) {
       int deductPoints = 0;
       if (post.category == PostCategory.pastExam && post.year != null && post.year! <= 2020) {
@@ -756,6 +787,11 @@ class AppStore extends ChangeNotifier {
       // denied (the server would still see only two reports).
       await _firestore.updatePostReports(postId, updatedReports).catchError((_) {});
       await _firestore.deletePost(postId).catchError((_) {});
+
+      // Same counter bookkeeping as AppStore.deletePost: this branch removes
+      // the post without going through it, so the decrement has to be issued
+      // here too or the ranking counter drifts upward forever.
+      _bumpPostCountFor(post, -1);
 
       // Claw back points from uploader!
       final uploaderProfile = await _firestore.getUserProfile(post.authorId);
@@ -1000,6 +1036,92 @@ class AppStore extends ChangeNotifier {
     lastNoticeMessage = category == 'report'
         ? '通報を受け付けました。運営にて確認いたします。'
         : 'お問い合わせを送信しました。運営からの連絡をお待ちください。';
+    notifyListeners();
+  }
+
+  // --- Review layer (Plan A) -------------------------------------------------
+
+  /// Create or edit the signed-in user's review for a course. Returns whether
+  /// the write landed; on failure [lastNoticeMessage] carries the reason.
+  Future<bool> submitReview({
+    required String courseKey,
+    required String courseName,
+    required int rating,
+    required Rakutan rakutan,
+    required Attendance attendance,
+    required GradingStyle grading,
+    required PastExamUsefulness pastExam,
+    required BringIn bringIn,
+    required String comment,
+    String? termTaken,
+    String? gradeTaken,
+  }) async {
+    final user = currentUser;
+    if (user == null) return false;
+    if (!user.isVerified) {
+      lastNoticeMessage = 'メール認証の完了後にレビューを投稿できます。';
+      notifyListeners();
+      return false;
+    }
+    final existing = await reviews.getMyReview(courseKey, user.uid);
+    final now = DateTime.now();
+    final review = Review(
+      id: Review.docId(courseKey, user.uid),
+      courseKey: courseKey,
+      // C1: the `reviews` create rule pins the document id to
+      // `courseSlug + '_' + uid`, so the escaped key has to be ON the document.
+      courseSlug: Review.slug(courseKey),
+      courseName: courseName,
+      authorId: user.uid,
+      authorName: user.displayName,
+      rating: rating,
+      rakutan: rakutan,
+      attendance: attendance,
+      grading: grading,
+      pastExam: pastExam,
+      bringIn: bringIn,
+      comment: comment.trim(),
+      termTaken: termTaken,
+      gradeTaken: gradeTaken,
+      helpfulBy: existing?.helpfulBy ?? const [],
+      createdAt: existing?.createdAt ?? now,
+      updatedAt: now,
+    );
+    try {
+      await reviews.submitReview(review);
+      lastNoticeMessage =
+          existing == null ? 'レビューを投稿しました！' : 'レビューを更新しました。';
+      notifyListeners();
+      return true;
+    } catch (e) {
+      lastNoticeMessage = 'レビューの保存に失敗しました。通信環境を確認してください。';
+      notifyListeners();
+      return false;
+    }
+  }
+
+  /// Remove the signed-in user's review for [courseKey], if any.
+  Future<void> deleteMyReview(String courseKey) async {
+    final user = currentUser;
+    if (user == null) return;
+    final existing = await reviews.getMyReview(courseKey, user.uid);
+    if (existing == null) return;
+    try {
+      await reviews.deleteReview(existing);
+      lastNoticeMessage = 'レビューを削除しました。';
+    } catch (_) {
+      lastNoticeMessage = 'レビューの削除に失敗しました。';
+    }
+    notifyListeners();
+  }
+
+  /// Mark a review as helpful (best-effort; idempotent in [ReviewService]).
+  Future<void> markReviewHelpful(String reviewId) async {
+    final user = currentUser;
+    if (user == null || !user.isVerified) return;
+    try {
+      await reviews.markHelpful(reviewId: reviewId, uid: user.uid);
+    } catch (_) {/* best-effort */}
     notifyListeners();
   }
 

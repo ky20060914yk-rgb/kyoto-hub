@@ -929,3 +929,48 @@ Fixes applied inline above: `courseName` added to `Review` (Task 1/5/10); Task 3
 Plan B (`docs/superpowers/plans/2026-09-08-review-layer-b-discovery.md`, written after Plan A lands so it can consume the real `CourseStats` shape): the **さがす tab** + 楽単/レビュー数/過去問数/新着 rankings querying `course_stats`, **bottom-nav reorg** (さがす / 時間割 / マイページ; 参考書 hidden; お問い合わせ → マイページ), the **bell icon + minimal notifications**, and the 全学共通 **系列** question (the course data has no series field — Plan B either does a lightweight keyword classification or ships faculty-only rankings).
 
 Deploy note: this plan adds `firestore:indexes` (Task 4) and `firestore:rules` (Task 3) changes — the production deploy for the review layer is `firebase deploy --only firestore:rules,firestore:indexes,hosting`.
+
+---
+
+## Deploy
+
+The four artefacts of this branch (indexes, rules, the web build, the one-off
+backfill) are **order-dependent**. Run them in exactly this order:
+
+```
+1. firebase deploy --only firestore:indexes --project kyodai-sns
+   # then WAIT: the reviews composite index (courseKey ASC, updatedAt DESC)
+   # must read READY in the Firebase console before step 3.
+
+2. firebase deploy --only firestore:rules --project kyodai-sns
+   # purely additive: two new match blocks (reviews, course_stats) inserted
+   # before the unchanged catch-all deny. No existing collection's rule changes,
+   # so this is safe to land ahead of the client.
+
+3. flutter build web --release && firebase deploy --only hosting --project kyodai-sns
+
+4. cd tools && node backfill_post_counts.mjs --project kyodai-sns --dry-run
+   # inspect the reported per-course totals, THEN:
+   cd tools && node backfill_post_counts.mjs --project kyodai-sns
+   # run once. It is an authoritative recount (plain ints, not increments), so a
+   # re-run recomputes the same totals — but it will lose any bump that lands
+   # between its read and its write, so do not leave it running on a schedule.
+```
+
+**Never ship hosting (3) before 1 and 2 have finished.**
+
+- New build against the OLD rules → every review operation fails with
+  `PERMISSION_DENIED`: the `reviews` and `course_stats` collections fall through
+  to the catch-all deny, so the レビュー tab is dead for every user until the
+  rules land.
+- New build against a still-BUILDING index → `streamReviewsForCourse` fails with
+  `FAILED_PRECONDITION` (the `where('courseKey') + orderBy('updatedAt')` query
+  needs the composite index), so the review list errors on every course while the
+  summary card still works — a confusing half-broken state.
+
+Step 4 is last because it recounts from `posts`, and a recount taken before the
+client that maintains the counters is live would be overwritten by nothing —
+harmless, but it would have to be re-run anyway.
+
+**Rollback:** re-deploy the previous hosting release. The rules and indexes can
+stay: they are additive, and nothing outside the review layer reads them.
