@@ -1,7 +1,11 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import '../../services/app_store.dart';
 import '../../models/post.dart';
+import '../../models/review.dart';
 import '../auth/signup_screen.dart';
+import '../course/review_form_sheet.dart';
 import '../timetable/timetable_registration_screen.dart';
 
 class MyPageScreen extends StatefulWidget {
@@ -14,6 +18,147 @@ class MyPageScreen extends StatefulWidget {
 }
 
 class _MyPageScreenState extends State<MyPageScreen> {
+  // Held once (Phase-1a ruling: no stream creation inside build()). If there is
+  // no signed-in user, an empty stream so the card still renders its zero state.
+  late final Stream<List<Review>> _myReviewsStream;
+
+  @override
+  void initState() {
+    super.initState();
+    final user = widget.store.currentUser;
+    _myReviewsStream = user == null
+        ? Stream.value(const <Review>[])
+        : widget.store.reviews.streamMyReviews(user.uid);
+  }
+
+  Widget _buildContributionCard() {
+    return Card(
+      elevation: 0,
+      color: Colors.white,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(16),
+        side: const BorderSide(color: Color(0xFFE2E8F0)),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.all(20.0),
+        child: StreamBuilder<List<Review>>(
+          stream: _myReviewsStream,
+          builder: (context, snapshot) {
+            final list = snapshot.data ?? const <Review>[];
+            final reviews = list.length;
+            final helpful = list.fold<int>(0, (a, r) => a + r.helpfulCount);
+            String? badge;
+            if (reviews >= 20 || helpful >= 50) {
+              badge = 'トップ貢献者';
+            } else if (reviews >= 5 || helpful >= 10) {
+              badge = '貢献者';
+            }
+            return Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    const Text(
+                      'あなたの貢献',
+                      style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Color(0xFF1E293B)),
+                    ),
+                    const Spacer(),
+                    if (badge != null)
+                      Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                        decoration: BoxDecoration(
+                          color: const Color(0xFF0F4C81).withAlpha(20),
+                          borderRadius: BorderRadius.circular(20),
+                        ),
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            const Icon(Icons.workspace_premium_rounded, size: 14, color: Color(0xFF0F4C81)),
+                            const SizedBox(width: 4),
+                            Text(badge, style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Color(0xFF0F4C81))),
+                          ],
+                        ),
+                      )
+                    else
+                      const Text('まだ貢献バッジがありません', style: TextStyle(fontSize: 10, color: Color(0xFF94A3B8))),
+                  ],
+                ),
+                const SizedBox(height: 12),
+                Text('レビュー $reviews件', style: const TextStyle(fontSize: 13, color: Color(0xFF334155))),
+                const SizedBox(height: 4),
+                Text('受け取った「役に立った」 $helpful', style: const TextStyle(fontSize: 13, color: Color(0xFF334155))),
+                const SizedBox(height: 4),
+                Theme(
+                  data: Theme.of(context).copyWith(dividerColor: Colors.transparent),
+                  child: ExpansionTile(
+                    tilePadding: EdgeInsets.zero,
+                    childrenPadding: const EdgeInsets.only(bottom: 4),
+                    title: Text(
+                      '自分のレビュー ($reviews)',
+                      style: const TextStyle(fontSize: 13, fontWeight: FontWeight.bold, color: Color(0xFF334155)),
+                    ),
+                    children: list.isEmpty
+                        ? const [
+                            Align(
+                              alignment: Alignment.centerLeft,
+                              child: Padding(
+                                padding: EdgeInsets.symmetric(vertical: 4),
+                                child: Text('まだレビューを書いていません', style: TextStyle(fontSize: 12, color: Color(0xFF94A3B8))),
+                              ),
+                            ),
+                          ]
+                        : list.map(_buildMyReviewRow).toList(),
+                  ),
+                ),
+              ],
+            );
+          },
+        ),
+      ),
+    );
+  }
+
+  Widget _buildMyReviewRow(Review review) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 4),
+      child: Row(
+        children: [
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  review.courseName.isEmpty ? '(科目名なし)' : review.courseName,
+                  style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: Color(0xFF1E293B)),
+                ),
+                Row(
+                  children: List.generate(
+                    5,
+                    (i) => Icon(
+                      i < review.rating ? Icons.star : Icons.star_border,
+                      size: 14,
+                      color: const Color(0xFFFBBF24),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+          TextButton(
+            onPressed: () => showReviewFormSheet(
+              context,
+              store: widget.store,
+              courseKey: review.courseKey,
+              courseName: review.courseName,
+              existing: review,
+            ),
+            child: const Text('編集', style: TextStyle(fontSize: 12, color: Color(0xFF0F4C81))),
+          ),
+        ],
+      ),
+    );
+  }
+
   void _showDeleteConfirmDialog(String postId, String title) {
     showDialog(
       context: context,
@@ -353,6 +498,9 @@ class _MyPageScreenState extends State<MyPageScreen> {
                 ),
               ),
             ),
+            const SizedBox(height: 16),
+
+            _buildContributionCard(),
             const SizedBox(height: 16),
 
             // Timetable Edit Button & Rules Button

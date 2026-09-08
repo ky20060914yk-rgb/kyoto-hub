@@ -129,6 +129,18 @@ void main() {
     expect(list.map((r) => r.courseKey).toSet(), {'ck'});
   });
 
+  test('streamMyReviews returns exactly the caller\'s reviews', () async {
+    final db = FakeFirebaseFirestore();
+    final svc = ReviewService(db);
+    await svc.submitReview(_review('ck1', 'u1'));
+    await svc.submitReview(_review('ck2', 'u1'));
+    await svc.submitReview(_review('ck3', 'u2'));
+    final list = await svc.streamMyReviews('u1').first;
+    expect(list.length, 2);
+    expect(list.map((r) => r.courseKey).toSet(), {'ck1', 'ck2'});
+    expect(list.every((r) => r.authorId == 'u1'), isTrue);
+  });
+
   test('bumpPostCount updates the right counter', () async {
     final db = FakeFirebaseFirestore();
     final svc = ReviewService(db);

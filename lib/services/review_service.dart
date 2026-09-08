@@ -50,6 +50,19 @@ class ReviewService {
     });
   }
 
+  /// Every review authored by [uid], newest edit first.
+  ///
+  /// A single-field `where` needs no composite index, so the `updatedAt`
+  /// ordering is done client-side rather than with an `orderBy` (which would
+  /// force one). Used by マイページ's contribution card.
+  Stream<List<Review>> streamMyReviews(String uid) {
+    return _reviews
+        .where('authorId', isEqualTo: uid)
+        .snapshots()
+        .map((snap) => snap.docs.map((d) => Review.fromMap(d.data())).toList()
+          ..sort((a, b) => b.updatedAt.compareTo(a.updatedAt)));
+  }
+
   /// `course_stats/{courseKey}`, or [CourseStats.empty] if the doc is missing.
   Future<CourseStats> getStats(String courseKey) async {
     final snap = await _stats.doc(courseKey).get();
