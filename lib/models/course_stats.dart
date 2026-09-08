@@ -165,7 +165,12 @@ class CourseStats {
   /// A stored counter that is not a number at all (a string, a map, absent)
   /// reads as 0 rather than raising. `as num?` alone would still throw on a
   /// `'3'`, which is exactly the shape a hand-crafted document can carry.
-  static int _int(dynamic raw) => raw is num ? raw.toInt() : 0;
+  ///
+  /// The `isFinite` guard matters too: Firestore accepts `NaN` / `Infinity` as
+  /// valid double values, and `double.nan.toInt()` throws `UnsupportedError`.
+  /// The `course_stats` rules shape-guard only the two scalar counters, so a
+  /// crafted bucket map or post-count field could otherwise crash every reader.
+  static int _int(dynamic raw) => (raw is num && raw.isFinite) ? raw.toInt() : 0;
 
   static Map<String, int> _intMap(dynamic raw) {
     if (raw is! Map) return {};

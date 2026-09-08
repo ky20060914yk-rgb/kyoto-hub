@@ -85,6 +85,18 @@ void main() {
         ['u1', 'u2']);
   });
 
+  // Firestore accepts NaN / Infinity as valid doubles and `double.nan.toInt()`
+  // throws `UnsupportedError` — a crafted `rating` must degrade, not crash the
+  // whole list.
+  test('fromMap does not throw on NaN / Infinity rating', () {
+    late Review a;
+    late Review b;
+    expect(() => a = Review.fromMap({'rating': double.nan}), returnsNormally);
+    expect(() => b = Review.fromMap({'rating': double.infinity}), returnsNormally);
+    expect(a.rating, 0);
+    expect(b.rating, 0);
+  });
+
   test('docId is deterministic', () {
     expect(Review.docId('微積a|山田', 'u9'), '微積a|山田_u9');
   });

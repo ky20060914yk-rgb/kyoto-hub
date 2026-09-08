@@ -312,7 +312,10 @@ class Review {
   /// not a whole number in range collapses to 0 ("unrated") instead of throwing
   /// or painting an absurd row of stars.
   static int _rating(dynamic raw) {
-    final v = raw is int ? raw : (raw is num ? raw.toInt() : 0);
+    // `isFinite` guard: Firestore accepts NaN/Infinity as doubles and
+    // `double.nan.toInt()` throws `UnsupportedError` — that must not take the
+    // whole review list down for every reader.
+    final v = raw is int ? raw : ((raw is num && raw.isFinite) ? raw.toInt() : 0);
     return v < 0 ? 0 : (v > 5 ? 5 : v);
   }
 

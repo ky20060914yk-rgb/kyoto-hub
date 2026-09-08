@@ -81,6 +81,29 @@ void main() {
     expect(s.avgRating, 0); // reviewCount 0 -> no division by zero
   });
 
+  // Firestore accepts NaN / Infinity as valid doubles and `double.nan.toInt()`
+  // throws `UnsupportedError`. The `course_stats` rules do not shape-guard the
+  // bucket maps or the post-count fields, so a crafted doc must not crash
+  // `fromMap` for every reader of the tab.
+  test('fromMap does not throw on NaN / Infinity numeric fields', () {
+    late CourseStats s;
+    expect(
+      () => s = CourseStats.fromMap({
+        'courseKey': 'ck',
+        'reviewCount': double.infinity,
+        'ratingSum': double.nan,
+        'rakutanCounts': {'raku': double.nan, 'muzu': 2},
+        'pastExamPostCount': double.infinity,
+      }),
+      returnsNormally,
+    );
+    expect(s.reviewCount, 0);
+    expect(s.ratingSum, 0);
+    expect(s.rakutanCounts['raku'], 0);
+    expect(s.rakutanCounts['muzu'], 2);
+    expect(s.pastExamPostCount, 0);
+  });
+
   // Merge safety: under `set(merge: true)` an explicit null is a write that
   // erases the stored value, so a stats doc with no timestamp must omit the key
   // rather than clobber a `lastReviewAt` a concurrent write recorded.
