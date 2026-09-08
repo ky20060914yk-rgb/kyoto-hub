@@ -250,4 +250,19 @@ void main() {
     await repo.warmUp();
     expect((await repo.forSlot('Mon', 2)).length, 2);
   });
+
+  test('byCourseKey returns a Subject for a known courseKey after warmUp', () async {
+    final repo = CourseRepository(await _seeded());
+    await repo.warmUp();
+    final s = repo.byCourseKey('微分積分学a|山田太郎');
+    expect(s, isNotNull);
+    expect(s!.courseKey, '微分積分学a|山田太郎');
+  });
+
+  test('byCourseKey returns null for an unknown courseKey and before warmUp', () async {
+    final repo = CourseRepository(await _seeded());
+    expect(repo.byCourseKey('nope|nobody'), isNull); // not warm yet
+    await repo.warmUp();
+    expect(repo.byCourseKey('nope|nobody'), isNull);
+  });
 }

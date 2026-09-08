@@ -28,6 +28,9 @@ class CourseRepository {
   /// `_refreshRegistered()`.
   final Set<String> _missing = {};
 
+  /// Lookup map from courseKey to Subject for ranking row joins (Plan B, さがす).
+  final Map<String, Subject> _byCourseKey = {};
+
   bool _loaded = false;
   Future<void>? _loading;
 
@@ -59,6 +62,7 @@ class CourseRepository {
     _byId[s.id] = s;
     _haystack[s.id] = '${_fold(s.name)} ${_fold(s.lecturer)} ${_fold(s.faculty)}';
     _missing.remove(s.id);
+    if (s.courseKey.isNotEmpty) _byCourseKey.putIfAbsent(s.courseKey, () => s);
   }
 
   Query<Map<String, dynamic>> _query() =>
@@ -146,6 +150,7 @@ class CourseRepository {
       _byId.clear();
       _haystack.clear();
       _missing.clear();
+      _byCourseKey.clear();
       for (final d in snap.docs) {
         final s = _fromDoc(d.id, d.data());
         // A malformed document is skipped, not fatal (C1).
@@ -205,6 +210,12 @@ class CourseRepository {
     _remember(s);
     return s;
   }
+
+  /// Synchronous courseKey → Subject lookup for ranking row joins (Plan B).
+  /// Returns any one cached Subject whose courseKey matches, or null if the
+  /// catalog isn't warm or no match exists. The catalog has several Subjects
+  /// per courseKey (one per slot); the first one wins for display purposes.
+  Subject? byCourseKey(String courseKey) => _byCourseKey[courseKey];
 
   // best-effort courseKey — no NFKC in dart:core; Plan 2 (review aggregation by
   // courseKey) must reconcile. A hand-added course's key may not match a catalog
