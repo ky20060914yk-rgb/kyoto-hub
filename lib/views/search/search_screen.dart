@@ -75,6 +75,13 @@ class _SearchScreenState extends State<SearchScreen> {
     _rankings = {
       for (final k in RankingKind.values) k: widget.store.ranking.ranking(k),
     };
+    // さがす is the default tab (nav index 0), so on a cold catalog cache the
+    // synchronous `byCourseKey` joins below all return null and every ranking
+    // section shows the empty state until a manual pull-to-refresh. Warming the
+    // catalog and rebuilding re-runs those joins deterministically.
+    widget.store.courses.warmUp().then((_) {
+      if (mounted) setState(() {});
+    });
   }
 
   @override
