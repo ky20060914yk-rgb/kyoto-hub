@@ -55,5 +55,38 @@ void main() {
     expect(back.reviewCount, 1);
     expect(back.ratingSum, 4);
     expect(back.rakutanCounts['raku'], 1);
+    expect(back.lastReviewAt, DateTime(2024));
+  });
+
+  // `course_stats` is trust-written by any verified KU client and the ranking
+  // screen reads every course in one pass, so one crafted document must not be
+  // able to crash the whole read.
+  test('fromMap is total: wrong TYPES degrade instead of throwing', () {
+    late CourseStats s;
+    expect(
+      () => s = CourseStats.fromMap({
+        'reviewCount': '3', // string, not a number
+        'ratingSum': 1.0, // double, not an int
+        'lastReviewAt': 7, // not a date string
+        'rakutanCounts': {'raku': 'lots'}, // non-numeric bucket
+        'courseKey': 42,
+      }),
+      returnsNormally,
+    );
+    expect(s.reviewCount, 0);
+    expect(s.ratingSum, 1);
+    expect(s.lastReviewAt, isNull);
+    expect(s.rakutanCounts['raku'], 0);
+    expect(s.courseKey, '42');
+    expect(s.avgRating, 0); // reviewCount 0 -> no division by zero
+  });
+
+  // Merge safety: under `set(merge: true)` an explicit null is a write that
+  // erases the stored value, so a stats doc with no timestamp must omit the key
+  // rather than clobber a `lastReviewAt` a concurrent write recorded.
+  test('toMap omits lastReviewAt entirely when it is null', () {
+    expect(CourseStats.empty('ck').toMap().containsKey('lastReviewAt'), isFalse);
+    final withDate = CourseStats.empty('ck').applyReview(_r('u1'), delta: 1);
+    expect(withDate.toMap()['lastReviewAt'], isNotNull);
   });
 }

@@ -46,6 +46,45 @@ void main() {
     expect(back.helpfulBy, isEmpty);
   });
 
+  // A course's reviews arrive as one `where('courseKey', ...)` stream mapped
+  // client-side, so a single malformed document must not throw — that would
+  // blank the entire list for every reader, not just hide the bad row.
+  test('fromMap is total: wrong TYPES degrade instead of throwing', () {
+    late Review back;
+    expect(
+      () => back = Review.fromMap({
+        'id': 'a_b',
+        'courseKey': 'a',
+        'authorId': 'b',
+        'rating': 'x', // not a number at all
+        'helpfulBy': 'nope', // not a list
+        'createdAt': 12345, // not a date string
+        'updatedAt': null,
+        'rakutan': 7, // not a string
+        'termTaken': 99,
+      }),
+      returnsNormally,
+    );
+    expect(back.rating, 0);
+    expect(back.helpfulBy, isEmpty);
+    expect(back.helpfulCount, 0);
+    expect(back.rakutan, Rakutan.futsu); // default, not a crash
+    expect(back.termTaken, '99');
+    expect(back.courseKey, 'a');
+    expect(back.createdAt, isNotNull);
+  });
+
+  test('fromMap coerces out-of-range and non-int ratings into 0..5', () {
+    Review r(dynamic rating) => Review.fromMap({'rating': rating});
+    expect(r(99).rating, 5);
+    expect(r(-3).rating, 0);
+    expect(r(4.7).rating, 4); // truncated, not thrown
+    expect(r(null).rating, 0);
+    // A well-formed helpfulBy with junk mixed in keeps only the uids.
+    expect(Review.fromMap({'helpfulBy': ['u1', 7, null, 'u2']}).helpfulBy,
+        ['u1', 'u2']);
+  });
+
   test('docId is deterministic', () {
     expect(Review.docId('微積a|山田', 'u9'), '微積a|山田_u9');
   });

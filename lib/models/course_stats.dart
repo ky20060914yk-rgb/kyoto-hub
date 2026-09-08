@@ -132,34 +132,43 @@ class CourseStats {
       'gradingCounts': gradingCounts,
       'pastExamCounts': pastExamCounts,
       'bringInCounts': bringInCounts,
-      'lastReviewAt': lastReviewAt?.toIso8601String(),
+      // Same merge-safety rule as the post counts: under `set(merge: true)` an
+      // explicit `null` is a WRITE that erases the stored value, so a stats
+      // write that happens to carry no timestamp must omit the key rather than
+      // clobber a `lastReviewAt` another write already recorded.
+      if (lastReviewAt != null) 'lastReviewAt': lastReviewAt!.toIso8601String(),
     };
   }
 
+  /// Total: never throws. A `course_stats` document is trust-written by any
+  /// verified KU client (the rules shape-guard only `university_id` and the two
+  /// scalar counters), and the ranking screen reads every course's aggregate in
+  /// one pass — so one crafted or legacy document must not be able to crash it.
   factory CourseStats.fromMap(Map<String, dynamic> map) {
     return CourseStats(
-      courseKey: (map['courseKey'] ?? '') as String,
-      universityId: (map['university_id'] ?? 'kyoto_u') as String,
-      reviewCount: (map['reviewCount'] ?? 0) as int,
-      ratingSum: (map['ratingSum'] ?? 0) as int,
+      courseKey: map['courseKey']?.toString() ?? '',
+      universityId: map['university_id']?.toString() ?? 'kyoto_u',
+      reviewCount: _int(map['reviewCount']),
+      ratingSum: _int(map['ratingSum']),
       rakutanCounts: _intMap(map['rakutanCounts']),
       attendanceCounts: _intMap(map['attendanceCounts']),
       gradingCounts: _intMap(map['gradingCounts']),
       pastExamCounts: _intMap(map['pastExamCounts']),
       bringInCounts: _intMap(map['bringInCounts']),
       // P2: written by bumpPostCount, not by the review path — but always read.
-      pastExamPostCount: (map['pastExamPostCount'] ?? 0) as int,
-      resourcePostCount: (map['resourcePostCount'] ?? 0) as int,
-      lastReviewAt: map['lastReviewAt'] != null
-          ? DateTime.parse(map['lastReviewAt'] as String)
-          : null,
+      pastExamPostCount: _int(map['pastExamPostCount']),
+      resourcePostCount: _int(map['resourcePostCount']),
+      lastReviewAt: DateTime.tryParse((map['lastReviewAt'] ?? '').toString()),
     );
   }
 
+  /// A stored counter that is not a number at all (a string, a map, absent)
+  /// reads as 0 rather than raising. `as num?` alone would still throw on a
+  /// `'3'`, which is exactly the shape a hand-crafted document can carry.
+  static int _int(dynamic raw) => raw is num ? raw.toInt() : 0;
+
   static Map<String, int> _intMap(dynamic raw) {
     if (raw is! Map) return {};
-    return raw.map(
-      (key, value) => MapEntry('$key', (value as num?)?.toInt() ?? 0),
-    );
+    return raw.map((key, value) => MapEntry('$key', _int(value)));
   }
 }

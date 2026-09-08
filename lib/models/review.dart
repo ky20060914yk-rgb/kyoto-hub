@@ -271,32 +271,53 @@ class Review {
     };
   }
 
+  /// Total: never throws, whatever the document holds.
+  ///
+  /// A course's review list is one `where('courseKey', ...)` stream mapped
+  /// client-side, so a single malformed document must not be able to take the
+  /// whole list down for every reader. The rules validate identity, `rating`,
+  /// `university_id` and the initial `helpfulBy`, but the enum fields, the free
+  /// text and the timestamps are unvalidated — and a document written before
+  /// the current rules, or by the Admin SDK, is not covered at all. So every
+  /// field here degrades to a default rather than raising.
   factory Review.fromMap(Map<String, dynamic> map) {
     return Review(
-      id: map['id'] ?? '',
-      courseKey: map['courseKey'] ?? '',
-      courseName: map['courseName'] ?? '',
-      universityId: map['university_id'] ?? 'kyoto_u',
-      authorId: map['authorId'] ?? '',
-      authorName: map['authorName'] ?? '匿名京大生',
-      rating: map['rating'] ?? 0,
-      rakutan: RakutanX.fromString(map['rakutan'] ?? ''),
-      attendance: AttendanceX.fromString(map['attendance'] ?? ''),
-      grading: GradingStyleX.fromString(map['grading'] ?? ''),
-      pastExam: PastExamUsefulnessX.fromString(map['pastExam'] ?? ''),
-      bringIn: BringInX.fromString(map['bringIn'] ?? ''),
-      comment: map['comment'] ?? '',
-      termTaken: map['termTaken'],
-      gradeTaken: map['gradeTaken'],
-      helpfulBy: List<String>.from(map['helpfulBy'] ?? const []),
-      createdAt: map['createdAt'] != null
-          ? DateTime.parse(map['createdAt'])
-          : DateTime.now(),
-      updatedAt: map['updatedAt'] != null
-          ? DateTime.parse(map['updatedAt'])
-          : DateTime.now(),
+      id: map['id']?.toString() ?? '',
+      courseKey: map['courseKey']?.toString() ?? '',
+      courseName: map['courseName']?.toString() ?? '',
+      universityId: map['university_id']?.toString() ?? 'kyoto_u',
+      authorId: map['authorId']?.toString() ?? '',
+      authorName: map['authorName']?.toString() ?? '匿名京大生',
+      rating: _rating(map['rating']),
+      // `fromString` defaults on any unknown string; `?.toString() ?? ''` keeps
+      // a non-string (or absent) value from raising before it gets there.
+      rakutan: RakutanX.fromString(map['rakutan']?.toString() ?? ''),
+      attendance: AttendanceX.fromString(map['attendance']?.toString() ?? ''),
+      grading: GradingStyleX.fromString(map['grading']?.toString() ?? ''),
+      pastExam: PastExamUsefulnessX.fromString(map['pastExam']?.toString() ?? ''),
+      bringIn: BringInX.fromString(map['bringIn']?.toString() ?? ''),
+      comment: map['comment']?.toString() ?? '',
+      termTaken: map['termTaken']?.toString(),
+      gradeTaken: map['gradeTaken']?.toString(),
+      helpfulBy: map['helpfulBy'] is Iterable
+          ? List<String>.from(
+              (map['helpfulBy'] as Iterable).whereType<String>())
+          : const <String>[],
+      createdAt: _date(map['createdAt']),
+      updatedAt: _date(map['updatedAt']),
     );
   }
+
+  /// `rating` is non-nullable and rendered as 1..5 stars, so anything that is
+  /// not a whole number in range collapses to 0 ("unrated") instead of throwing
+  /// or painting an absurd row of stars.
+  static int _rating(dynamic raw) {
+    final v = raw is int ? raw : (raw is num ? raw.toInt() : 0);
+    return v < 0 ? 0 : (v > 5 ? 5 : v);
+  }
+
+  static DateTime _date(dynamic raw) =>
+      DateTime.tryParse(raw?.toString() ?? '') ?? DateTime.now();
 
   Review copyWith({
     String? id,
