@@ -156,8 +156,12 @@ class CourseStats {
       pastExamCounts: _intMap(map['pastExamCounts']),
       bringInCounts: _intMap(map['bringInCounts']),
       // P2: written by bumpPostCount, not by the review path — but always read.
-      pastExamPostCount: _int(map['pastExamPostCount']),
-      resourcePostCount: _int(map['resourcePostCount']),
+      // Clamped at >= 0: every post that predates the counters never issued a
+      // `+1`, so deleting one lands an `increment(-1)` on a doc that is at 0
+      // and the UI would render 「過去問 -1件」. A negative stored value is
+      // read as 0 until `tools/backfill_post_counts.mjs` recounts the doc.
+      pastExamPostCount: _nonNeg(map['pastExamPostCount']),
+      resourcePostCount: _nonNeg(map['resourcePostCount']),
       lastReviewAt: DateTime.tryParse((map['lastReviewAt'] ?? '').toString()),
     );
   }
@@ -171,6 +175,10 @@ class CourseStats {
   /// The `course_stats` rules shape-guard only the two scalar counters, so a
   /// crafted bucket map or post-count field could otherwise crash every reader.
   static int _int(dynamic raw) => (raw is num && raw.isFinite) ? raw.toInt() : 0;
+
+  /// [_int] floored at 0 — for the two counters that can legitimately be driven
+  /// negative by an `increment(-1)` against a doc that never recorded the `+1`.
+  static int _nonNeg(dynamic raw) => _clamp(_int(raw));
 
   static Map<String, int> _intMap(dynamic raw) {
     if (raw is! Map) return {};

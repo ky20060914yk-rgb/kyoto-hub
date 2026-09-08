@@ -104,6 +104,29 @@ void main() {
     expect(s.pastExamPostCount, 0);
   });
 
+  // Every post that predates Task 8 never issued a `+1`, so deleting one lands
+  // an `increment(-1)` on a counter sitting at 0 and Firestore stores -1. The
+  // UI must never render 「過去問 -1件」; a negative reads as 0 until
+  // `tools/backfill_post_counts.mjs` recounts the doc.
+  test('fromMap clamps negative post counters at 0', () {
+    final s = CourseStats.fromMap({
+      'courseKey': 'ck',
+      'pastExamPostCount': -3,
+      'resourcePostCount': -1,
+    });
+    expect(s.pastExamPostCount, 0);
+    expect(s.resourcePostCount, 0);
+
+    // A positive value is still read through unchanged.
+    final ok = CourseStats.fromMap({
+      'courseKey': 'ck',
+      'pastExamPostCount': 4,
+      'resourcePostCount': 2,
+    });
+    expect(ok.pastExamPostCount, 4);
+    expect(ok.resourcePostCount, 2);
+  });
+
   // Merge safety: under `set(merge: true)` an explicit null is a write that
   // erases the stored value, so a stats doc with no timestamp must omit the key
   // rather than clobber a `lastReviewAt` a concurrent write recorded.
