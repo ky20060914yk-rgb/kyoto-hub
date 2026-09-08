@@ -73,6 +73,16 @@ class CourseRepository {
     return _loading ??= _load();
   }
 
+  /// Drops the "already loaded" latch so the next [warmUp] re-runs [_load].
+  /// Test-only: there is no production catalog-refresh path yet, but [_load]
+  /// must be safe to re-run — it clears every index (including `_byCourseKey`)
+  /// before repopulating, so a reload never leaves a stale mapping behind.
+  @visibleForTesting
+  void resetForReload() {
+    _loaded = false;
+    _loading = null;
+  }
+
   /// Reads `meta/catalog.courseCount` — the number of course documents the last
   /// seed wrote (one document read per cold start).
   ///

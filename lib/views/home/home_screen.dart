@@ -13,10 +13,10 @@ class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key, required this.store});
 
   @override
-  State<HomeScreen> createState() => HomeScreenState();
+  State<HomeScreen> createState() => _HomeScreenState();
 }
 
-class HomeScreenState extends State<HomeScreen> {
+class _HomeScreenState extends State<HomeScreen> {
   final _searchController = TextEditingController();
   String _searchQuery = '';
   bool _isGridView = true;
@@ -184,13 +184,6 @@ class HomeScreenState extends State<HomeScreen> {
         ],
       ),
     );
-  }
-
-  void resetSearch() {
-    _searchDebounce?.cancel();
-    _searchController.clear();
-    _searchQuery = '';
-    _runSearch('');
   }
 
   void _openOnboardingEditor() {

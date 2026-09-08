@@ -147,10 +147,16 @@ void main() {
     expect(s.score, s.rakutanScore.round());
   });
 
-  test('fromMap clamps a negative/NaN score to a sane value', () {
-    expect(CourseStats.fromMap({'score': -5}).score, 0);
-    expect(CourseStats.fromMap({'score': double.nan}).score, 0);
-    expect(CourseStats.fromMap({}).score, 50); // P-B2: absent -> 50 (neutral)
+  // I3 + M9: `score` is a 0..100 snapshot of `rakutanScore`. The `course_stats`
+  // rules do NOT shape-guard `score`, so a crafted write must be clamped on
+  // read (an unbounded value pins a course to #1 in 楽単ランキング). Non-numeric
+  // and non-finite values fall back to the neutral 50, not 0.
+  test('fromMap clamps score into 0..100 and falls back to 50', () {
+    expect(CourseStats.fromMap({'score': 999999}).score, 100); // upper clamp
+    expect(CourseStats.fromMap({'score': -5}).score, 0); // lower clamp
+    expect(CourseStats.fromMap({'score': 'abc'}).score, 50); // non-numeric
+    expect(CourseStats.fromMap({'score': double.nan}).score, 50); // non-finite
+    expect(CourseStats.fromMap({}).score, 50); // absent -> neutral (P-B2)
   });
 
   // Merge safety: under `set(merge: true)` an explicit null is a write that

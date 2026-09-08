@@ -133,8 +133,9 @@ void main() {
     ]);
     expect(r.poolFetchCount, 1);
 
-    // Same memoised pool instance is handed back after settle.
-    expect(identical(await r.pool(), await r.pool()), isTrue);
+    // Memoised: a later pool() call inside the TTL does not refetch.
+    await r.pool();
+    await r.pool();
     expect(r.poolFetchCount, 1);
 
     // invalidate() clears the in-flight guard too, so the next call refetches.
@@ -143,6 +144,49 @@ void main() {
       for (final k in RankingKind.values) r.ranking(k),
     ]);
     expect(r.poolFetchCount, 2);
+  });
+
+  // I1: invalidate() during an in-flight fetch must not corrupt the memo — the
+  // orphaned fetch neither publishes stale data nor nulls the new fetch's guard.
+  test('I1: invalidate() mid-flight — exactly one extra fetch, no stale publish',
+      () async {
+    final db = await _db();
+    final r = RankingService(db);
+
+    // First wave: N concurrent pool() calls => a single fetch.
+    await Future.wait([for (var i = 0; i < 5; i++) r.pool()]);
+    expect(r.poolFetchCount, 1);
+
+    // Mutate the backing data, then invalidate and re-fetch.
+    await db
+        .collection('course_stats')
+        .doc('quiet|d')
+        .set({'reviewCount': 42}, SetOptions(merge: true));
+    r.invalidate();
+
+    final results = await Future.wait([for (var i = 0; i < 5; i++) r.pool()]);
+    // Exactly one more fetch — the guard held across the concurrent calls.
+    expect(r.poolFetchCount, 2);
+    // The new pool reflects the mutation (no stale publish from the orphan).
+    for (final pool in results) {
+      expect(pool.firstWhere((s) => s.courseKey == 'quiet|d').reviewCount, 42);
+    }
+    expect(
+        (await r.pool()).firstWhere((s) => s.courseKey == 'quiet|d').reviewCount,
+        42);
+  });
+
+  test('M2: pool() hands out a copy on both the cache-hit and fetch paths',
+      () async {
+    final r = RankingService(await _db());
+    final first = await r.pool(); // fetch path
+    first.clear();
+    final second = await r.pool(); // cache-hit path
+    expect(second, isNotEmpty, reason: 'mutating the returned list must not '
+        'touch the internal pool');
+    second.removeWhere((_) => true);
+    expect(await r.pool(), isNotEmpty);
+    expect(r.poolFetchCount, 1);
   });
 
   test('M2: ranking() operates on a copy, not the shared pool', () async {

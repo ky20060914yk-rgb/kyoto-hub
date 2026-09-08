@@ -647,7 +647,8 @@ class _MyPageScreenState extends State<MyPageScreen> {
               elevation: 0,
               color: Colors.white,
               shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(12),
+                // Match the sibling list cards on this screen (circular(8)).
+                borderRadius: BorderRadius.circular(8),
                 side: const BorderSide(color: Color(0xFFE2E8F0)),
               ),
               child: Column(

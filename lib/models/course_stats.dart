@@ -211,12 +211,18 @@ class CourseStats {
       // for `FieldValue.serverTimestamp()` here must convert on read (or keep
       // writing ISO strings) or this field will read as null forever.
       lastReviewAt: DateTime.tryParse((map['lastReviewAt'] ?? '').toString()),
-      // RULING P-B2: absent -> 50 (neutral, matches `rakutanScore` at 0
-      // reviews); a negative or NaN stored value -> 0 via `_nonNeg`'s
-      // finite-guard + `_clamp`.
-      score: _nonNeg(map['score'] ?? 50),
+      score: _score(map['score']),
     );
   }
+
+  /// [score] is a 0..100 snapshot of [rakutanScore]. Absent or non-numeric ->
+  /// 50 (neutral, matches [rakutanScore] at 0 reviews; RULING P-B2). A stored
+  /// value outside 0..100 is clamped: the `course_stats` rules do NOT
+  /// shape-guard `score`, so a crafted write could otherwise pin a course to
+  /// the top of 楽単ランキング (badge overflow, and 科目詳細 — which shows the
+  /// honest `rakutanScore.round()` — would visibly disagree).
+  static int _score(dynamic raw) =>
+      (raw is num && raw.isFinite) ? raw.toInt().clamp(0, 100) : 50;
 
   /// A stored counter that is not a number at all (a string, a map, absent)
   /// reads as 0 rather than raising. `as num?` alone would still throw on a

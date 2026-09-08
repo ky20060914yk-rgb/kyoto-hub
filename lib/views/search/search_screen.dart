@@ -64,6 +64,13 @@ class _SearchScreenState extends State<SearchScreen> {
 
   String _faculty = 'すべて';
 
+  // I2: RefreshIndicator only ignores new pulls while `onRefresh`'s future is
+  // pending — and `_refresh` used to return before the fetch resolved. This
+  // guard also covers the four `_inlineError(_refresh)` 再試行 buttons, which
+  // have no indicator of their own. Without it, refresh-spam launched N
+  // concurrent pool fetches.
+  bool _refreshing = false;
+
   // Assigned ONCE in initState (and reassigned only by pull-to-refresh). The
   // Future objects must be stable across build() so a rebuild never refetches —
   // hence a plain field, not `late final`, and never created in build().
@@ -81,7 +88,7 @@ class _SearchScreenState extends State<SearchScreen> {
     // catalog and rebuilding re-runs those joins deterministically.
     widget.store.courses.warmUp().then((_) {
       if (mounted) setState(() {});
-    });
+    }).catchError((_) {});
   }
 
   @override
@@ -141,12 +148,23 @@ class _SearchScreenState extends State<SearchScreen> {
   }
 
   Future<void> _refresh() async {
-    widget.store.ranking.invalidate();
-    setState(() {
-      _rankings = {
-        for (final k in RankingKind.values) k: widget.store.ranking.ranking(k),
-      };
-    });
+    if (_refreshing) return;
+    _refreshing = true;
+    try {
+      widget.store.ranking.invalidate();
+      setState(() {
+        _rankings = {
+          for (final k in RankingKind.values) k: widget.store.ranking.ranking(k),
+        };
+      });
+      // Keep the indicator spinner up until the fetch resolves. Per-section
+      // errors are surfaced by the FutureBuilder's `snap.hasError`; the
+      // `.catchError` here only stops an unhandled `Future.wait` rejection.
+      await Future.wait(_rankings.values)
+          .catchError((_) => const <List<CourseStats>>[]);
+    } finally {
+      _refreshing = false;
+    }
   }
 
   bool _matchesFaculty(String faculty) =>
