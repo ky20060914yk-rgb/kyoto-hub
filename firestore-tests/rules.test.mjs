@@ -873,8 +873,9 @@ test('course_stats writes are shape-guarded and deletion is forbidden', async ()
   await assertFails(setDoc(doc(ku, 'course_stats/ck'), { reviewCount: 'many' }, { merge: true }));
   await assertFails(setDoc(doc(ku, 'course_stats/ck'), { ratingSum: 3.5 }, { merge: true }));
   await assertFails(setDoc(doc(ku, 'course_stats/ck'), { university_id: 'osaka_u' }, { merge: true }));
-  // A create that omits the guarded counters is refused as well.
-  await assertFails(setDoc(doc(ku, 'course_stats/fresh'), {
+  // Counter-only creates are allowed (for bumpPostCount on fresh docs), but
+  // negative/non-int counters still fail.
+  await assertSucceeds(setDoc(doc(ku, 'course_stats/fresh'), {
     courseKey: 'fresh', university_id: 'kyoto_u',
   }));
   await assertSucceeds(setDoc(doc(ku, 'course_stats/fresh'), {
@@ -901,6 +902,24 @@ test('course_stats: counter-only merge writes succeed without reviewCount/rating
   await assertSucceeds(setDoc(doc(ku, 'course_stats/ck_counter'), {
     resourcePostCount: 3,
   }, { merge: true }));
+});
+
+// Counter-only CREATE (no prior doc) must succeed: when bumpPostCount fires on
+// a course that nobody has reviewed yet, course_stats/{courseKey} does not exist,
+// so the merge write is a create. It must pass with only counter fields.
+test('course_stats: a counter-only CREATE (no prior doc) succeeds', async () => {
+  const ku = asKu();
+  await assertSucceeds(setDoc(doc(ku, 'course_stats/ck_fresh_counter'),
+    { courseKey: 'ck_fresh_counter', university_id: 'kyoto_u', pastExamPostCount: 1 },
+    { merge: true }));
+});
+
+// Counter-only CREATE with an invalid reviewCount must fail: shape guards still apply.
+test('course_stats: a counter-only CREATE with invalid reviewCount fails', async () => {
+  const ku = asKu();
+  await assertFails(setDoc(doc(ku, 'course_stats/ck_fresh_invalid'),
+    { courseKey: 'ck_fresh_invalid', university_id: 'kyoto_u', pastExamPostCount: 1, reviewCount: -1 },
+    { merge: true }));
 });
 
 // --- queries -----------------------------------------------------------------
