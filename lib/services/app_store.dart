@@ -485,6 +485,16 @@ class AppStore extends ChangeNotifier {
     posts.insert(0, newPost);
     _firestore.createPost(newPost).catchError((_) {});
 
+    // Task 8: keep course_stats' post counters in step for the ranking.
+    // Fire-and-forget — a missed bump only skews a future ranking, it must
+    // never break the upload flow. (`sub` is the already-resolved course.)
+    final ck = sub?.courseKey ?? '';
+    if (ck.isNotEmpty) {
+      reviews
+          .bumpPostCount(ck, isPastExam: category == PostCategory.pastExam, delta: 1)
+          .catchError((_) {});
+    }
+
     int bonusAmount = 0;
 
     // Check daily limit of upload rewards (up to 3 uploads per day)
@@ -696,6 +706,14 @@ class AppStore extends ChangeNotifier {
 
     posts.removeAt(idx);
     await _firestore.deletePost(postId).catchError((_) {});
+
+    // Task 8: mirror the addPost bump. Fire-and-forget for the same reason.
+    final ck = (await courses.byId(post.subjectId))?.courseKey ?? '';
+    if (ck.isNotEmpty) {
+      reviews
+          .bumpPostCount(ck, isPastExam: post.category == PostCategory.pastExam, delta: -1)
+          .catchError((_) {});
+    }
 
     if (currentUser != null && post.authorId == currentUser!.uid) {
       int deductPoints = 0;
