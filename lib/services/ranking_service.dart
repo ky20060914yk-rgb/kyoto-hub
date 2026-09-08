@@ -1,4 +1,5 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:flutter/foundation.dart';
 
 import '../models/course_stats.dart';
 
@@ -31,20 +32,40 @@ class RankingService {
   DateTime? _pooledAt;
   static const _ttl = Duration(minutes: 2);
 
+  /// In-flight guard: when the さがす tab opens it fires four `ranking()` calls
+  /// synchronously, each of which calls [pool]. Without this the TTL memo can't
+  /// help (all four see `_pool == null`) so every one issues the two bounded
+  /// reads — ~4x the Firestore reads. A second [pool] call while the first is
+  /// in flight returns the SAME future. Mirrors `CourseRepository._loading`.
+  Future<List<CourseStats>>? _poolInFlight;
+
+  /// Number of times [_fetchPool] actually hit Firestore. Test-only assertion
+  /// hook for the concurrent-dedup guarantee.
+  @visibleForTesting
+  int poolFetchCount = 0;
+
   /// RULING P-B1: drop the memoised pool. Task 5's pull-to-refresh calls this so
   /// the next [pool]/[ranking] hits Firestore again.
   void invalidate() {
     _pool = null;
     _pooledAt = null;
+    _poolInFlight = null;
   }
 
-  Future<List<CourseStats>> pool({int poolLimit = 200}) async {
+  Future<List<CourseStats>> pool({int poolLimit = 200}) {
     final now = DateTime.now();
     if (_pool != null &&
         _pooledAt != null &&
         now.difference(_pooledAt!) < _ttl) {
-      return _pool!;
+      return Future.value(_pool!);
     }
+    return _poolInFlight ??=
+        _fetchPool(poolLimit).whenComplete(() => _poolInFlight = null);
+  }
+
+  Future<List<CourseStats>> _fetchPool(int poolLimit) async {
+    poolFetchCount++;
+    final now = DateTime.now();
 
     final a = await _db
         .collection('course_stats')

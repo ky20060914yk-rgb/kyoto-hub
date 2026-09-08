@@ -122,6 +122,29 @@ void main() {
     expect(mostPastExams.map((s) => s.courseKey), contains('zero'));
   });
 
+  // I2: opening the さがす tab fires four ranking() calls synchronously, each
+  // calling pool(). Without an in-flight guard all four see `_pool == null` and
+  // each issues the two bounded reads — ~4x the Firestore reads. The guard means
+  // a second pool() call while the first is in flight returns the SAME future.
+  test('I2: 4 concurrent ranking() calls trigger a single pool fetch', () async {
+    final r = RankingService(await _db());
+    await Future.wait([
+      for (final k in RankingKind.values) r.ranking(k),
+    ]);
+    expect(r.poolFetchCount, 1);
+
+    // Same memoised pool instance is handed back after settle.
+    expect(identical(await r.pool(), await r.pool()), isTrue);
+    expect(r.poolFetchCount, 1);
+
+    // invalidate() clears the in-flight guard too, so the next call refetches.
+    r.invalidate();
+    await Future.wait([
+      for (final k in RankingKind.values) r.ranking(k),
+    ]);
+    expect(r.poolFetchCount, 2);
+  });
+
   test('M2: ranking() operates on a copy, not the shared pool', () async {
     final r = RankingService(await _db());
 
