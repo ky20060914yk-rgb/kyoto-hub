@@ -69,6 +69,57 @@ void main() {
     expect(r!.helpfulBy, ['u2']);
   });
 
+  // MINOR — the real hazard is not the end state (arrayUnion alone dedupes) but
+  // the redundant `tx.update`: in production that write trips the reviews-update
+  // rule's `!diff().affectedKeys().hasAny(['helpfulBy'])` clause and fails with
+  // PERMISSION_DENIED. The early-return in `markHelpful` is what prevents it.
+  // fake_cloud_firestore can't spy on the transaction, so assert the doc is
+  // byte-identical (updateTime unchanged) across the redundant second call.
+  test('markHelpful second call performs no write (early-return guard)',
+      () async {
+    final db = FakeFirebaseFirestore();
+    final svc = ReviewService(db);
+    await svc.submitReview(_review('ck', 'u1'));
+    await svc.markHelpful(reviewId: 'ck_u1', uid: 'u2');
+
+    final before = await db.doc('reviews/ck_u1').get();
+    await svc.markHelpful(reviewId: 'ck_u1', uid: 'u2');
+    final after = await db.doc('reviews/ck_u1').get();
+
+    expect(after.data(), equals(before.data()));
+    expect((await svc.getMyReview('ck', 'u1'))!.helpfulBy, ['u2']);
+  });
+
+  // IMPORTANT — on an edit, submitReview must NOT write the caller's `helpfulBy`
+  // or `createdAt` over the stored (server-owned) values. The deployed rules
+  // hard-deny any author update whose diff touches `helpfulBy`, so a write that
+  // echoes a stale caller copy fails with PERMISSION_DENIED in production.
+  test('submitReview edit preserves server-owned helpfulBy and createdAt',
+      () async {
+    final db = FakeFirebaseFirestore();
+    final svc = ReviewService(db);
+
+    final original = _review('ck', 'u1', rating: 4);
+    await svc.submitReview(original);
+    // Another user marks it helpful — this is the server-owned state.
+    await svc.markHelpful(reviewId: 'ck_u1', uid: 'helper');
+
+    // The author edits their review; their in-memory copy carries a bogus
+    // helpfulBy and a different createdAt.
+    final edit = original.copyWith(
+      rating: 2,
+      helpfulBy: const ['someone', 'else'],
+      createdAt: DateTime(2020, 1, 1),
+      updatedAt: DateTime(2024, 6, 1),
+    );
+    await svc.submitReview(edit);
+
+    final stored = Review.fromMap((await db.doc('reviews/ck_u1').get()).data()!);
+    expect(stored.rating, 2); // the edit landed
+    expect(stored.helpfulBy, ['helper']); // caller's value did NOT overwrite
+    expect(stored.createdAt, original.createdAt); // original createdAt kept
+  });
+
   test('streamReviewsForCourse returns only that course, newest first', () async {
     final db = FakeFirebaseFirestore();
     final svc = ReviewService(db);

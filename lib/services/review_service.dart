@@ -85,7 +85,16 @@ class ReviewService {
           ? Review.fromMap(prevData)
           : null;
       stats = stats.applyReview(review, delta: 1, previous: previous);
-      tx.set(reviewRef, review.toMap());
+      // On an edit, `helpfulBy` and `createdAt` are server-owned: the deployed
+      // rules hard-deny any author update whose diff touches `helpfulBy`, so the
+      // write must carry the exact stored values rather than the caller's copy.
+      final toWrite = previous != null
+          ? review.copyWith(
+              helpfulBy: previous.helpfulBy,
+              createdAt: previous.createdAt,
+            )
+          : review;
+      tx.set(reviewRef, toWrite.toMap());
       tx.set(statsRef, stats.toMap(), SetOptions(merge: true));
     });
   }
