@@ -69,7 +69,12 @@ class _ReviewFormSheetBodyState extends State<_ReviewFormSheetBody> {
     _commentCtrl = TextEditingController(text: e?.comment);
     _termCtrl = TextEditingController(text: e?.termTaken);
     _gradeCtrl = TextEditingController(text: e?.gradeTaken);
-    _rating = e?.rating;
+    // M1: `Review._rating` degrades an unreadable stored rating to 0, and the
+    // rules reject any write with `rating < 1`. Seeding 0 here would show an
+    // "unrated" star row that satisfies `_rating != null`, so the user could
+    // press 更新する and only get a bare 「保存に失敗しました」. Treat a degraded
+    // rating as unset instead: the form then insists on a real 1..5 pick.
+    _rating = (e?.rating ?? 0) >= 1 ? e!.rating : null;
     _rakutan = e?.rakutan ?? Rakutan.futsu;
     _attendance = e?.attendance ?? Attendance.light;
     _grading = e?.grading ?? GradingStyle.examReport;
@@ -123,7 +128,7 @@ class _ReviewFormSheetBodyState extends State<_ReviewFormSheetBody> {
 
   Future<void> _submit() async {
     final rating = _rating;
-    if (rating == null || _submitting) return;
+    if (rating == null || rating < 1 || _submitting) return;
     setState(() => _submitting = true);
     final messenger = ScaffoldMessenger.of(context);
     final ok = await widget.store.submitReview(
@@ -182,7 +187,9 @@ class _ReviewFormSheetBodyState extends State<_ReviewFormSheetBody> {
   @override
   Widget build(BuildContext context) {
     final isEdit = widget.existing != null;
-    final canSubmit = _rating != null && !_submitting;
+    // M1: `>= 1` as well as non-null — the rules require `rating` in 1..5, so
+    // enabling submit for a 0 only buys the user a failed write.
+    final canSubmit = _rating != null && _rating! >= 1 && !_submitting;
 
     return Padding(
       padding: EdgeInsets.only(
