@@ -44,7 +44,7 @@ test('P2-13: a review on a thin course (total <= 5) earns +1 on top; the 5th rev
   assert.deepEqual({ first: a.first, scarce: a.scarce, granted: a.granted }, { first: true, scarce: true, granted: 3 });
   const b = await review(u, full);
   assert.deepEqual({ first: b.first, scarce: b.scarce, granted: b.granted }, { first: true, scarce: false, granted: 2 });
-  const led = await db.collection('credits_ledger').doc(`reviewscarce_${thin}_${u}`).get();
+  const led = await db.collection('credits_ledger').doc(`reviewscarce_${u}_${thin}`).get();
   assert.equal(led.get('delta'), 1);
   assert.equal(led.get('reason'), 'scarce_review');
 });
@@ -66,6 +66,36 @@ test('replaying the trigger, or deleting and re-posting the same review, pays on
   const repost = await review(u, k);
   assert.equal(repost.granted, 0);
   assert.equal(await bal(u), 3); // +2 first +1 scarce, once
+});
+
+test('a review whose id does not match slug(courseKey)_authorId earns nothing (forged courseSlug)', async () => {
+  const u = uid(); const k = uid('ck');
+  const id = `forged_${u}`;
+  await db.collection('reviews').doc(id).set({ courseKey: k, courseSlug: 'forged', authorId: u, university_id: 'kyoto_u' });
+  const r = await handleReviewCreated(db, { id, authorId: u, courseKey: k });
+  assert.equal(r.granted, 0);
+  assert.equal(await bal(u), 0);
+  // ...and another author's id is not accepted either
+  const other = await handleReviewCreated(db, { id: `${k}_someone`, authorId: u, courseKey: k });
+  assert.equal(other.granted, 0);
+});
+
+test('a courseKey with / and % is slugged like the client (%->%25, /->%2F)', async () => {
+  const u = uid(); const k = `fbl/pbl 100%|${uid()}`;
+  const id = `${k.replaceAll('%', '%25').replaceAll('/', '%2F')}_${u}`;
+  await db.collection('reviews').doc(id).set({ courseKey: k, authorId: u, university_id: 'kyoto_u' });
+  const r = await handleReviewCreated(db, { id, authorId: u, courseKey: k });
+  assert.equal(r.granted, 3);
+});
+
+test('delete + repost of the same course never re-pays the scarce bonus (author+course key)', async () => {
+  const u = uid(); const k = uid('ck');
+  await review(u, k);
+  await db.collection('reviews').doc(`${k}_${u}`).delete();
+  const repost = await review(u, k);
+  assert.equal(repost.scarce, false);
+  assert.equal((await db.collection('credits_ledger').doc(`reviewscarce_${u}_${k}`).get()).get('delta'), 1);
+  assert.equal(await bal(u), 3);
 });
 
 test('P2-14: at most 5 review-bonus grants per JST day; the cap resets the next day', async () => {
