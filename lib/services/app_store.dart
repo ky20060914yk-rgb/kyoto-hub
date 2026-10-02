@@ -81,10 +81,18 @@ class AppStore extends ChangeNotifier {
   /// Idempotent server-side (a flag on the balance doc), so calling it on every
   /// verified login is cheap and also back-fills users who verified before
   /// Plan 2A shipped.
-  Future<void> _claimWelcome() async {
+  /// Returns null when the call failed (retried on the next login or
+  /// verification check), otherwise whether this call actually granted credits.
+  bool _welcomePending = false;
+  Future<bool?> _claimWelcome() async {
     try {
-      await credits.claimWelcome();
-    } catch (_) {/* best-effort; retried on next login */}
+      final r = await credits.claimWelcome();
+      _welcomePending = false;
+      return r.granted;
+    } catch (_) {
+      _welcomePending = true;
+      return null;
+    }
   }
 
   AppStore(this.courses, this.reviews, this.ranking, this.credits) {
@@ -338,11 +346,17 @@ class AppStore extends ChangeNotifier {
     await fbUser.getIdToken(true);
     final isEmailVerified = fbUser.emailVerified;
 
-    if (isEmailVerified && currentUser != null && !currentUser!.isVerified) {
-      currentUser = currentUser!.copyWith(isVerified: true);
-      await _firestore.saveUserProfile(currentUser!);
-      await _claimWelcome();
-      lastNoticeMessage = 'メールアドレスの検証が完了しました！ ご登録ボーナスとして3クレジットを付与しました。';
+    if (isEmailVerified && currentUser != null && (!currentUser!.isVerified || _welcomePending)) {
+      if (!currentUser!.isVerified) {
+        currentUser = currentUser!.copyWith(isVerified: true);
+        await _firestore.saveUserProfile(currentUser!);
+      }
+      final granted = await _claimWelcome();
+      lastNoticeMessage = granted == null
+          ? 'メールアドレスの検証が完了しました！ クレジットの付与は次回ログイン時に再試行されます。'
+          : granted
+              ? 'メールアドレスの検証が完了しました！ ご登録ボーナスとして3クレジットを付与しました。'
+              : 'メールアドレスの検証が完了しました！';
       notifyListeners();
       return true;
     }
@@ -481,11 +495,19 @@ class AppStore extends ChangeNotifier {
       createdAt: DateTime.now(),
       requestId: requestId,
     );
+    // Await the write: rules can deny it (bad path, unverified, ...) and the UI
+    // must not claim success. Only then add it locally and bump the counter.
+    try {
+      await _firestore.createPost(newPost);
+    } catch (_) {
+      lastNoticeMessage = '投稿に失敗しました。ファイルの形式・サイズやメール認証の状態を確認して、もう一度お試しください。';
+      notifyListeners();
+      return false;
+    }
     posts.insert(0, newPost);
     // Credits are granted by the `onPostCreated` trigger once it has validated
     // the files; the balance arrives through the `credits` stream. If the post
-    // is rejected the trigger deletes it and the posts stream drops it.
-    _firestore.createPost(newPost).catchError((_) {});
+    // is rejected there the trigger deletes it and the posts stream drops it.
     _bumpPostCountFor(newPost, 1);
     lastNoticeMessage = '資料をアップロードしました！確認後、クレジットが付与されます。';
     notifyListeners();
@@ -529,7 +551,8 @@ class AppStore extends ChangeNotifier {
       return null;
     }
     try {
-      final safe = fileName.replaceAll(RegExp(r'[^\w.\-぀-ヿ一-鿿]'), '_');
+      var safe = fileName.replaceAll(RegExp(r'[^\w.\-぀-ヿ一-鿿]'), '_');
+      if (safe.length > 100) safe = safe.substring(safe.length - 100); // keep the extension
       final path = 'resources/$uid/${DateTime.now().millisecondsSinceEpoch}_$safe';
       final lower = fileName.toLowerCase();
       final contentType = lower.endsWith('.pdf')
@@ -629,8 +652,14 @@ class AppStore extends ChangeNotifier {
       createdAt: DateTime.now(),
     );
 
+    try {
+      await _firestore.createMaterialRequest(req);
+    } catch (_) {
+      lastNoticeMessage = 'リクエストの投稿に失敗しました。時間をおいて再度お試しください。';
+      notifyListeners();
+      return false;
+    }
     requests.insert(0, req);
-    _firestore.createMaterialRequest(req).catchError((_) {});
 
     lastNoticeMessage = 'Cloud Firestoreへリクエストを投稿しました！';
     notifyListeners();

@@ -390,7 +390,7 @@ class _CourseResourceTabState extends State<CourseResourceTab> {
                                     return;
                                   }
 
-                                  await widget.store.addPost(
+                                  final posted = await widget.store.addPost(
                                     subjectId: widget.subject.id,
                                     category: category,
                                     year: category == PostCategory.pastExam ? selectedYear : null,
@@ -400,6 +400,13 @@ class _CourseResourceTabState extends State<CourseResourceTab> {
                                     filePaths: [uploadedPath],
                                     requestId: requestId,
                                   );
+                                  if (!posted) {
+                                    // Rejected (e.g. by the rules): keep the form open, show why.
+                                    messenger.showSnackBar(
+                                      SnackBar(content: Text(widget.store.lastNoticeMessage ?? '投稿に失敗しました。')),
+                                    );
+                                    return;
+                                  }
                                   navigator.pop();
                                   if (mounted) setState(() {});
                                   messenger.showSnackBar(
@@ -532,7 +539,7 @@ class _CourseResourceTabState extends State<CourseResourceTab> {
                                     );
                                   } else {
                                     messenger.showSnackBar(
-                                      SnackBar(content: Text(widget.store.lastNoticeMessage ?? 'ポイントが不足しています。')),
+                                      SnackBar(content: Text(widget.store.lastNoticeMessage ?? 'リクエストの投稿に失敗しました。')),
                                     );
                                   }
                                 },

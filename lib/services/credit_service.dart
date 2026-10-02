@@ -33,6 +33,12 @@ class DownloadResult {
   final int balance;
 }
 
+class WelcomeResult {
+  const WelcomeResult({required this.granted, required this.balance});
+  final bool granted; // false when the welcome grant was already claimed
+  final int balance;
+}
+
 /// Calls a Cloud Function by name. Injected so tests never touch the network.
 typedef CallableInvoker = Future<Map<String, dynamic>> Function(String name, Map<String, dynamic> data);
 
@@ -85,10 +91,10 @@ class CreditService {
       .map((q) => q.docs.map((d) => CreditLedgerEntry.fromMap(d.id, d.data())).toList());
 
   /// Idempotent server-side; safe to call on every login.
-  Future<int> claimWelcome() async {
+  Future<WelcomeResult> claimWelcome() async {
     final r = await _call('claimWelcomeCredits', {});
     final b = r['balance'];
-    return b is num ? b.toInt() : 0;
+    return WelcomeResult(granted: r['granted'] == true, balance: b is num ? b.toInt() : 0);
   }
 
   Future<DownloadResult> downloadResource(String postId, {int fileIndex = 0}) async {

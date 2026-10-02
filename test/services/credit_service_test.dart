@@ -50,8 +50,17 @@ void main() {
       calls.add(name);
       return {'granted': true, 'balance': 3};
     });
-    expect(await svc.claimWelcome(), 3);
+    final r = await svc.claimWelcome();
+    expect(r.balance, 3);
+    expect(r.granted, isTrue);
     expect(calls, ['claimWelcomeCredits']);
+  });
+
+  test('claimWelcome reports granted=false when already claimed', () async {
+    final svc = CreditService(FakeFirebaseFirestore(), (n, d) async => {'granted': false, 'balance': 7});
+    final r = await svc.claimWelcome();
+    expect(r.granted, isFalse);
+    expect(r.balance, 7);
   });
 
   test('downloadResource sends postId + fileIndex and parses the result', () async {
