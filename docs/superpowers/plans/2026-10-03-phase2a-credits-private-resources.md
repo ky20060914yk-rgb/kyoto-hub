@@ -13,7 +13,7 @@
 ## Global Constraints
 
 - Flutter `3.41.9`, Dart `^3.11.5`. The ONLY new Dart dependency this plan may add is `cloud_functions`. Functions: Node `22`, TypeScript, `firebase-functions/v2/*` only (no v1), region **`asia-east1`** on every function.
-- Credit amounts (spec §4.3, verbatim): signup **+3**; download **−1** flat (any category); upload approved **+3** (daily cap, duplicates earn nothing); first review **+2** once; own posts and posts that fulfilled your request are **free**. Credits are **never purchasable**.
+- Credit amounts (spec §4.3, verbatim): signup **+3**; download **−1** flat (any category); upload approved **+3** (daily cap, duplicates earn nothing); **each of a user's first 3 reviews +2**; **a review on a course that has fewer than 5 reviews +1** (data-collection incentives, P2-12/13); own posts and posts that fulfilled your request are **free**. Credits are **never purchasable**.
 - **Abolished** (must not survive in code, rules, or copy): 80% uploader royalty, 5-DL / 10-DL milestones, delete/report claw-back penalties, the 2020 cut-off, the uploader-set 0–20pt price, the request-reward slider, the referral/invitation bonus, the 20pt textbook settlement.
 - The client NEVER writes a balance or a ledger row. `credit_balances` and `credits_ledger`: `allow write: if false`. Reading is own-doc only.
 - Text course reviews remain free to post and read (Phase 1 behaviour unchanged).
@@ -38,6 +38,9 @@
 | P2-9 | Post docs are still **client-created** (rule-constrained); credits are granted by the `onPostCreated` trigger, which deletes the doc if its files are invalid | Smallest client change; the trigger is the authority for credits | Move create into a callable |
 | P2-10 | Fulfilling a request grants the **+3 request bonus in addition to** the normal upload grant; both count toward the daily cap | Spec: upload +3 and "提供者に +3" | Merge into one grant |
 | P2-11 | Report auto-delete at 3 reports stays **client-driven for now** (claw-back removed); Storage cleanup is handled by `onPostDeleted` | Spec wants hide+queue — that is Plan 2B's takedown work | n/a (2B) |
+| P2-12 | **First-3-reviews bonus:** each of a user's first **3** reviews earns **+2** (max +6 per user, ever). Granted per review (ledger id `reviewfirst_<reviewId>`), counted on `credit_balances.reviewBonusesUsed`; delete + re-post of the same course never re-pays | Product owner (2026-10-03): review data is the launch asset, so reward the first few reviews, not just one. Replaces the spec's "first review +2 once" | Constants in `common.ts` |
+| P2-13 | **Scarce-course bonus:** a review on a course whose TOTAL review count (including this one) is **<= 5** earns **+1**. Counted server-side with a `reviews` count query (NOT the client-written `course_stats`, which any verified user can forge). Idempotent per review (`reviewscarce_<reviewId>`). Stacks with P2-12 (a thin course's first review by a new user = +3) | Product owner: nudge reviews onto thin courses. "5件に達していない" is read as `< 5` existing reviews, i.e. the 5th review still earns | `scarceThreshold` constant |
+| P2-14 | **Review-bonus daily cap = 5 grants per JST day** (separate counter from the upload cap; both P2-12 and P2-13 grants count) | Reviews are cheap to type — without a cap, junk reviews on 100 thin courses mint 100 credits. A minimum-comment-length gate is deliberately NOT added: the structured fields are the data | `reviewDailyCap` constant |
 
 ## File Structure
 
@@ -71,7 +74,7 @@
 - Modify: `firebase.json`, `.gitignore` (add `functions/node_modules/`, `functions/lib/`)
 
 **Interfaces:**
-- Produces (`common.ts`): `REGION: 'asia-east1'`, `UNIVERSITY_ID: 'kyoto_u'`, `CREDITS` (`welcome:3, upload:3, firstReview:2, requestFulfilled:3, downloadCost:1, dailyGrantCap:3`), `SIGNED_URL_TTL_MS: number`, `interface AuthLike { uid: string; token: { email?: string; email_verified?: boolean } }`, `requireKuVerified(auth: AuthLike | undefined | null): string` (returns uid, throws `HttpsError`), `jstDay(now?: Date): string` (`YYYY-MM-DD` in JST).
+- Produces (`common.ts`): `REGION: 'asia-east1'`, `UNIVERSITY_ID: 'kyoto_u'`, `CREDITS` (`welcome:3, upload:3, firstReviews:2, firstReviewCount:3, scarceReview:1, scarceThreshold:5, reviewDailyCap:5, requestFulfilled:3, downloadCost:1, dailyGrantCap:3`), `SIGNED_URL_TTL_MS: number`, `interface AuthLike { uid: string; token: { email?: string; email_verified?: boolean } }`, `requireKuVerified(auth: AuthLike | undefined | null): string` (returns uid, throws `HttpsError`), `jstDay(now?: Date): string` (`YYYY-MM-DD` in JST).
 - Produces (`testlib/helpers.mjs`): `db` (admin Firestore on the emulator), `uid(prefix?)` (unique id), `KU(uid)` (an `AuthLike`), `seedPost(id, over?)`, `fakeDeps(existingPaths?)` → `{ signed: [], sign, exists, remove, removed: [] }`.
 
 - [ ] **Step 1: Create `functions/package.json`**
@@ -191,7 +194,8 @@ test('jstDay rolls over at 15:00 UTC', () => {
 
 test('credit constants match spec §4.3', () => {
   assert.deepEqual({ ...CREDITS }, {
-    welcome: 3, upload: 3, firstReview: 2, requestFulfilled: 3, downloadCost: 1, dailyGrantCap: 3,
+    welcome: 3, upload: 3, firstReviews: 2, firstReviewCount: 3, scarceReview: 1, scarceThreshold: 5,
+    reviewDailyCap: 5, requestFulfilled: 3, downloadCost: 1, dailyGrantCap: 3,
   });
 });
 ```
@@ -213,7 +217,11 @@ export const UNIVERSITY_ID = 'kyoto_u';
 export const CREDITS = {
   welcome: 3,
   upload: 3,
-  firstReview: 2,
+  firstReviews: 2, // each of a user's first `firstReviewCount` reviews (P2-12)
+  firstReviewCount: 3,
+  scarceReview: 1, // review on a course with <= `scarceThreshold` reviews (P2-13)
+  scarceThreshold: 5,
+  reviewDailyCap: 5, // review-bonus grants per JST day (P2-14)
   requestFulfilled: 3,
   downloadCost: 1,
   dailyGrantCap: 3, // grants per JST day (P2-3)
@@ -331,7 +339,7 @@ git commit -m "feat(functions): scaffold Functions codebase, shared auth/credit 
 **Interfaces:**
 - Consumes: `UNIVERSITY_ID`, `CREDITS` from `common.ts`.
 - Produces (`credits.ts`):
-  - `interface Balance { balance: number; welcomeGranted?: boolean; firstReviewGranted?: boolean; uploadGrantDay?: string; uploadGrantsToday?: number }`
+  - `interface Balance { balance: number; welcomeGranted?: boolean; reviewBonusesUsed?: number; reviewGrantDay?: string; reviewGrantsToday?: number; uploadGrantDay?: string; uploadGrantsToday?: number }`
   - `interface CreditEvent { uid: string; delta: number; reason: string; ledgerId: string; refId?: string }`
   - `balanceRef(db, uid)`, `ledgerRef(db, ledgerId)` → DocumentReference
   - `readBalance(tx, db, uid): Promise<Balance>` (a missing doc reads as `{ balance: 0 }`)
@@ -401,12 +409,12 @@ test('writeCredit merges a patch into the balance doc without losing other field
   await db.runTransaction(async (tx) => {
     const cur = await readBalance(tx, db, u);
     writeCredit(tx, db, { uid: u, delta: 2, reason: 'first_review', ledgerId: `fr_${u}` }, cur,
-      { firstReviewGranted: true });
+      { reviewBonusesUsed: 1 });
   });
   const b = await db.collection('credit_balances').doc(u).get();
   assert.equal(b.get('balance'), 5);
   assert.equal(b.get('welcomeGranted'), true);
-  assert.equal(b.get('firstReviewGranted'), true);
+  assert.equal(b.get('reviewBonusesUsed'), 1);
 });
 ```
 
@@ -425,7 +433,9 @@ import { UNIVERSITY_ID } from './common.js';
 export interface Balance {
   balance: number;
   welcomeGranted?: boolean;
-  firstReviewGranted?: boolean;
+  reviewBonusesUsed?: number; // how many first-3-reviews bonuses (P2-12) have been paid
+  reviewGrantDay?: string; // JST day of the last review-bonus grant (P2-14 cap)
+  reviewGrantsToday?: number;
   uploadGrantDay?: string; // JST day of the last capped grant
   uploadGrantsToday?: number; // grants already issued on that day
 }
@@ -433,7 +443,7 @@ export interface Balance {
 export interface CreditEvent {
   uid: string;
   delta: number;
-  reason: string; // signup_bonus | download | download_free | upload | first_review | request_fulfilled
+  reason: string; // signup_bonus | download | download_free | upload | first_review | scarce_review | request_fulfilled
   ledgerId: string; // deterministic => the caller can make the grant idempotent
   refId?: string; // postId / requestId the event is about
 }
@@ -723,7 +733,7 @@ git commit -m "feat(functions): downloadResource — charge once, ledger, 10-min
   - `interface PostDeps { exists(path: string): Promise<boolean> }`
   - `interface PostCreatedResult { valid: boolean; duplicate: boolean; granted: number; capped: boolean; fulfilled: boolean }`
   - `handlePostCreated(db, deps: PostDeps, postId: string, now?: Date): Promise<PostCreatedResult>`
-  - `handleReviewCreated(db, authorId: string): Promise<boolean>` (true = bonus granted)
+  - `interface ReviewRef { id: string; authorId: string; courseKey: string }`, `interface ReviewBonusResult { first: boolean; scarce: boolean; granted: number; capped: boolean }`, `handleReviewCreated(db, review: ReviewRef, now?: Date): Promise<ReviewBonusResult>`
   - `interface DeleteDeps { remove(path: string): Promise<void> }`, `handlePostDeleted(deps, post: Record<string, unknown>): Promise<string[]>` (returns removed paths)
   - Exported Firebase functions: `claimWelcomeCredits`, `downloadResource` (callables), `onPostCreated`, `onReviewCreated`, `onPostDeleted` (triggers).
 
@@ -871,20 +881,86 @@ import { db, uid } from '../testlib/helpers.mjs';
 import { handleReviewCreated } from '../lib/reviewCreated.js';
 
 const bal = async (u) => (await db.collection('credit_balances').doc(u).get()).get('balance') ?? 0;
+// Seed `n` reviews of a course by OTHER users so the course is not scarce.
+const crowd = async (courseKey, n) => {
+  for (let i = 0; i < n; i++) {
+    await db.collection('reviews').doc(uid('x')).set({ courseKey, authorId: uid('o'), university_id: 'kyoto_u' });
+  }
+};
+// Create the review doc (the trigger fires after it exists) and run the handler.
+const review = async (author, courseKey, now) => {
+  const id = `${courseKey}_${author}`;
+  await db.collection('reviews').doc(id).set({ courseKey, authorId: author, university_id: 'kyoto_u' });
+  return handleReviewCreated(db, { id, authorId: author, courseKey }, now);
+};
 
-test('the first review earns +2, later reviews earn nothing', async () => {
+test('P2-12: each of a user\u2019s first 3 reviews earns +2, the 4th earns nothing (non-scarce courses)', async () => {
   const u = uid();
-  assert.equal(await handleReviewCreated(db, u), true);
-  assert.equal(await bal(u), 2);
-  assert.equal(await handleReviewCreated(db, u), false);
-  assert.equal(await bal(u), 2);
-  const led = await db.collection('credits_ledger').doc(`firstreview_${u}`).get();
+  const keys = [uid('ck'), uid('ck'), uid('ck'), uid('ck')];
+  for (const k of keys) await crowd(k, 6); // 7 reviews each once ours lands -> not scarce
+  for (let i = 0; i < 3; i++) {
+    const r = await review(u, keys[i]);
+    assert.deepEqual({ first: r.first, scarce: r.scarce, granted: r.granted }, { first: true, scarce: false, granted: 2 });
+  }
+  assert.equal(await bal(u), 6);
+  const fourth = await review(u, keys[3]);
+  assert.deepEqual({ first: fourth.first, granted: fourth.granted }, { first: false, granted: 0 });
+  assert.equal(await bal(u), 6);
+  assert.equal((await db.collection('credit_balances').doc(u).get()).get('reviewBonusesUsed'), 3);
+  const led = await db.collection('credits_ledger').doc(`reviewfirst_${keys[0]}_${u}`).get();
   assert.equal(led.get('delta'), 2);
   assert.equal(led.get('reason'), 'first_review');
 });
 
-test('an empty author id grants nothing', async () => {
-  assert.equal(await handleReviewCreated(db, ''), false);
+test('P2-13: a review on a thin course (total <= 5) earns +1 on top; the 5th review yes, the 6th no', async () => {
+  const u = uid(); const thin = uid('ck'); const full = uid('ck');
+  await crowd(thin, 4); // + ours = 5 -> still scarce
+  await crowd(full, 5); // + ours = 6 -> not scarce
+  const a = await review(u, thin);
+  assert.deepEqual({ first: a.first, scarce: a.scarce, granted: a.granted }, { first: true, scarce: true, granted: 3 });
+  const b = await review(u, full);
+  assert.deepEqual({ first: b.first, scarce: b.scarce, granted: b.granted }, { first: true, scarce: false, granted: 2 });
+  const led = await db.collection('credits_ledger').doc(`reviewscarce_${thin}_${u}`).get();
+  assert.equal(led.get('delta'), 1);
+  assert.equal(led.get('reason'), 'scarce_review');
+});
+
+test('after the first 3, only the scarce bonus remains', async () => {
+  const u = uid();
+  for (let i = 0; i < 3; i++) { const k = uid('ck'); await crowd(k, 6); await review(u, k); }
+  const r = await review(u, uid('ck')); // a course with just this review
+  assert.deepEqual({ first: r.first, scarce: r.scarce, granted: r.granted }, { first: false, scarce: true, granted: 1 });
+  assert.equal(await bal(u), 7);
+});
+
+test('replaying the trigger, or deleting and re-posting the same review, pays once', async () => {
+  const u = uid(); const k = uid('ck');
+  await review(u, k);
+  const again = await handleReviewCreated(db, { id: `${k}_${u}`, authorId: u, courseKey: k });
+  assert.equal(again.granted, 0);
+  await db.collection('reviews').doc(`${k}_${u}`).delete();
+  const repost = await review(u, k);
+  assert.equal(repost.granted, 0);
+  assert.equal(await bal(u), 3); // +2 first +1 scarce, once
+});
+
+test('P2-14: at most 5 review-bonus grants per JST day; the cap resets the next day', async () => {
+  const u = uid();
+  const day1 = new Date('2026-10-03T03:00:00Z');
+  const results = [];
+  for (let i = 0; i < 4; i++) results.push(await review(u, uid('ck'), day1)); // 4 thin courses
+  // r1: first+scarce (2 grants), r2: 2 (4), r3: first = 5th grant, its scarce is capped, r4: capped
+  assert.deepEqual(results.map((r) => r.granted), [3, 3, 2, 0]);
+  assert.equal(results[2].capped, true);
+  assert.equal(await bal(u), 8);
+  const next = await review(u, uid('ck'), new Date('2026-10-03T16:00:00Z')); // 01:00 JST next day
+  assert.deepEqual({ first: next.first, scarce: next.scarce, granted: next.granted }, { first: false, scarce: true, granted: 1 });
+});
+
+test('an empty author id or course key grants nothing it should not', async () => {
+  assert.equal((await handleReviewCreated(db, { id: 'x', authorId: '', courseKey: 'k' })).granted, 0);
+  const r = await handleReviewCreated(db, { id: 'y', authorId: uid(), courseKey: '' });
+  assert.equal(r.scarce, false); // no count query on an empty key
 });
 ```
 
@@ -1036,22 +1112,62 @@ export async function handlePostCreated(
 ```ts
 // reviewCreated.ts
 import type { Firestore } from 'firebase-admin/firestore';
-import { CREDITS } from './common.js';
-import { readBalance, writeCredit } from './credits.js';
+import { CREDITS, jstDay } from './common.js';
+import { ledgerRef, readBalance, writeCredit } from './credits.js';
 
-/** +2 once per user, on their first review (the flag survives delete + re-post). */
-export async function handleReviewCreated(db: Firestore, authorId: string): Promise<boolean> {
-  if (!authorId) return false;
+export interface ReviewRef { id: string; authorId: string; courseKey: string }
+export interface ReviewBonusResult { first: boolean; scarce: boolean; granted: number; capped: boolean }
+
+/**
+ * Review incentives (P2-12/13/14). Runs after a review doc is created.
+ *  - first: each of the author's first CREDITS.firstReviewCount reviews pays +2
+ *  - scarce: a review on a course with <= CREDITS.scarceThreshold reviews pays +1
+ * The course's review total is counted from `reviews` (server-side) - never
+ * from `course_stats`, which any verified client can write. Every grant is
+ * keyed by the review id, so a replayed trigger or delete + re-post pays once.
+ * Both kinds share a per-JST-day cap.
+ */
+export async function handleReviewCreated(
+  db: Firestore,
+  review: ReviewRef,
+  now: Date = new Date(),
+): Promise<ReviewBonusResult> {
+  const none: ReviewBonusResult = { first: false, scarce: false, granted: 0, capped: false };
+  if (!review.authorId) return none;
+
+  let total = Number.POSITIVE_INFINITY;
+  if (review.courseKey) {
+    const agg = await db.collection('reviews').where('courseKey', '==', review.courseKey).count().get();
+    total = agg.data().count;
+  }
+
   return db.runTransaction(async (tx) => {
-    const cur = await readBalance(tx, db, authorId);
-    if (cur.firstReviewGranted) return false;
-    writeCredit(
-      tx, db,
-      { uid: authorId, delta: CREDITS.firstReview, reason: 'first_review', ledgerId: `firstreview_${authorId}` },
-      cur,
-      { firstReviewGranted: true },
-    );
-    return true;
+    const firstLed = await tx.get(ledgerRef(db, `reviewfirst_${review.id}`));
+    const scarceLed = await tx.get(ledgerRef(db, `reviewscarce_${review.id}`));
+    let cur = await readBalance(tx, db, review.authorId);
+
+    const day = jstDay(now);
+    let used = cur.reviewGrantDay === day ? cur.reviewGrantsToday ?? 0 : 0;
+    let bonuses = cur.reviewBonusesUsed ?? 0;
+    const out = { ...none };
+    const grant = (delta: number, reason: string, ledgerId: string): boolean => {
+      if (used >= CREDITS.reviewDailyCap) { out.capped = true; return false; }
+      used += 1;
+      cur = writeCredit(tx, db, { uid: review.authorId, delta, reason, ledgerId, refId: review.id }, cur,
+        { reviewGrantDay: day, reviewGrantsToday: used, reviewBonusesUsed: bonuses });
+      out.granted += delta;
+      return true;
+    };
+
+    if (!firstLed.exists && bonuses < CREDITS.firstReviewCount) {
+      bonuses += 1; // reserve the slot; released below if the daily cap refused the grant
+      if (grant(CREDITS.firstReviews, 'first_review', `reviewfirst_${review.id}`)) out.first = true;
+      else bonuses -= 1;
+    }
+    if (!scarceLed.exists && total <= CREDITS.scarceThreshold) {
+      if (grant(CREDITS.scarceReview, 'scarce_review', `reviewscarce_${review.id}`)) out.scarce = true;
+    }
+    return out;
   });
 }
 ```
@@ -1132,7 +1248,12 @@ export const onPostCreated = onDocumentCreated({ ...opts, document: 'posts/{post
 });
 
 export const onReviewCreated = onDocumentCreated({ ...opts, document: 'reviews/{reviewId}' }, async (event) => {
-  await handleReviewCreated(db, String(event.data?.data()?.authorId ?? ''));
+  const d = event.data?.data();
+  await handleReviewCreated(db, {
+    id: event.params.reviewId,
+    authorId: String(d?.authorId ?? ''),
+    courseKey: String(d?.courseKey ?? ''),
+  });
 });
 
 export const onPostDeleted = onDocumentDeleted({ ...opts, document: 'posts/{postId}' }, async (event) => {
@@ -1146,7 +1267,7 @@ If the installed `firebase-functions` major renamed any of these symbols, adapt 
 - [ ] **Step 7: Run to verify it passes**
 
 Run: `bash tools/test_functions.sh`
-Expected: PASS — common 5 + credits 6 + download 8 + postCreated 10 + reviewCreated 2 + postDeleted 4. `tsc` clean (it also type-checks `index.ts`).
+Expected: PASS — common 5 + credits 6 + download 8 + postCreated 10 + reviewCreated 6 + postDeleted 4. `tsc` clean (it also type-checks `index.ts`).
 
 - [ ] **Step 8: Commit**
 
@@ -1632,7 +1753,8 @@ void main() {
       'upload': '資料のアップロード',
       'download': '資料のダウンロード',
       'download_free': '資料のダウンロード（無料）',
-      'first_review': '初めてのレビュー投稿',
+      'first_review': 'レビュー投稿ボーナス（最初の3件）',
+      'scarce_review': 'レビューの少ない科目への投稿',
       'request_fulfilled': 'リクエストへの対応',
     };
     expected.forEach((reason, label) {
@@ -1756,7 +1878,8 @@ class CreditLedgerEntry {
         'upload' => '資料のアップロード',
         'download' => '資料のダウンロード',
         'download_free' => '資料のダウンロード（無料）',
-        'first_review' => '初めてのレビュー投稿',
+        'first_review' => 'レビュー投稿ボーナス（最初の3件）',
+        'scarce_review' => 'レビューの少ない科目への投稿',
         'request_fulfilled' => 'リクエストへの対応',
         _ => 'クレジットの増減',
       };
@@ -2223,7 +2346,7 @@ Title `'クレジット制度のルール'`; intro `'京大InfoHubでは、良�
 🎁 ご登録ボーナス: メール認証を完了すると 3クレジット がもらえます。
 📥 資料のダウンロード: 過去問・資料は 1つにつき 1クレジット。一度ダウンロードした資料は、何度でも無料で再ダウンロードできます。
 📤 資料のアップロード: 承認されると 3クレジット がもらえます（1日3回まで。既に登録済みの年度の重複投稿は対象外）。
-✍️ 授業レビュー: 投稿も閲覧も無料です。初めてのレビュー投稿で 2クレジット がもらえます。
+✍️ 授業レビュー: 投稿も閲覧も無料です。最初の3件のレビューは 各2クレジット、レビューが5件に満たない科目への投稿は 1クレジット が加算されます（レビューボーナスは1日5回まで）。
 🙋 リクエスト: リクエストの投稿は無料。応えてくれた方には 3クレジット が付き、あなたはその資料を無料でダウンロードできます。
 🚫 クレジットは購入できません。投稿者への還元はなく、削除や通報による没収もありません。
 ⚠️ 転載・無関係なファイルの投稿は通報され、3件で自動削除されます。権利者の方からの削除要請には速やかに対応します。
@@ -2247,7 +2370,7 @@ Label `'保有ポイント残高'` → `'保有クレジット'`; the right-hand
     },
     {
       'title': '投稿して、クレジットを集めよう',
-      'subtitle': '・資料のアップロード: +3クレジット（1日3回まで）\n・初めてのレビュー投稿: +2クレジット\n・リクエストに応える: +3クレジット\nクレジットは購入できません。みんなで資料を持ち寄る仕組みです。',
+      'subtitle': '・資料のアップロード: +3クレジット（1日3回まで）\n・最初の3件のレビュー: 各+2クレジット\n・レビューの少ない科目(5件未満)への投稿: +1クレジット\n・リクエストに応える: +3クレジット\nクレジットは購入できません。みんなで資料を持ち寄る仕組みです。',
       'icon': Icons.savings_outlined,
       'color': const Color(0xFF059669),
       'highlight': '投稿すれば、また資料がもらえる！',
@@ -2259,6 +2382,28 @@ Slide 4 (textbook): replace the subtitle's `応答時に20pt決済され、` wit
 - [ ] **Step 4: Remaining strings**
 
 `timetable_registration_screen.dart:437`: replace `獲得したポイントは過去問ダウンロードのほか、学内のサークル・新歓等の宣伝広告にも利用可能です。` with `登録した科目の過去問やレビューをチェックしてみましょう。` (credits are not an ad currency — A3 decoupling). `contact_screen.dart:20`: `'② ポイント返却のお問い合わせ (虚偽資料・未受領等の申告)'` → `'② クレジット返却のお問い合わせ (虚偽資料・ダウンロード失敗等の申告)'` (keep the map key `point_refund`; it is an existing inquiry code).
+
+- [ ] **Step 4b: 「レビュー募集中」 tag (P2-13)**
+
+In `lib/views/course/course_review_tab.dart`, where the course summary card renders from `CourseStats? stats` (it already has the stats for the course — no extra read), show a small tag whenever `stats == null || stats.reviewCount < 5`:
+
+```dart
+  // P2-13: a thin course earns the reviewer a +1 bonus (see the credit rules).
+  Widget _scarceTag() => Container(
+        margin: const EdgeInsets.only(bottom: 10),
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+        decoration: BoxDecoration(
+          color: const Color(0xFFFEF3C7),
+          borderRadius: BorderRadius.circular(20),
+        ),
+        child: const Text(
+          'レビュー募集中・投稿すると +1クレジット',
+          style: TextStyle(fontSize: 11.5, fontWeight: FontWeight.bold, color: Color(0xFF92400E)),
+        ),
+      );
+```
+
+Place `if (stats == null || stats.reviewCount < 5) _scarceTag()` at the top of the summary column. (The tag uses `< 5` because the 5th review is the one that fills the course, and it still earns the bonus — P2-13 pays while the total INCLUDING the new review is <= 5.) In `lib/views/course/review_form_sheet.dart` add one line of helper text under the form title: `'最初の3件のレビューは +2クレジット、レビューの少ない科目なら さらに +1クレジット'`. Do NOT add a tag to the さがす search results — a per-row `course_stats` read for up to 500 results would blow the Spark read quota; the tag lives only where the stats are already loaded.
 
 - [ ] **Step 5: Verify**
 
@@ -2427,7 +2572,7 @@ Who runs what: **Claude** runs the `firebase deploy` steps (allowed by the user'
 2. Open a course that has a migrated past exam → ダウンロード → confirm dialog says 1クレジット → file downloads, balance **2**, ledger 「資料のダウンロード −1」. Download the same post again → free, balance stays 2.
 3. With balance 0 (use a second account that has not claimed, or spend down) → the confirm button is disabled / the notice says クレジットが足りません.
 4. Upload a PDF as a past exam → post appears, then within ~5 s the balance rises **+3** and the ledger shows 「資料のアップロード +3」. Upload a 4th in one day → no further credit.
-5. Post your first-ever review → **+2**, a second review → no credit.
+5. Post reviews on three well-reviewed courses → **+2** each, a 4th → no credit. Post a review on a course with fewer than 5 reviews → **+1** extra (a new user's first review on a thin course = **+3**), and that course's レビュー tab shows the 「レビュー募集中」 tag until it reaches 5 reviews. More than 5 bonus grants in one day → capped.
 6. Create a request (free, no slider). From a second account upload against it → request shows solved, the provider gets **+6** (3 upload + 3 request), the requester can download free.
 7. Direct-URL check: copy an old `firebasestorage.googleapis.com/...?alt=media` URL of a migrated file → **403/denied**. Open a signed URL after 10+ minutes → expired.
 8. DevTools console as a signed-in user: `firebase`-SDK write to `credit_balances/<own uid>` → permission denied.
@@ -2435,7 +2580,7 @@ Who runs what: **Claude** runs the `firebase deploy` steps (allowed by the user'
 ## Self-Review
 
 **Spec coverage (§4.3, §4.5.3–4.5.4, §6 Phase 2):**
-- Credit table: signup +3 → T2; download −1 flat → T3; upload +3 w/ daily cap, dup excluded → T4; first review +2 → T4; own/requested free → T3. ✓
+- Credit table: signup +3 → T2; download −1 flat → T3; upload +3 w/ daily cap, dup excluded → T4; first-3-reviews +2 each and scarce-course +1 (P2-12/13/14, owner-requested; replaces the spec's single first-review bonus) → T4 + T9 tag; own/requested free → T3. ✓
 - Abolished economy items (royalty, milestones, penalties, 2020 cut-off, uploader price, reward slider, referral, 20pt textbook) → T8 (code), T9 (copy). ✓
 - Server-authoritative ledger, clients never write balances → T2/T5 (`write: false`). ✓
 - Private bucket + 10-minute signed URL via Function → T3, T4 (`index.ts` signer), T6, T10. ✓
@@ -2445,4 +2590,4 @@ Who runs what: **Claude** runs the `firebase deploy` steps (allowed by the user'
 
 **Placeholder scan:** none — every code step carries the code; Task 8 specifies each edit with replacement code or an exact delete-target.
 
-**Type consistency:** `Balance`/`CreditEvent`/`writeCredit`/`readBalance` (T2) are the only credit writers and are used identically in T3/T4; ledger ids `signup_<uid>`, `dl_<uid>_<postId>`, `upload_<postId>`, `fulfill_<requestId>`, `firstreview_<uid>` are the same strings in code, tests, and the Dart `CreditLedgerEntry.label` reasons (`signup_bonus`, `download`, `download_free`, `upload`, `first_review`, `request_fulfilled`). Callable names `claimWelcomeCredits` / `downloadResource` (T4 `index.ts`) match `CreditService` (T7). Region `asia-east1` in `common.ts` and `CreditService._liveInvoker`. `Post.filePaths` (T8) matches the rules' `filePaths` checks (T5), the trigger (T4), and the migration output (T10).
+**Type consistency:** `Balance`/`CreditEvent`/`writeCredit`/`readBalance` (T2) are the only credit writers and are used identically in T3/T4; ledger ids `signup_<uid>`, `dl_<uid>_<postId>`, `upload_<postId>`, `fulfill_<requestId>`, `reviewfirst_<reviewId>`, `reviewscarce_<reviewId>` are the same strings in code, tests, and the Dart `CreditLedgerEntry.label` reasons (`signup_bonus`, `download`, `download_free`, `upload`, `first_review`, `scarce_review`, `request_fulfilled`). Callable names `claimWelcomeCredits` / `downloadResource` (T4 `index.ts`) match `CreditService` (T7). Region `asia-east1` in `common.ts` and `CreditService._liveInvoker`. `Post.filePaths` (T8) matches the rules' `filePaths` checks (T5), the trigger (T4), and the migration output (T10).
