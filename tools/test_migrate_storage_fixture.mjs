@@ -93,11 +93,15 @@ const ODD = '3_my exam (1).pdf';
 const ODD_DEST = `resources/u2/${destName(ODD)}`;
 const body = (n) => Buffer.from(`content of ${n}`);
 const exists = async (n) => (await bucket.file(n).exists())[0];
+const token = async (n) => (await bucket.file(n).getMetadata())[0].metadata?.firebaseStorageDownloadTokens;
 const post = async (id) => (await db.doc(`posts/${id}`).get()).data();
 
 if (mode === 'seed') {
-  for (const n of ['1_a.pdf', '2_b.png', ODD, '4_x.pdf', '5_c.pdf']) await bucket.file(n).save(body(n));
-  await bucket.file('resources/u3/5_c.pdf').save(body('5_c.pdf')); // already migrated earlier
+  for (const n of ['1_a.pdf', '2_b.png', ODD, '4_x.pdf', '5_c.pdf']) {
+    await bucket.file(n).save(body(n), { metadata: { metadata: { firebaseStorageDownloadTokens: `tok-${n}` } } });
+  }
+  await bucket.file('resources/u3/5_c.pdf').save(body('5_c.pdf'), { metadata: { metadata: { firebaseStorageDownloadTokens: 'tok-old-run' } } }); // (token left by an earlier run)
+  // already migrated earlier
   await db.doc('posts/p1').set({ authorId: 'u1', fileNames: ['1_a.pdf', '2_b.png'], fileUrls: ['https://x/1', 'https://x/2'], title: 'one' });
   await db.doc('posts/p2').set({ authorId: 'u1', fileNames: ['1_a.pdf', 'gone.pdf'], fileUrls: ['https://x/1', 'https://x/g'] });
   await db.doc('posts/p3').set({ authorId: 'u2', fileNames: [ODD], fileUrls: ['https://x/3'] });
@@ -110,6 +114,9 @@ if (mode === 'seed') {
   assert.ok((await post('p1')).fileUrls);
   assert.equal(await exists('resources/u1/1_a.pdf'), false);
   assert.equal(await exists(ODD_DEST), false);
+  // The seeded sources really carry a token (so the later no-token asserts mean something).
+  assert.equal(await token('1_a.pdf'), 'tok-1_a.pdf');
+  assert.equal(await token('resources/u3/5_c.pdf'), 'tok-old-run'); // dry run does not strip either
   console.log('unchanged: OK');
 } else if (mode === 'migrated' || mode === 'deleted') {
   const p1 = await post('p1');
@@ -126,6 +133,8 @@ if (mode === 'seed') {
   // Copies are byte-identical.
   assert.equal((await bucket.file('resources/u1/2_b.png').download())[0].toString(), body('2_b.png').toString());
   assert.equal((await bucket.file(ODD_DEST).download())[0].toString(), body(ODD).toString());
+  // No legacy download token survives on the private destinations (nor after re-runs).
+  for (const d of ['resources/u1/1_a.pdf', 'resources/u1/2_b.png', ODD_DEST, 'resources/u3/5_c.pdf']) assert.equal(await token(d), undefined, d);
   // Unmigratable posts' sources stay put in both modes.
   assert.equal(await exists('4_x.pdf'), true);
   if (mode === 'migrated') {

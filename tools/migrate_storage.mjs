@@ -14,6 +14,9 @@
 //     size + md5, otherwise the post is reported FAIL and left untouched).
 //   * A post is only rewritten after EVERY copy of it is verified (dest exists,
 //     same size and md5). A post with any missing/unsafe source is left alone.
+//   * The destination never keeps the source's firebaseStorageDownloadTokens
+//     (stripped after every verified copy and on re-runs), so legacy public
+//     download URLs do not work on the private path.
 //   * Old public objects are NEVER deleted unless you pass --delete-old (with
 //     --apply), and only after the copy is verified and the post rewritten. Run
 //     that as a second pass once the app works; it also cleans up posts that an
@@ -49,6 +52,8 @@ export function destName(name) {
   if (safe === name) return safe;
   return `${createHash('sha1').update(name).digest('hex').slice(0, 8)}_${safe}`;
 }
+
+const TOKEN_KEY = 'firebaseStorageDownloadTokens';
 
 function unsafeName(n) {
   return typeof n !== 'string' || n === '' || n.includes('/') || n.includes('..');
@@ -140,6 +145,24 @@ async function main() {
     return String(ma.size) === String(mb.size) && ma.md5Hash === mb.md5Hash;
   };
 
+  const hasToken = async (f) => !!(await f.getMetadata())[0].metadata?.[TOKEN_KEY];
+  // Remove the legacy public download token from an object (no-op if none).
+  // null deletes the key on GCS; if the backend ignores that (the Storage
+  // emulator does) rewrite the object onto itself with the metadata overridden.
+  // Returns true if a token was removed; throws if one cannot be removed.
+  const stripToken = async (f) => {
+    if (!(await hasToken(f))) return false;
+    await f.setMetadata({ metadata: { [TOKEN_KEY]: null } });
+    if (await hasToken(f)) {
+      const custom = { ...((await f.getMetadata())[0].metadata || {}) };
+      delete custom[TOKEN_KEY];
+      custom.tokenStripped = 'true';
+      await f.copy(f, { metadata: custom });
+    }
+    if (await hasToken(f)) throw new Error(`download token still present on ${f.name}`);
+    return true;
+  };
+
   const snap = await db.collection('posts').get();
   const tot = { migrated: 0, skipped: 0, failed: 0, deleted: 0, copied: 0, existed: 0 };
   const deletable = new Set();   // root names safe to delete (verified + post rewritten)
@@ -158,6 +181,15 @@ async function main() {
     if (plan.skip) {
       tot.skipped++;
       console.log(`SKIP (already migrated) ${post.id}`);
+      if (opts.apply) {
+        // Earlier runs of this script copied the token along: strip it now.
+        for (const p of plan.filePaths) {
+          const f = bucket.file(p);
+          if (!(await f.exists())[0]) continue;
+          try { if (await stripToken(f)) console.log(`  stripped download token: ${p}`); }
+          catch (e) { tot.failed++; console.log(`FAIL ${post.id}: ${e.message}`); }
+        }
+      }
       if (opts.deleteOld) {
         for (const m of cleanupCandidates(post, bucketHas)) {
           const dst = bucket.file(m.to);
@@ -179,7 +211,21 @@ async function main() {
         const dst = bucket.file(m.to);
         const [exists] = await dst.exists();
         if (exists) tot.existed++;
-        else { await src.copy(dst); tot.copied++; }
+        else {
+          // copy() carries the source's custom metadata, including the legacy
+          // public download token, so override the destination's custom
+          // metadata at copy time with the token removed.
+          const custom = { ...((await src.getMetadata())[0].metadata || {}) };
+          delete custom[TOKEN_KEY];
+          custom.migratedFrom = m.from; // non-empty, so the override is never treated as "unset"
+          await src.copy(dst, { metadata: custom });
+          tot.copied++;
+        }
+        // For destinations that already existed (earlier runs) or if the copy
+        // override was ignored: null deletes the key on GCS. Then verify; never
+        // leave a token. (Only touched when present: the Storage emulator mints
+        // a fresh token on any metadata update.)
+        await stripToken(dst);
         if (!(await sameObject(src, dst))) throw new Error(`verification failed (size/md5) for ${m.to}`);
       } catch (e) {
         ok = false;
