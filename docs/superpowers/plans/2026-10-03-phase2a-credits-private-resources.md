@@ -2773,44 +2773,64 @@ git commit -m "feat(tools): migrate_storage — move legacy public files to priv
 
 ## Deploy (order-dependent — do NOT improvise)
 
-Who runs what: **Claude** runs the `firebase deploy` steps (allowed by the user's settings rule). **The user** runs anything needing the service-account key (step 3). Run the full local suite first: `bash tools/test_functions.sh`, `bash tools/test_rules.sh`, `bash tools/test_storage_rules.sh`, `flutter analyze`, `flutter test`, `flutter build web --release`.
+Who runs what: **Claude** runs the `firebase deploy` steps (allowed by the user's settings rule). **The user** runs anything needing the service-account key (the migration). Run the full local suite first: `bash tools/test_functions.sh`, `bash tools/test_rules.sh`, `bash tools/test_storage_rules.sh`, `bash tools/test_migrate_storage.sh`, `flutter analyze`, `flutter test`, `flutter build web --release`.
+
+**Requirements:** Cloud Functions need the **Blaze (pay-as-you-go) plan**. The first functions deploy may also prompt about an **Artifact Registry cleanup policy** — accept (or set one, e.g. delete images older than 1 day) so old build images do not accumulate.
 
 ```
+0. PRE-STEP (read-only audit, before anything is deployed): the OLD requests rule
+   lets a client write isFulfilled / fulfilledPostId itself. In the Firebase
+   console (Firestore → requests) look for docs where isFulfilled == true or
+   fulfilledPostId is set that were NOT produced by a real fulfilment. Note them;
+   clear any bogus ones (set isFulfilled false, fulfilledPostId null) after the
+   new rules are live. (downloadResource no longer trusts fulfilledPostId alone,
+   but a clean state keeps the request UI honest.)
+
 1. firebase deploy --only firestore:indexes --project kyodai-sns
    # adds credits_ledger (uid ASC, createdAt DESC). WAIT until it reads Enabled
    # in the console (the マイページ ledger query fails FAILED_PRECONDITION until then).
 
-2. firebase deploy --only functions --project kyodai-sns
+2. Enable the IAM Credentials API (needed for signed URLs without a key file):
+   gcloud services enable iamcredentials.googleapis.com --project kyodai-sns
+
+3. ONE command for functions AND rules, so the new onPostCreated never runs against
+   the old rules window and the old requests rule cannot forge fulfilledPostId:
+   firebase deploy --only functions,firestore:rules,firestore:indexes,storage --project kyodai-sns
    # FIRST functions deploy in this project: the CLI will offer to enable the
    # Cloud Functions / Cloud Build / Artifact Registry / Eventarc / Cloud Run /
    # Pub/Sub APIs — accept. Firestore-trigger functions can fail the first time
    # with an Eventarc permission-propagation error: wait ~3 minutes and re-run
    # the same command (it is idempotent).
-   # REQUIRED once, or downloadResource fails with "signBlob"/"iam.serviceAccounts.signBlob"
-   # permission denied: grant the functions' runtime service account the
-   # Service Account Token Creator role ON ITSELF:
-   #   gcloud iam service-accounts add-iam-policy-binding <PROJECT_NUMBER>-compute@developer.gserviceaccount.com \
-   #     --member="serviceAccount:<PROJECT_NUMBER>-compute@developer.gserviceaccount.com" \
-   #     --role="roles/iam.serviceAccountTokenCreator" --project kyodai-sns
-   # (PROJECT_NUMBER = 932624635949.) If the user prefers the console: IAM → that
-   # service account → add itself with role "Service Account Token Creator".
 
-3. USER, with GOOGLE_APPLICATION_CREDENTIALS set (a freshly created key, deleted afterwards):
-   cd tools ; node migrate_storage.mjs --project kyodai-sns --dry-run
-   # review the plan, then:
-   cd tools ; node migrate_storage.mjs --project kyodai-sns
-   # copies + sets filePaths. Leave the old root objects (no --delete-old yet).
+4. IMMEDIATELY after the FIRST functions deploy (the runtime service account exists
+   now), or downloadResource fails with "iam.serviceAccounts.signBlob" permission
+   denied: grant the functions' runtime service account the Service Account Token
+   Creator role ON ITSELF (PROJECT_NUMBER = 932624635949):
+   gcloud iam service-accounts add-iam-policy-binding 932624635949-compute@developer.gserviceaccount.com \
+     --member="serviceAccount:932624635949-compute@developer.gserviceaccount.com" \
+     --role="roles/iam.serviceAccountTokenCreator" --project kyodai-sns
+   # Console alternative: IAM → that service account → add itself with role
+   # "Service Account Token Creator". Not needed again on later deploys.
+   # NOTE: the new storage rules do NOT block the OLD public objects or their URLs
+   # (download-token URLs bypass rules). Only the migration (token strip +
+   # fileUrls removal) and the later --delete-old close that.
 
-4. firebase deploy --only firestore:rules,storage --project kyodai-sns
-   # Order matters: AFTER the migration (the new storage rules deny the old
-   # public root objects) and BEFORE hosting. There is a short window where the
-   # still-cached OLD web build cannot post or download — acceptable (a handful of users).
+5. USER, with GOOGLE_APPLICATION_CREDENTIALS set (a freshly created key, deleted afterwards):
+   cd tools ; npm install
+   node migrate_storage.mjs --project kyodai-sns
+   # dry run is the DEFAULT: review the plan first, then the real run:
+   node migrate_storage.mjs --project kyodai-sns --apply
+   # copies to resources/<uid>/, strips the legacy download tokens from the copies,
+   # sets filePaths and removes fileUrls. The old root objects stay (no --delete-old yet).
 
-5. flutter build web --release   then   firebase deploy --only hosting --project kyodai-sns
+6. Deploy hosting IMMEDIATELY after the migration (the migration removes fileUrls,
+   which breaks the OLD client until it is replaced):
+   flutter build web --release   then   firebase deploy --only hosting --project kyodai-sns
 
-6. After the smoke test passes and a day has gone by:
-   cd tools ; node migrate_storage.mjs --project kyodai-sns --delete-old
-   # removes the now-redundant public root objects (idempotent; USER runs it).
+7. After the smoke test passes and a day has gone by (USER runs it):
+   cd tools ; node migrate_storage.mjs --project kyodai-sns --apply --delete-old
+   # removes the now-redundant public root objects (idempotent). Until this runs the
+   # old root URLs still work.
 ```
 
 **Rollback:** `firebase deploy --only hosting` of the previous release does NOT restore the old economy (rules are stricter) — the old build cannot write points any more. To roll back fully, redeploy the previous `firestore.rules`/`storage.rules` from git too. Functions can stay deployed.
@@ -2823,7 +2843,7 @@ Who runs what: **Claude** runs the `firebase deploy` steps (allowed by the user'
 4. Upload a PDF as a past exam → post appears, then within ~5 s the balance rises **+3** and the ledger shows 「資料のアップロード +3」. Upload a 4th in one day → no further credit.
 5. Post reviews on three well-reviewed courses → **+2** each, a 4th → no credit. Post a review on a course with fewer than 5 reviews → **+1** extra (a new user's first review on a thin course = **+3**), and that course's レビュー tab shows the 「レビュー募集中」 tag until it reaches 5 reviews. More than 5 bonus grants in one day → capped.
 6. Create a request (free, no slider). From a second account upload against it → request shows solved, the provider gets **+6** (3 upload + 3 request), the requester can download free.
-7. Direct-URL check: copy an old `firebasestorage.googleapis.com/...?alt=media` URL of a migrated file → **403/denied**. Open a signed URL after 10+ minutes → expired.
+7. Direct-URL check: after the migration, an old root `firebasestorage.googleapis.com/...?alt=media&token=...` URL still returns **200** until `--delete-old` and **404 after** it. The SAME old token on the NEW `resources/<uid>/...` path must be **403/404** (tokens were stripped). Open a signed URL after 10+ minutes → expired.
 8. DevTools console as a signed-in user: `firebase`-SDK write to `credit_balances/<own uid>` → permission denied.
 9. Invitation: マイページ shows your 招待コード (copy button works). Sign up a second KU account entering that code, verify its email, log in → the new account shows **6** (3 welcome + 3 referral) and yours rises by **+3** with a 「ご友人の招待特典」 ledger row. Re-using the same code on a third account also pays; an 11th referral pays nothing.
 
