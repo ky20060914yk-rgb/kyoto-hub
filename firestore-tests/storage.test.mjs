@@ -50,6 +50,14 @@ test('only PDFs and images, at most 20 MiB', async () => {
   await assertFails(uploadBytes(ref(s, 'resources/u1/big.pdf'), new Uint8Array(20 * 1024 * 1024 + 1), pdf));
 });
 
+test('SVG (script-capable) and other image types are denied; png/jpeg/webp are allowed', async () => {
+  const s = st('u1', KU);
+  await assertFails(uploadBytes(ref(s, 'resources/u1/x.svg'), bytes, { contentType: 'image/svg+xml' }));
+  await assertFails(uploadBytes(ref(s, 'resources/u1/x.gif'), bytes, { contentType: 'image/gif' }));
+  await assertSucceeds(uploadBytes(ref(s, 'resources/u1/x.jpg'), bytes, { contentType: 'image/jpeg' }));
+  await assertSucceeds(uploadBytes(ref(s, 'resources/u1/x.webp'), bytes, { contentType: 'image/webp' }));
+});
+
 test('NOBODY can read, overwrite or delete through the client SDK — not even the owner', async () => {
   await env.withSecurityRulesDisabled(async (ctx) => {
     await uploadBytes(ref(ctx.storage(), 'resources/u1/seeded.pdf'), bytes, pdf);

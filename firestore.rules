@@ -116,6 +116,7 @@ service cloud.firestore {
       // `downloadCount` and `reports` cannot be pre-seeded.
       allow create: if kuVerified()
         && request.resource.data.authorId == request.auth.uid
+        && request.resource.data.university_id == 'kyoto_u'
         && request.resource.data.get('downloadCount', 0) == 0
         && request.resource.data.get('reports', []) == []
         && request.resource.data.filePaths is list

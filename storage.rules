@@ -24,7 +24,7 @@ service firebase.storage {
         && request.auth.uid == uid
         && request.resource.size <= 20 * 1024 * 1024
         && (request.resource.contentType == 'application/pdf'
-            || request.resource.contentType.matches('image/.*'));
+            || request.resource.contentType.matches('image/(png|jpeg|webp)'));
       allow update, delete: if false;
     }
 

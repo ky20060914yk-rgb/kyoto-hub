@@ -378,6 +378,12 @@ test('verified KU user can create a post they author', async () => {
   await assertSucceeds(setDoc(doc(asKu(), 'posts/p1'), validPost({ id: 'p1' })));
 });
 
+test('a post must carry university_id kyoto_u on create', async () => {
+  const { university_id, ...noUni } = validPost({ id: 'p_nu' });
+  await assertFails(setDoc(doc(asKu(), 'posts/p_nu'), noUni));
+  await assertFails(setDoc(doc(asKu(), 'posts/p_nu2'), validPost({ id: 'p_nu2', university_id: 'other_u' })));
+});
+
 test('unverified user cannot create a post', async () => {
   const db = env.authenticatedContext('u2', KU_UNVERIFIED).firestore();
   await assertFails(setDoc(doc(db, 'posts/p2'), validPost({ id: 'p2', authorId: 'u2', filePaths: ['resources/u2/1_a.pdf'] })));
