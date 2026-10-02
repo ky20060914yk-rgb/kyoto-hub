@@ -13,8 +13,8 @@
 ## Global Constraints
 
 - Flutter `3.41.9`, Dart `^3.11.5`. The ONLY new Dart dependency this plan may add is `cloud_functions`. Functions: Node `22`, TypeScript, `firebase-functions/v2/*` only (no v1), region **`asia-east1`** on every function.
-- Credit amounts (spec §4.3, verbatim): signup **+3**; download **−1** flat (any category); upload approved **+3** (daily cap, duplicates earn nothing); **each of a user's first 3 reviews +2**; **a review on a course that has fewer than 5 reviews +1** (data-collection incentives, P2-12/13); own posts and posts that fulfilled your request are **free**. Credits are **never purchasable**.
-- **Abolished** (must not survive in code, rules, or copy): 80% uploader royalty, 5-DL / 10-DL milestones, delete/report claw-back penalties, the 2020 cut-off, the uploader-set 0–20pt price, the request-reward slider, the referral/invitation bonus, the 20pt textbook settlement.
+- Credit amounts (spec §4.3, verbatim): signup **+3**; download **−1** flat (any category); upload approved **+3** (daily cap, duplicates earn nothing); **each of a user's first 3 reviews +2**; **a review on a course that has fewer than 5 reviews +1** (data-collection incentives, P2-12/13); own posts and posts that fulfilled your request are **free**. **invitation: inviter +3 and invitee +3 on the invitee's email verification (inviter capped at 10 referrals)** (P2-2); Credits are **never purchasable**.
+- **Abolished** (must not survive in code, rules, or copy): 80% uploader royalty, 5-DL / 10-DL milestones, delete/report claw-back penalties, the 2020 cut-off, the uploader-set 0–20pt price, the request-reward slider, the CLIENT-written referral bonus (referral itself is kept, server-side — P2-2), the 20pt textbook settlement.
 - The client NEVER writes a balance or a ledger row. `credit_balances` and `credits_ledger`: `allow write: if false`. Reading is own-doc only.
 - Text course reviews remain free to post and read (Phase 1 behaviour unchanged).
 - Every Firestore document written by a Function carries `university_id: 'kyoto_u'`.
@@ -28,7 +28,7 @@
 | # | Ruling | Why | Cost if wrong |
 |---|---|---|---|
 | P2-1 | Balances live in `credit_balances/{uid}`, not `users.credits` | `users/{uid}` is owner-writable; locking one field of it needs diff-rules gymnastics. A separate Function-only doc is simpler and provably un-forgeable | One-line move later |
-| P2-2 | Referral/invitation bonus is **dropped** (UI included) | Spec's credit table has none; the old flow wrote another user's balance from the client — the exact hole being closed | Re-add as a Function later |
+| P2-2 | **Invitation codes are KEPT, rebuilt server-side** (owner decision 2026-10-03: they drive user growth). Code = 6 chars from an unambiguous alphabet, issued by `claimWelcome` (so only verified users have one), stored in Admin-only `invitation_codes/{code}` and on `credit_balances.invitationCode`. The invitee types it at signup (`users.pendingReferralCode`, a hint); when the invitee's `claimWelcome` runs, the Function validates it and pays **invitee +3 and inviter +3** (ledger `referral_in_<invitee>` / `referral_out_<invitee>`). Guards: no self-referral, referrer must already be welcomed, invitee must not already be welcomed, inviter capped at **10 referrals** (+30). The old client-side flow wrote another user's balance and was already being denied by the `users` rule | Spec's table has no referral; added on the owner's call. Amounts/cap are constants | `referral`, `referralCap` constants |
 | P2-3 | Daily grant cap = **3 grants per JST day** (upload and request-fulfilment grants share it) | Spec says "daily cap" without a number; the old rule was 3 uploads/day | Constant in `common.ts` |
 | P2-4 | A download is **unlocked once**: re-downloading the same post is free (ledger id `dl_<uid>_<postId>` is the marker) | Signed URLs expire in 10 min; charging per click would punish retries | Remove the marker check |
 | P2-5 | Legacy `users.points` and `transactions` are **abandoned**; every user gets the normal +3 welcome (existing verified users claim it on next login) | ~22 test users; converting would re-introduce client-trusted data | Friends lose old points |
@@ -48,7 +48,8 @@
 - `functions/package.json`, `functions/tsconfig.json`, `functions/.gitignore` — Functions codebase scaffold
 - `functions/src/common.ts` — constants (`REGION`, `CREDITS`, TTL), `requireKuVerified`, `jstDay`
 - `functions/src/credits.ts` — `Balance`, `CreditEvent`, `readBalance`, `writeCredit` (the single place credit invariants live)
-- `functions/src/welcome.ts` — `claimWelcome`
+- `functions/src/welcome.ts` — `claimWelcome` (Task 2; extended with invitation codes in Task 4b)
+- `functions/src/referral.ts`, `functions/test/referral.test.mjs` — code generator + redemption tests (Task 4b)
 - `functions/src/download.ts` — `processDownload`
 - `functions/src/postCreated.ts` — `handlePostCreated`
 - `functions/src/reviewCreated.ts` — `handleReviewCreated`
@@ -74,7 +75,7 @@
 - Modify: `firebase.json`, `.gitignore` (add `functions/node_modules/`, `functions/lib/`)
 
 **Interfaces:**
-- Produces (`common.ts`): `REGION: 'asia-east1'`, `UNIVERSITY_ID: 'kyoto_u'`, `CREDITS` (`welcome:3, upload:3, firstReviews:2, firstReviewCount:3, scarceReview:1, scarceThreshold:5, reviewDailyCap:5, requestFulfilled:3, downloadCost:1, dailyGrantCap:3`), `SIGNED_URL_TTL_MS: number`, `interface AuthLike { uid: string; token: { email?: string; email_verified?: boolean } }`, `requireKuVerified(auth: AuthLike | undefined | null): string` (returns uid, throws `HttpsError`), `jstDay(now?: Date): string` (`YYYY-MM-DD` in JST).
+- Produces (`common.ts`): `REGION: 'asia-east1'`, `UNIVERSITY_ID: 'kyoto_u'`, `CREDITS` (`welcome:3, upload:3, firstReviews:2, firstReviewCount:3, scarceReview:1, scarceThreshold:5, reviewDailyCap:5, requestFulfilled:3, downloadCost:1, dailyGrantCap:3, referral:3, referralCap:10`), `SIGNED_URL_TTL_MS: number`, `interface AuthLike { uid: string; token: { email?: string; email_verified?: boolean } }`, `requireKuVerified(auth: AuthLike | undefined | null): string` (returns uid, throws `HttpsError`), `jstDay(now?: Date): string` (`YYYY-MM-DD` in JST).
 - Produces (`testlib/helpers.mjs`): `db` (admin Firestore on the emulator), `uid(prefix?)` (unique id), `KU(uid)` (an `AuthLike`), `seedPost(id, over?)`, `fakeDeps(existingPaths?)` → `{ signed: [], sign, exists, remove, removed: [] }`.
 
 - [ ] **Step 1: Create `functions/package.json`**
@@ -195,7 +196,7 @@ test('jstDay rolls over at 15:00 UTC', () => {
 test('credit constants match spec §4.3', () => {
   assert.deepEqual({ ...CREDITS }, {
     welcome: 3, upload: 3, firstReviews: 2, firstReviewCount: 3, scarceReview: 1, scarceThreshold: 5,
-    reviewDailyCap: 5, requestFulfilled: 3, downloadCost: 1, dailyGrantCap: 3,
+    reviewDailyCap: 5, requestFulfilled: 3, downloadCost: 1, dailyGrantCap: 3, referral: 3, referralCap: 10,
   });
 });
 ```
@@ -222,6 +223,8 @@ export const CREDITS = {
   scarceReview: 1, // review on a course with <= `scarceThreshold` reviews (P2-13)
   scarceThreshold: 5,
   reviewDailyCap: 5, // review-bonus grants per JST day (P2-14)
+  referral: 3, // each side of a successful invitation (P2-2)
+  referralCap: 10, // invitations that pay a single inviter
   requestFulfilled: 3,
   downloadCost: 1,
   dailyGrantCap: 3, // grants per JST day (P2-3)
@@ -339,7 +342,7 @@ git commit -m "feat(functions): scaffold Functions codebase, shared auth/credit 
 **Interfaces:**
 - Consumes: `UNIVERSITY_ID`, `CREDITS` from `common.ts`.
 - Produces (`credits.ts`):
-  - `interface Balance { balance: number; welcomeGranted?: boolean; reviewBonusesUsed?: number; reviewGrantDay?: string; reviewGrantsToday?: number; uploadGrantDay?: string; uploadGrantsToday?: number }`
+  - `interface Balance { balance: number; welcomeGranted?: boolean; invitationCode?: string; referredBy?: string; referralsRewarded?: number; reviewBonusesUsed?: number; reviewGrantDay?: string; reviewGrantsToday?: number; uploadGrantDay?: string; uploadGrantsToday?: number }`
   - `interface CreditEvent { uid: string; delta: number; reason: string; ledgerId: string; refId?: string }`
   - `balanceRef(db, uid)`, `ledgerRef(db, ledgerId)` → DocumentReference
   - `readBalance(tx, db, uid): Promise<Balance>` (a missing doc reads as `{ balance: 0 }`)
@@ -433,6 +436,9 @@ import { UNIVERSITY_ID } from './common.js';
 export interface Balance {
   balance: number;
   welcomeGranted?: boolean;
+  invitationCode?: string; // this user's own code (issued by claimWelcome, P2-2)
+  referredBy?: string; // inviter uid, set once
+  referralsRewarded?: number; // invitations by this user that have paid out (cap)
   reviewBonusesUsed?: number; // how many first-3-reviews bonuses (P2-12) have been paid
   reviewGrantDay?: string; // JST day of the last review-bonus grant (P2-14 cap)
   reviewGrantsToday?: number;
@@ -443,7 +449,7 @@ export interface Balance {
 export interface CreditEvent {
   uid: string;
   delta: number;
-  reason: string; // signup_bonus | download | download_free | upload | first_review | scarce_review | request_fulfilled
+  reason: string; // signup_bonus | download | download_free | upload | first_review | scarce_review | request_fulfilled | referral_in | referral_out
   ledgerId: string; // deterministic => the caller can make the grant idempotent
   refId?: string; // postId / requestId the event is about
 }
@@ -1278,6 +1284,212 @@ git commit -m "feat(functions): post/review/delete triggers and the Firebase ent
 
 ---
 
+### Task 4b: Invitation codes (server-side referral, P2-2)
+
+**Files:**
+- Create: `functions/src/referral.ts`, `functions/test/referral.test.mjs`
+- Modify: `functions/src/welcome.ts` (replace with the version below)
+
+**Interfaces:**
+- Consumes: `CREDITS.welcome`, `CREDITS.referral`, `CREDITS.referralCap`, `UNIVERSITY_ID` (common); `readBalance`, `writeCredit`, `Balance` (credits).
+- Produces: `newCode(rand?: () => number): string` (6 chars of `ABCDEFGHJKLMNPQRSTUVWXYZ23456789`), `normalizeCode(raw: unknown): string` (trim + upper-case), and `claimWelcome(db, uid, rand?)` — **same return shape as Task 2** (`{ granted, balance }`), so Task 2's tests stay green. New side effects, all inside the one welcome transaction: the user's own `invitationCode` is allocated (`invitation_codes/{code}` = `{ uid, university_id, createdAt }`, and `credit_balances.invitationCode`); and if `users/{uid}.pendingReferralCode` resolves to a valid referrer, `referral_in` (+3) is paid to the invitee and `referral_out` (+3) to the inviter, `referredBy` / `referralsRewarded` are recorded, and `pendingReferralCode` is cleared (used or not).
+
+Validity of a pending code: the code exists; its owner is not the claimant; the owner has already been welcomed (`welcomeGranted`) — i.e. is a real verified user; the owner's `referralsRewarded < CREDITS.referralCap`. The invitee side is automatically once-only because it only runs on the first (un-welcomed) claim. An invalid code is silently ignored (the user still gets the normal welcome).
+
+- [ ] **Step 1: Write the failing tests `functions/test/referral.test.mjs`**
+
+```js
+import { test } from 'node:test';
+import assert from 'node:assert/strict';
+import { db, uid } from '../testlib/helpers.mjs';
+import { claimWelcome } from '../lib/welcome.js';
+
+const balDoc = async (u) => (await db.collection('credit_balances').doc(u).get()).data() ?? {};
+const withPending = (u, code) => db.collection('users').doc(u).set({ pendingReferralCode: code, university_id: 'kyoto_u' });
+const welcomed = async () => { const u = uid('r'); await claimWelcome(db, u); return { u, code: (await balDoc(u)).invitationCode }; };
+
+test('a new user is issued a well-formed invitation code, registered for lookup', async () => {
+  const { u, code } = await welcomed();
+  assert.match(code, /^[A-HJ-NP-Z2-9]{6}$/);
+  const reg = await db.collection('invitation_codes').doc(code).get();
+  assert.equal(reg.get('uid'), u);
+  assert.equal(reg.get('university_id'), 'kyoto_u');
+});
+
+test('a valid code pays the invitee +3 and the inviter +3, once, and is consumed', async () => {
+  const ref = await welcomed();
+  const inv = uid('i');
+  await withPending(inv, ` ${ref.code.toLowerCase()} `); // typed sloppily
+  assert.deepEqual(await claimWelcome(db, inv), { granted: true, balance: 6 }); // 3 welcome + 3 referral
+  assert.equal((await balDoc(ref.u)).balance, 6);
+  assert.equal((await balDoc(ref.u)).referralsRewarded, 1);
+  assert.equal((await balDoc(inv)).referredBy, ref.u);
+  assert.equal((await db.collection('credits_ledger').doc(`referral_in_${inv}`).get()).get('delta'), 3);
+  const out = await db.collection('credits_ledger').doc(`referral_out_${inv}`).get();
+  assert.equal(out.get('delta'), 3);
+  assert.equal(out.get('uid'), ref.u);
+  assert.equal((await db.collection('users').doc(inv).get()).get('pendingReferralCode'), undefined);
+  // a second claim changes nothing
+  assert.deepEqual(await claimWelcome(db, inv), { granted: false, balance: 6 });
+  assert.equal((await balDoc(ref.u)).balance, 6);
+});
+
+test('an unknown code just gives the normal welcome and is cleared', async () => {
+  const inv = uid('i');
+  await withPending(inv, 'ZZZZZZ');
+  assert.deepEqual(await claimWelcome(db, inv), { granted: true, balance: 3 });
+  assert.equal((await db.collection('users').doc(inv).get()).get('pendingReferralCode'), undefined);
+});
+
+test('self-referral pays nothing', async () => {
+  const me = uid('s');
+  await db.collection('invitation_codes').doc('SELF22').set({ uid: me, university_id: 'kyoto_u' });
+  await withPending(me, 'SELF22');
+  assert.deepEqual(await claimWelcome(db, me), { granted: true, balance: 3 });
+});
+
+test('a referrer who has not been welcomed (unverified) pays nothing', async () => {
+  const ghost = uid('g'); const inv = uid('i');
+  await db.collection('invitation_codes').doc('GHOST2').set({ uid: ghost, university_id: 'kyoto_u' });
+  await withPending(inv, 'GHOST2');
+  assert.deepEqual(await claimWelcome(db, inv), { granted: true, balance: 3 });
+  assert.equal((await balDoc(ghost)).balance, undefined);
+});
+
+test('the inviter is capped at 10 paid referrals', async () => {
+  const ref = await welcomed();
+  await db.collection('credit_balances').doc(ref.u).set({ referralsRewarded: 10 }, { merge: true });
+  const inv = uid('i');
+  await withPending(inv, ref.code);
+  assert.deepEqual(await claimWelcome(db, inv), { granted: true, balance: 3 }); // invitee gets no bonus either
+  assert.equal((await balDoc(ref.u)).balance, 3);
+});
+
+test('an already-welcomed user cannot redeem a code afterwards', async () => {
+  const ref = await welcomed();
+  const late = uid('l');
+  await claimWelcome(db, late); // welcomed first
+  await withPending(late, ref.code);
+  assert.deepEqual(await claimWelcome(db, late), { granted: false, balance: 3 });
+  assert.equal((await balDoc(ref.u)).balance, 3);
+});
+
+test('if every candidate code is taken the claim aborts instead of overwriting', async () => {
+  await db.collection('invitation_codes').doc('AAAAAA').set({ uid: 'someone', university_id: 'kyoto_u' });
+  const u = uid('c');
+  await assert.rejects(claimWelcome(db, u, () => 0), (e) => e.code === 'aborted'); // rand 0 -> 'AAAAAA' x5
+  assert.equal((await db.collection('credit_balances').doc(u).get()).exists, false);
+});
+```
+
+- [ ] **Step 2: Run to verify it fails**
+
+Run: `bash tools/test_functions.sh`
+Expected: FAIL — `referral.test.mjs` (no invitation codes issued yet); Task 2's tests still pass.
+
+- [ ] **Step 3: Create `functions/src/referral.ts`**
+
+```ts
+// Unambiguous alphabet: no 0/O, 1/I/L.
+const ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+
+/** A 6-character invitation code. Not a secret — redemption is guarded by caps. */
+export const newCode = (rand: () => number = Math.random): string =>
+  Array.from({ length: 6 }, () => ALPHABET[Math.floor(rand() * ALPHABET.length)]).join('');
+
+export const normalizeCode = (raw: unknown): string => String(raw ?? '').trim().toUpperCase();
+```
+
+- [ ] **Step 4: Replace `functions/src/welcome.ts`**
+
+```ts
+import { FieldValue, type Firestore } from 'firebase-admin/firestore';
+import { HttpsError } from 'firebase-functions/v2/https';
+import { CREDITS, UNIVERSITY_ID } from './common.js';
+import { readBalance, writeCredit, type Balance } from './credits.js';
+import { newCode, normalizeCode } from './referral.js';
+
+/**
+ * One-time welcome grant + invitation-code issue + (optional) referral payout,
+ * all in a single transaction (every read first, then every write). Idempotent:
+ * the flag lives on the balance doc, and an already-welcomed user can never
+ * redeem a code afterwards.
+ */
+export async function claimWelcome(
+  db: Firestore,
+  uid: string,
+  rand: () => number = Math.random,
+): Promise<{ granted: boolean; balance: number }> {
+  return db.runTransaction(async (tx) => {
+    const cur = await readBalance(tx, db, uid);
+    if (cur.welcomeGranted) return { granted: false, balance: cur.balance };
+
+    // ---- reads
+    const userRef = db.collection('users').doc(uid);
+    const pending = normalizeCode((await tx.get(userRef)).get('pendingReferralCode'));
+
+    const candidates = Array.from({ length: 5 }, () => newCode(rand));
+    const taken = await Promise.all(candidates.map((c) => tx.get(db.collection('invitation_codes').doc(c))));
+    const myCode = candidates.find((_, i) => !taken[i].exists);
+    if (!myCode) throw new HttpsError('aborted', 'could not allocate an invitation code');
+
+    let referrerUid: string | null = null;
+    let referrerBal: Balance | null = null;
+    if (pending) {
+      const owner = await tx.get(db.collection('invitation_codes').doc(pending));
+      const ownerUid = owner.exists ? String(owner.get('uid') ?? '') : '';
+      if (ownerUid && ownerUid !== uid) {
+        const rb = await readBalance(tx, db, ownerUid);
+        if (rb.welcomeGranted && (rb.referralsRewarded ?? 0) < CREDITS.referralCap) {
+          referrerUid = ownerUid;
+          referrerBal = rb;
+        }
+      }
+    }
+
+    // ---- writes
+    let next = writeCredit(
+      tx, db,
+      { uid, delta: CREDITS.welcome, reason: 'signup_bonus', ledgerId: `signup_${uid}` },
+      cur,
+      { welcomeGranted: true, invitationCode: myCode, ...(referrerUid ? { referredBy: referrerUid } : {}) },
+    );
+    tx.create(db.collection('invitation_codes').doc(myCode), {
+      uid, university_id: UNIVERSITY_ID, createdAt: FieldValue.serverTimestamp(),
+    });
+    if (referrerUid && referrerBal) {
+      next = writeCredit(
+        tx, db,
+        { uid, delta: CREDITS.referral, reason: 'referral_in', ledgerId: `referral_in_${uid}`, refId: referrerUid },
+        next,
+      );
+      writeCredit(
+        tx, db,
+        { uid: referrerUid, delta: CREDITS.referral, reason: 'referral_out', ledgerId: `referral_out_${uid}`, refId: uid },
+        referrerBal,
+        { referralsRewarded: (referrerBal.referralsRewarded ?? 0) + 1 },
+      );
+    }
+    if (pending) tx.set(userRef, { pendingReferralCode: FieldValue.delete() }, { merge: true });
+    return { granted: true, balance: next.balance };
+  });
+}
+```
+
+- [ ] **Step 5: Run to verify it passes**
+
+Run: `bash tools/test_functions.sh`
+Expected: PASS — all earlier tests (Task 2's `claimWelcome` tests unchanged) + 8 referral tests; `tsc` clean.
+
+- [ ] **Step 6: Commit**
+
+```bash
+git add functions/src/referral.ts functions/src/welcome.ts functions/test/referral.test.mjs
+git commit -m "feat(functions): server-side invitation codes — issue on welcome, pay invitee+inviter, capped"
+```
+
+---
+
 ### Task 5: Firestore rules + index + rules tests (credits are Function-only)
 
 **Files:**
@@ -1424,6 +1636,13 @@ test('credits_ledger: the per-user stream query is allowed, another user’s is 
   await assertSucceeds(getDocs(query(collection(asKu(), 'credits_ledger'), where('uid', '==', 'u1'))));
   await assertFails(getDocs(query(collection(asKu(), 'credits_ledger'), where('uid', '==', 'u2'))));
   await assertFails(getDocs(collection(asKu(), 'credits_ledger')));
+});
+
+test('invitation_codes: Admin-only — no client may read, list or write (P2-2)', async () => {
+  const db = asKu();
+  await assertFails(getDoc(doc(db, 'invitation_codes/ABC234')));
+  await assertFails(setDoc(doc(db, 'invitation_codes/ABC234'), { uid: 'u1' }));
+  await assertFails(getDocs(collection(db, 'invitation_codes')));
 });
 ```
 
@@ -1703,7 +1922,7 @@ git commit -m "feat(storage): private bucket rules — own-prefix create only, n
   - `class CreditException implements Exception { final CreditErrorKind kind; final String message; factory CreditException.fromCode(String code, String? message) }`
   - `class DownloadResult { final String url; final bool charged; final int balance }`
   - `typedef CallableInvoker = Future<Map<String, dynamic>> Function(String name, Map<String, dynamic> data)`
-  - `class CreditService { CreditService(FirebaseFirestore db, CallableInvoker call); factory CreditService.live(FirebaseFirestore db); Stream<int> streamBalance(String uid); Stream<List<CreditLedgerEntry>> streamLedger(String uid, {int limit = 50}); Future<int> claimWelcome(); Future<DownloadResult> downloadResource(String postId, {int fileIndex = 0}); }`
+  - `class CreditService { CreditService(FirebaseFirestore db, CallableInvoker call); factory CreditService.live(FirebaseFirestore db); Stream<int> streamBalance(String uid); Stream<String?> streamInvitationCode(String uid); Stream<List<CreditLedgerEntry>> streamLedger(String uid, {int limit = 50}); Future<int> claimWelcome(); Future<DownloadResult> downloadResource(String postId, {int fileIndex = 0}); }`
 
 - [ ] **Step 1: Add the dependency**
 
@@ -1756,6 +1975,8 @@ void main() {
       'first_review': 'レビュー投稿ボーナス（最初の3件）',
       'scarce_review': 'レビューの少ない科目への投稿',
       'request_fulfilled': 'リクエストへの対応',
+      'referral_in': '招待コード特典',
+      'referral_out': 'ご友人の招待特典',
     };
     expected.forEach((reason, label) {
       expect(CreditLedgerEntry.fromMap('x', {'reason': reason}).label, label);
@@ -1791,6 +2012,14 @@ void main() {
     final db = FakeFirebaseFirestore();
     await db.collection('credit_balances').doc('u1').set({'balance': 'lots'});
     expect(await CreditService(db, (_, _) async => {}).streamBalance('u1').first, 0);
+  });
+
+  test('streamInvitationCode is null until the server issues one, then the code', () async {
+    final db = FakeFirebaseFirestore();
+    final svc = CreditService(db, (_, _) async => {});
+    expect(await svc.streamInvitationCode('u1').first, isNull);
+    await db.collection('credit_balances').doc('u1').set({'balance': 3, 'invitationCode': 'ABC234'});
+    expect(await svc.streamInvitationCode('u1').first, 'ABC234');
   });
 
   test('streamLedger returns only the caller’s rows, newest first', () async {
@@ -1881,6 +2110,8 @@ class CreditLedgerEntry {
         'first_review' => 'レビュー投稿ボーナス（最初の3件）',
         'scarce_review' => 'レビューの少ない科目への投稿',
         'request_fulfilled' => 'リクエストへの対応',
+        'referral_in' => '招待コード特典',
+        'referral_out' => 'ご友人の招待特典',
         _ => 'クレジットの増減',
       };
 
@@ -1976,6 +2207,16 @@ class CreditService {
         return (b is num && b.isFinite) ? b.toInt() : 0;
       });
 
+  /// This user's own invitation code (issued server-side by `claimWelcome`); null until then.
+  Stream<String?> streamInvitationCode(String uid) => _db
+      .collection('credit_balances')
+      .doc(uid)
+      .snapshots()
+      .map((s) {
+        final c = s.data()?['invitationCode'];
+        return c is String && c.isNotEmpty ? c : null;
+      });
+
   Stream<List<CreditLedgerEntry>> streamLedger(String uid, {int limit = 50}) => _db
       .collection('credits_ledger')
       .where('uid', isEqualTo: uid)
@@ -2029,7 +2270,7 @@ This is the large refactor. Its single deliverable: **after it, no client code w
 - Consumes: `CreditService`, `CreditException`, `CreditErrorKind`, `DownloadResult`, `CreditLedgerEntry` (Task 7).
 - Produces:
   - `Post`: **removes** `fileUrls`, `downloadCost`, `is5DownloadsRewarded`, `is10DownloadsRewarded`; **adds** `final List<String> filePaths`. `Post.fromMap` stays total over old docs (ignores the removed keys; `filePaths` defaults to `[]`). `copyWith({int? downloadCount, List<String>? reports})`.
-  - `UserProfile`: **removes** `points`, `invitationCode`, `pendingReferralCode`. `fromMap` ignores them in old docs. (`downloadCount` is kept as a plain field; nothing increments it any more.)
+  - `UserProfile`: **removes** `points` and `invitationCode` (the code now lives server-side, P2-2); **keeps** `pendingReferralCode` (the invitee's typed code — a hint the `claimWelcome` Function consumes). `fromMap` ignores the removed keys in old docs. (`downloadCount` is kept as a plain field; nothing increments it any more.)
   - `AppStore(CourseRepository, ReviewService, RankingService, CreditService)`; fields `int creditBalance`, `List<CreditLedgerEntry> ledger`; `Future<bool> downloadPost(Post post)` (**now async**); `Future<String?> uploadFileToStorage(String fileName, Uint8List bytes)` (returns the storage **path** `resources/<uid>/<ts>_<name>`); `Future<bool> addPost({required String subjectId, required PostCategory category, int? year, required String title, required String description, required List<String> fileNames, required List<String> filePaths, String? requestId})`; `Future<bool> addMaterialRequest({required String subjectId, required PostCategory category, int? year, required String title, required String description})` (free, no reward); removed: `transactions`, `_addTransaction`, every `copyWith(points: …)`.
   - `startDownload(String url)` in the download helper (web: hidden `<a>` click in the current tab; stub: no-op). `openUrlInNewTab` stays for other callers.
 
@@ -2076,9 +2317,9 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:kyoto_exam_hub/models/user_profile.dart';
 
 void main() {
-  test('UserProfile.toMap never writes points, invitation or referral fields', () {
+  test('UserProfile.toMap never writes points or an invitation code (the pending referral hint is allowed)', () {
     final m = UserProfile(uid: 'u', email: 'a@st.kyoto-u.ac.jp', displayName: 'me', createdAt: DateTime.utc(2026, 10, 3)).toMap();
-    for (final k in ['points', 'invitationCode', 'pendingReferralCode']) {
+    for (final k in ['points', 'invitationCode']) {
       expect(m.containsKey(k), isFalse, reason: '$k must not be client-written');
     }
   });
@@ -2099,7 +2340,7 @@ Expected: FAIL — `Post` has no `filePaths`; `toMap` still emits the old keys.
 
 `lib/models/post.dart`: delete the fields `fileUrls`, `downloadCost`, `is5DownloadsRewarded`, `is10DownloadsRewarded` from the class, constructor, `toMap`, `fromMap`, `copyWith`; add `final List<String> filePaths;` (required in the constructor; in `toMap` `'filePaths': filePaths`; in `fromMap` `filePaths: List<String>.from(map['filePaths'] ?? [])`). `copyWith` keeps only `downloadCount` and `reports`. The `PostCategory` enum and `PostCategoryX` are unchanged.
 
-`lib/models/user_profile.dart`: delete `points`, `invitationCode`, `pendingReferralCode` from the class, constructor, `copyWith`, `toMap`, `fromMap`. Keep `downloadCount`, `isVerified`, `createdAt`.
+`lib/models/user_profile.dart`: delete `points` and `invitationCode` from the class, constructor, `copyWith`, `toMap`, `fromMap`. Keep `pendingReferralCode`, `downloadCount`, `isVerified`, `createdAt`.
 
 - [ ] **Step 4: `FirestoreService` and the download helper**
 
@@ -2135,14 +2376,21 @@ Make these edits (all in `lib/services/app_store.dart`; keep every unrelated met
   final CreditService credits;
   int creditBalance = 0;
   List<CreditLedgerEntry> ledger = [];
+  String? invitationCode; // own code, issued server-side (P2-2)
+  StreamSubscription<String?>? _codeSub;
   StreamSubscription<int>? _balanceSub;
   StreamSubscription<List<CreditLedgerEntry>>? _ledgerSub;
 
   void _watchCredits(String uid) {
     _balanceSub?.cancel();
+    _codeSub?.cancel();
     _ledgerSub?.cancel();
     _balanceSub = credits.streamBalance(uid).listen((b) {
       creditBalance = b;
+      notifyListeners();
+    }, onError: (_) {});
+    _codeSub = credits.streamInvitationCode(uid).listen((c) {
+      invitationCode = c;
       notifyListeners();
     }, onError: (_) {});
     _ledgerSub = credits.streamLedger(uid).listen((l) {
@@ -2162,7 +2410,7 @@ Make these edits (all in `lib/services/app_store.dart`; keep every unrelated met
 ```
 
 2. **`_initFirebaseSync`.** In the email-link sign-in branch delete the `points: 30` argument and the `_addTransaction(... 'signup_bonus' ...)` call, and drop `invitationCode:`. In the `authStateChanges` listener, after `currentUser = profile;` add `_watchCredits(fbUser.uid); if (fbUser.emailVerified) _claimWelcome();` and delete the `_firestore.streamTransactions(...)` subscription block.
-3. **`signUpWithPassword`.** Remove the `referralCode` parameter, the `points: 0`, `invitationCode:` and `pendingReferralCode:` arguments. (Update `signup_screen.dart` accordingly — Step 6.)
+3. **`signUpWithPassword`.** KEEP the `referralCode` parameter and `pendingReferralCode: referralCode` (the `claimWelcome` Function reads it after verification). Remove only `points: 0` and `invitationCode:`.
 4. **`checkEmailVerification`.** Replace the whole `if (isEmailVerified) { if (currentUser != null && !currentUser!.isVerified) { … } }` bonus/referral body with:
 
 ```dart
@@ -2284,17 +2532,17 @@ Make these edits (all in `lib/services/app_store.dart`; keep every unrelated met
 9. **`reportPost`.** In the ≥ 3-report branch delete the whole "Claw back points from uploader" block (uploader profile read, penalty, `saveUserProfile`, `_addTransaction`) and the `DefaultFirebaseOptions` bucket usage if it becomes unused; notice becomes `'通報が3件に達したため、投稿は自動削除されました。'`. (P2-11: threshold behaviour is otherwise unchanged.)
 10. **`addMaterialRequest`.** New signature without `rewardPoints`; delete the `cost`/`totalCost`/points check/`saveUserProfile`/`_addTransaction`; create the request with `costSpent: 0, rewardPoints: 0`.
 11. **`respondToTextbookRequest`.** Delete the `_addTransaction(... 'textbook_borrow' ... -20 ...)` call and change the notice to `'貸し出しに応答しました！トークルームを作成しました。'`.
-12. **Delete** `_addTransaction` and any helper left unused. **`logout()`**: also `_balanceSub?.cancel(); _ledgerSub?.cancel(); creditBalance = 0; ledger = [];`.
+12. **Delete** `_addTransaction` and any helper left unused. **`logout()`**: also `_balanceSub?.cancel(); _codeSub?.cancel(); _ledgerSub?.cancel(); creditBalance = 0; invitationCode = null; ledger = [];`.
 
 - [ ] **Step 6: `main.dart` and the views (minimum to compile and keep flows working)**
 
 `lib/main.dart`: pass `CreditService.live(FirebaseFirestore.instance)` as the 4th `AppStore` argument (+ import).
 
-`lib/views/auth/signup_screen.dart`: remove the `_referralController`, the referral `TextField` (line ~422) and its label, and the `referralCode:` argument at the `signUpWithPassword` call (line ~38). Change the notice text at line ~230 to say the 3-credit welcome bonus is granted after verification (`'検証を完了するまで、過去問のダウンロードや投稿機能は利用できません。検証後に、ご登録ボーナス3クレジットが付与されます。'`).
+`lib/views/auth/signup_screen.dart`: KEEP the referral field and the `referralCode:` argument; relabel the field `'招待コード（任意）'` with helper text `'お友だちの招待コードを入力すると、認証完了後にあなたもお友だちも 3クレジット がもらえます'`. Change the notice text at line ~230 to say the 3-credit welcome bonus is granted after verification (`'検証を完了するまで、過去問のダウンロードや投稿機能は利用できません。検証後に、ご登録ボーナス3クレジットが付与されます。'`).
 
 `lib/views/home/home_screen.dart`: line ~392 `${widget.store.currentUser?.points ?? 0} pt` → `${widget.store.creditBalance} クレジット`.
 
-`lib/views/mypage/my_page_screen.dart`: line ~460 `'${user?.points ?? 0}'` → `'${widget.store.creditBalance}'` and its `'pt'` suffix → `'クレジット'`; **delete** the whole "Invitation Code Info" `Container` (lines ~488–503); line ~581 `Text('${p.downloadCost}pt' …)` → remove that trailing widget (posts no longer have a price). Replace the `txs` list source (`widget.store.transactions`) with `widget.store.ledger` and adapt the item builder to `CreditLedgerEntry` (`tx.amount` → `e.delta`, `tx.description` → `e.label`, `tx.createdAt` → `e.createdAt`, `'… pt'` → `'… クレジット'`); title `'ポイント取引・獲得履歴'` → `'クレジット履歴'`.
+`lib/views/mypage/my_page_screen.dart`: line ~460 `'${user?.points ?? 0}'` → `'${widget.store.creditBalance}'` and its `'pt'` suffix → `'クレジット'`; keep the "Invitation Code Info" `Container` but source it from `widget.store.invitationCode` (new `AppStore` field, below): text `'あなたの招待コード: ${widget.store.invitationCode ?? '発行中…'}'`, trailing text `'友だち登録で あなたも友だちも +3クレジット'`, and add a copy `IconButton` (`Icons.copy_rounded`) that calls `Clipboard.setData(ClipboardData(text: code))` + a `SnackBar('招待コードをコピーしました')` (import `package:flutter/services.dart`); hide the button until the code exists; line ~581 `Text('${p.downloadCost}pt' …)` → remove that trailing widget (posts no longer have a price). Replace the `txs` list source (`widget.store.transactions`) with `widget.store.ledger` and adapt the item builder to `CreditLedgerEntry` (`tx.amount` → `e.delta`, `tx.description` → `e.label`, `tx.createdAt` → `e.createdAt`, `'… pt'` → `'… クレジット'`); title `'ポイント取引・獲得履歴'` → `'クレジット履歴'`.
 
 `lib/views/course/course_resource_tab.dart`:
 - Upload flow (line ~406–429): `uploadedName` is now a **path**. Call
@@ -2317,7 +2565,7 @@ Make these edits (all in `lib/services/app_store.dart`; keep every unrelated met
 - [ ] **Step 7: Verify**
 
 Run: `flutter analyze` (expect 0 errors; the ~25 pre-existing info lints are fine — report any NEW ones), `flutter test` (expect all green: prior 72 + 10 from Task 7 + 4 new here), `flutter build web --debug` (clean).
-Also `grep -rnE "\.points|downloadCost|rewardPoints|invitationCode|pendingReferral|PointTransaction|recordTransaction|_addTransaction|openUrlInNewTab\(post" lib/` must return nothing in `lib/views/`, `lib/services/` and `lib/models/` (`MaterialRequest.rewardPoints`/`costSpent` fields in `lib/models/request.dart` and `lib/models/transaction.dart` itself may remain — they are tolerated legacy shapes).
+Also `grep -rnE "\.points|downloadCost|rewardPoints|user\??\.invitationCode|PointTransaction|recordTransaction|_addTransaction|openUrlInNewTab\(post" lib/` must return nothing in `lib/views/`, `lib/services/` and `lib/models/` (`MaterialRequest.rewardPoints`/`costSpent` fields in `lib/models/request.dart` and `lib/models/transaction.dart` itself may remain — they are tolerated legacy shapes).
 
 - [ ] **Step 8: Commit**
 
@@ -2348,6 +2596,7 @@ Title `'クレジット制度のルール'`; intro `'京大InfoHubでは、良�
 📤 資料のアップロード: 承認されると 3クレジット がもらえます（1日3回まで。既に登録済みの年度の重複投稿は対象外）。
 ✍️ 授業レビュー: 投稿も閲覧も無料です。最初の3件のレビューは 各2クレジット、レビューが5件に満たない科目への投稿は 1クレジット が加算されます（レビューボーナスは1日5回まで）。
 🙋 リクエスト: リクエストの投稿は無料。応えてくれた方には 3クレジット が付き、あなたはその資料を無料でダウンロードできます。
+👥 友だち招待: あなたの招待コードで友だちが登録（メール認証を完了）すると、あなたも友だちも 3クレジット がもらえます（招待特典は10人まで）。
 🚫 クレジットは購入できません。投稿者への還元はなく、削除や通報による没収もありません。
 ⚠️ 転載・無関係なファイルの投稿は通報され、3件で自動削除されます。権利者の方からの削除要請には速やかに対応します。
 ```
@@ -2370,7 +2619,7 @@ Label `'保有ポイント残高'` → `'保有クレジット'`; the right-hand
     },
     {
       'title': '投稿して、クレジットを集めよう',
-      'subtitle': '・資料のアップロード: +3クレジット（1日3回まで）\n・最初の3件のレビュー: 各+2クレジット\n・レビューの少ない科目(5件未満)への投稿: +1クレジット\n・リクエストに応える: +3クレジット\nクレジットは購入できません。みんなで資料を持ち寄る仕組みです。',
+      'subtitle': '・資料のアップロード: +3クレジット（1日3回まで）\n・最初の3件のレビュー: 各+2クレジット\n・レビューの少ない科目(5件未満)への投稿: +1クレジット\n・リクエストに応える: +3クレジット\n・友だちを招待: あなたも友だちも +3クレジット\nクレジットは購入できません。みんなで資料を持ち寄る仕組みです。',
       'icon': Icons.savings_outlined,
       'color': const Color(0xFF059669),
       'highlight': '投稿すれば、また資料がもらえる！',
@@ -2576,18 +2825,20 @@ Who runs what: **Claude** runs the `firebase deploy` steps (allowed by the user'
 6. Create a request (free, no slider). From a second account upload against it → request shows solved, the provider gets **+6** (3 upload + 3 request), the requester can download free.
 7. Direct-URL check: copy an old `firebasestorage.googleapis.com/...?alt=media` URL of a migrated file → **403/denied**. Open a signed URL after 10+ minutes → expired.
 8. DevTools console as a signed-in user: `firebase`-SDK write to `credit_balances/<own uid>` → permission denied.
+9. Invitation: マイページ shows your 招待コード (copy button works). Sign up a second KU account entering that code, verify its email, log in → the new account shows **6** (3 welcome + 3 referral) and yours rises by **+3** with a 「ご友人の招待特典」 ledger row. Re-using the same code on a third account also pays; an 11th referral pays nothing.
 
 ## Self-Review
 
 **Spec coverage (§4.3, §4.5.3–4.5.4, §6 Phase 2):**
 - Credit table: signup +3 → T2; download −1 flat → T3; upload +3 w/ daily cap, dup excluded → T4; first-3-reviews +2 each and scarce-course +1 (P2-12/13/14, owner-requested; replaces the spec's single first-review bonus) → T4 + T9 tag; own/requested free → T3. ✓
-- Abolished economy items (royalty, milestones, penalties, 2020 cut-off, uploader price, reward slider, referral, 20pt textbook) → T8 (code), T9 (copy). ✓
+- Abolished economy items (royalty, milestones, penalties, 2020 cut-off, uploader price, reward slider, client-written referral, 20pt textbook) → T8 (code), T9 (copy). ✓
+- Invitation codes (owner-requested, spec silent): server-issued code + invitee/inviter +3 + 10-referral cap → T4b (Functions), T7 (`streamInvitationCode`), T8/T9 (UI). ✓
 - Server-authoritative ledger, clients never write balances → T2/T5 (`write: false`). ✓
 - Private bucket + 10-minute signed URL via Function → T3, T4 (`index.ts` signer), T6, T10. ✓
 - Request board simplified (free, fixed +3, requester free DL) → T4, T5, T8. ✓
 - Rules: `credits_ledger`/`users.credits` Function-only → T5 (as `credit_balances`, P2-1). ✓
-- **Not in 2A (deliberate, → Plan 2B):** takedown flow + rights-holder form + report→hide queue (§4.3 削除対応フロー), notifications, `course_stats` as a Function aggregate, tightening `users`/`talk_rooms` reads, the `ku_verified` claim (P2-7), `invitation_codes`. Phase 3: chat sub-collections, textbook market, AppStore split.
+- **Not in 2A (deliberate, → Plan 2B):** takedown flow + rights-holder form + report→hide queue (§4.3 削除対応フロー), notifications, `course_stats` as a Function aggregate, tightening `users`/`talk_rooms` reads, the `ku_verified` claim (P2-7). Phase 3: chat sub-collections, textbook market, AppStore split.
 
 **Placeholder scan:** none — every code step carries the code; Task 8 specifies each edit with replacement code or an exact delete-target.
 
-**Type consistency:** `Balance`/`CreditEvent`/`writeCredit`/`readBalance` (T2) are the only credit writers and are used identically in T3/T4; ledger ids `signup_<uid>`, `dl_<uid>_<postId>`, `upload_<postId>`, `fulfill_<requestId>`, `reviewfirst_<reviewId>`, `reviewscarce_<reviewId>` are the same strings in code, tests, and the Dart `CreditLedgerEntry.label` reasons (`signup_bonus`, `download`, `download_free`, `upload`, `first_review`, `scarce_review`, `request_fulfilled`). Callable names `claimWelcomeCredits` / `downloadResource` (T4 `index.ts`) match `CreditService` (T7). Region `asia-east1` in `common.ts` and `CreditService._liveInvoker`. `Post.filePaths` (T8) matches the rules' `filePaths` checks (T5), the trigger (T4), and the migration output (T10).
+**Type consistency:** `Balance`/`CreditEvent`/`writeCredit`/`readBalance` (T2) are the only credit writers and are used identically in T3/T4; ledger ids `signup_<uid>`, `dl_<uid>_<postId>`, `upload_<postId>`, `fulfill_<requestId>`, `reviewfirst_<reviewId>`, `reviewscarce_<reviewId>`, `referral_in_<uid>`, `referral_out_<uid>` are the same strings in code, tests, and the Dart `CreditLedgerEntry.label` reasons (`signup_bonus`, `download`, `download_free`, `upload`, `first_review`, `scarce_review`, `request_fulfilled`, `referral_in`, `referral_out`). Callable names `claimWelcomeCredits` / `downloadResource` (T4 `index.ts`) match `CreditService` (T7). Region `asia-east1` in `common.ts` and `CreditService._liveInvoker`. `Post.filePaths` (T8) matches the rules' `filePaths` checks (T5), the trigger (T4), and the migration output (T10).
