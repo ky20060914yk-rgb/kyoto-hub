@@ -2773,7 +2773,7 @@ git commit -m "feat(tools): migrate_storage — move legacy public files to priv
 
 ## Deploy (order-dependent — do NOT improvise)
 
-Who runs what: **Claude** runs the `firebase deploy` steps (allowed by the user's settings rule). **The user** runs anything needing the service-account key (the migration). Run the full local suite first: `bash tools/test_functions.sh`, `bash tools/test_rules.sh`, `bash tools/test_storage_rules.sh`, `bash tools/test_migrate_storage.sh`, `flutter analyze`, `flutter test`, `flutter build web --release`.
+Who runs what: **Claude** runs the `firebase deploy` steps (allowed by the user's settings rule). **The USER runs the `gcloud` steps** (they need the user's own owner login: `gcloud auth login`) **and the migration** (it needs a service-account key). The user's shell is **PowerShell 5.1**: every command below is a single line, with no `&&` and no bash `\` continuations (use `;` to chain). Run the full local suite first: `bash tools/test_functions.sh`, `bash tools/test_rules.sh`, `bash tools/test_storage_rules.sh`, `bash tools/test_migrate_storage.sh`, `flutter analyze`, `flutter test`.
 
 **Requirements:** Cloud Functions need the **Blaze (pay-as-you-go) plan**. The first functions deploy may also prompt about an **Artifact Registry cleanup policy** — accept (or set one, e.g. delete images older than 1 day) so old build images do not accumulate.
 
@@ -2790,7 +2790,7 @@ Who runs what: **Claude** runs the `firebase deploy` steps (allowed by the user'
    # adds credits_ledger (uid ASC, createdAt DESC). WAIT until it reads Enabled
    # in the console (the マイページ ledger query fails FAILED_PRECONDITION until then).
 
-2. Enable the IAM Credentials API (needed for signed URLs without a key file):
+2. USER (PowerShell): enable the IAM Credentials API (signed URLs without a key file):
    gcloud services enable iamcredentials.googleapis.com --project kyodai-sns
 
 3. ONE command for functions AND rules, so the new onPostCreated never runs against
@@ -2802,35 +2802,46 @@ Who runs what: **Claude** runs the `firebase deploy` steps (allowed by the user'
    # with an Eventarc permission-propagation error: wait ~3 minutes and re-run
    # the same command (it is idempotent).
 
-4. IMMEDIATELY after the FIRST functions deploy (the runtime service account exists
-   now), or downloadResource fails with "iam.serviceAccounts.signBlob" permission
-   denied: grant the functions' runtime service account the Service Account Token
-   Creator role ON ITSELF (PROJECT_NUMBER = 932624635949):
-   gcloud iam service-accounts add-iam-policy-binding 932624635949-compute@developer.gserviceaccount.com \
-     --member="serviceAccount:932624635949-compute@developer.gserviceaccount.com" \
-     --role="roles/iam.serviceAccountTokenCreator" --project kyodai-sns
+4. USER (PowerShell), IMMEDIATELY after the FIRST functions deploy (the runtime
+   service account exists now), or downloadResource fails with
+   "iam.serviceAccounts.signBlob" permission denied: grant the functions' runtime
+   service account the Service Account Token Creator role ON ITSELF
+   (PROJECT_NUMBER = 932624635949). ONE line:
+   gcloud iam service-accounts add-iam-policy-binding 932624635949-compute@developer.gserviceaccount.com --member="serviceAccount:932624635949-compute@developer.gserviceaccount.com" --role="roles/iam.serviceAccountTokenCreator" --project kyodai-sns
    # Console alternative: IAM → that service account → add itself with role
    # "Service Account Token Creator". Not needed again on later deploys.
    # NOTE: the new storage rules do NOT block the OLD public objects or their URLs
    # (download-token URLs bypass rules). Only the migration (token strip +
    # fileUrls removal) and the later --delete-old close that.
 
-5. USER, with GOOGLE_APPLICATION_CREDENTIALS set (a freshly created key, deleted afterwards):
-   cd tools ; npm install
+5. Build the new web app BEFORE migrating (so migration -> hosting is back to back):
+   flutter build web --release
+
+6. USER (PowerShell), with a freshly created service-account key (delete it afterwards):
+   $env:GOOGLE_APPLICATION_CREDENTIALS="C:\path\key.json"
+   Set-Location C:\path\to\kyoto-hub\tools
+   npm install
+   # dry run is the DEFAULT: review the plan first (nothing is written):
    node migrate_storage.mjs --project kyodai-sns
-   # dry run is the DEFAULT: review the plan first, then the real run:
+   # then the real run:
    node migrate_storage.mjs --project kyodai-sns --apply
-   # copies to resources/<uid>/, strips the legacy download tokens from the copies,
-   # sets filePaths and removes fileUrls. The old root objects stay (no --delete-old yet).
+   # copies to resources/<uid>/ (keeping content type), strips the legacy download
+   # tokens from the copies, sets filePaths and removes fileUrls. Old root objects
+   # stay (no --delete-old yet).
+   # DO NOT open migrated resources/... objects in the Firebase console Storage
+   # browser: viewing a file there mints a NEW download token on it.
 
-6. Deploy hosting IMMEDIATELY after the migration (the migration removes fileUrls,
-   which breaks the OLD client until it is replaced):
-   flutter build web --release   then   firebase deploy --only hosting --project kyodai-sns
+7. Deploy hosting IMMEDIATELY after the migration finishes (back to back: the
+   migration removes fileUrls, which breaks the OLD client, and the old cached web
+   build cannot post or earn under the new rules):
+   firebase deploy --only hosting --project kyodai-sns
 
-7. After the smoke test passes and a day has gone by (USER runs it):
-   cd tools ; node migrate_storage.mjs --project kyodai-sns --apply --delete-old
+8. After the smoke test passes and a day has gone by (USER, same PowerShell session
+   or re-set the env var; use an absolute path, not a relative cd):
+   Set-Location C:\path\to\kyoto-hub\tools
+   node migrate_storage.mjs --project kyodai-sns --apply --delete-old
    # removes the now-redundant public root objects (idempotent). Until this runs the
-   # old root URLs still work.
+   # old root URLs still work. Delete the key file afterwards.
 ```
 
 **Rollback:** `firebase deploy --only hosting` of the previous release does NOT restore the old economy (rules are stricter) — the old build cannot write points any more. To roll back fully, redeploy the previous `firestore.rules`/`storage.rules` from git too. Functions can stay deployed.
