@@ -20,3 +20,9 @@ firebase emulators:exec --only firestore,storage --project demo-mstore "\
   && node test_migrate_storage_fixture.mjs migrated \
   && node test_migrate_storage_fixture.mjs run 1 'deleted=3' --apply --delete-old \
   && node test_migrate_storage_fixture.mjs deleted"
+
+# A destination whose token cannot be stripped must block --delete-old for that post.
+MIGRATE_TEST_FAIL_STRIP=resources/u3 firebase emulators:exec --only firestore,storage --project demo-mstore "\
+  node test_migrate_storage_fixture.mjs seed \
+  && node test_migrate_storage_fixture.mjs run 1 'FAIL p5' --apply --delete-old \
+  && node test_migrate_storage_fixture.mjs stripfail"

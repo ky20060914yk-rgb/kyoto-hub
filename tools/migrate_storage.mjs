@@ -55,6 +55,19 @@ export function destName(name) {
 
 const TOKEN_KEY = 'firebaseStorageDownloadTokens';
 
+// Body for copy(): custom metadata (token removed, plus a marker so it is never
+// empty) AND the standard headers, so a copy does not decay to octet-stream.
+export function copyBody(meta, from, extra = {}) {
+  const custom = { ...(meta.metadata || {}) };
+  delete custom[TOKEN_KEY];
+  custom.migratedFrom = from;
+  const body = { metadata: { ...custom, ...extra } };
+  for (const k of ['contentType', 'cacheControl', 'contentDisposition', 'contentEncoding']) {
+    if (meta[k]) body[k] = meta[k];
+  }
+  return body;
+}
+
 function unsafeName(n) {
   return typeof n !== 'string' || n === '' || n.includes('/') || n.includes('..');
 }
@@ -152,12 +165,12 @@ async function main() {
   // Returns true if a token was removed; throws if one cannot be removed.
   const stripToken = async (f) => {
     if (!(await hasToken(f))) return false;
+    if (emulator && process.env.MIGRATE_TEST_FAIL_STRIP && f.name.includes(process.env.MIGRATE_TEST_FAIL_STRIP)) {
+      throw new Error(`injected strip failure on ${f.name}`); // test hook, emulator only
+    }
     await f.setMetadata({ metadata: { [TOKEN_KEY]: null } });
     if (await hasToken(f)) {
-      const custom = { ...((await f.getMetadata())[0].metadata || {}) };
-      delete custom[TOKEN_KEY];
-      custom.tokenStripped = 'true';
-      await f.copy(f, { metadata: custom });
+      await f.copy(f, copyBody((await f.getMetadata())[0], f.name, { tokenStripped: 'true' }));
     }
     if (await hasToken(f)) throw new Error(`download token still present on ${f.name}`);
     return true;
@@ -181,14 +194,20 @@ async function main() {
     if (plan.skip) {
       tot.skipped++;
       console.log(`SKIP (already migrated) ${post.id}`);
+      let stripFailed = false;
       if (opts.apply) {
         // Earlier runs of this script copied the token along: strip it now.
         for (const p of plan.filePaths) {
           const f = bucket.file(p);
           if (!(await f.exists())[0]) continue;
           try { if (await stripToken(f)) console.log(`  stripped download token: ${p}`); }
-          catch (e) { tot.failed++; console.log(`FAIL ${post.id}: ${e.message}`); }
+          catch (e) { stripFailed = true; tot.failed++; console.log(`FAIL ${post.id}: ${e.message}`); }
         }
+      }
+      if (stripFailed) {
+        // A destination may still carry a token: never delete this post's old objects.
+        for (const m of cleanupCandidates(post, bucketHas)) protectedNames.add(m.from);
+        continue;
       }
       if (opts.deleteOld) {
         for (const m of cleanupCandidates(post, bucketHas)) {
@@ -215,10 +234,7 @@ async function main() {
           // copy() carries the source's custom metadata, including the legacy
           // public download token, so override the destination's custom
           // metadata at copy time with the token removed.
-          const custom = { ...((await src.getMetadata())[0].metadata || {}) };
-          delete custom[TOKEN_KEY];
-          custom.migratedFrom = m.from; // non-empty, so the override is never treated as "unset"
-          await src.copy(dst, { metadata: custom });
+          await src.copy(dst, copyBody((await src.getMetadata())[0], m.from));
           tot.copied++;
         }
         // For destinations that already existed (earlier runs) or if the copy

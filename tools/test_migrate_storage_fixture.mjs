@@ -8,7 +8,7 @@
 // configured, so they can never touch a real project.
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { planMigration, destName, cleanupCandidates } from './migrate_storage.mjs';
+import { planMigration, destName, cleanupCandidates, copyBody } from './migrate_storage.mjs';
 
 const mode = process.argv[2];
 
@@ -61,6 +61,10 @@ if (!mode) {
     [{ from: 'a.pdf', to: 'resources/u1/a.pdf' }]);
   assert.deepEqual(cleanupCandidates({ authorId: 'u1', fileNames: ['a.pdf'], filePaths: ['resources/u1/other.pdf'] }, () => true), []);
 
+  // copy body keeps the standard headers and drops only the token.
+  assert.deepEqual(copyBody({ contentType: 'image/png', cacheControl: 'x', metadata: { firebaseStorageDownloadTokens: 't', a: '1' } }, 'f.png'),
+    { metadata: { a: '1', migratedFrom: 'f.png' }, contentType: 'image/png', cacheControl: 'x' });
+
   console.log('migrate_storage planner: OK');
   process.exit(0);
 }
@@ -98,7 +102,7 @@ const post = async (id) => (await db.doc(`posts/${id}`).get()).data();
 
 if (mode === 'seed') {
   for (const n of ['1_a.pdf', '2_b.png', ODD, '4_x.pdf', '5_c.pdf']) {
-    await bucket.file(n).save(body(n), { metadata: { metadata: { firebaseStorageDownloadTokens: `tok-${n}` } } });
+    await bucket.file(n).save(body(n), { contentType: 'application/pdf', metadata: { metadata: { firebaseStorageDownloadTokens: `tok-${n}` } } });
   }
   await bucket.file('resources/u3/5_c.pdf').save(body('5_c.pdf'), { metadata: { metadata: { firebaseStorageDownloadTokens: 'tok-old-run' } } }); // (token left by an earlier run)
   // already migrated earlier
@@ -135,6 +139,8 @@ if (mode === 'seed') {
   assert.equal((await bucket.file(ODD_DEST).download())[0].toString(), body(ODD).toString());
   // No legacy download token survives on the private destinations (nor after re-runs).
   for (const d of ['resources/u1/1_a.pdf', 'resources/u1/2_b.png', ODD_DEST, 'resources/u3/5_c.pdf']) assert.equal(await token(d), undefined, d);
+  // Copies keep their content type (not octet-stream).
+  assert.equal((await bucket.file('resources/u1/1_a.pdf').getMetadata())[0].contentType, 'application/pdf');
   // Unmigratable posts' sources stay put in both modes.
   assert.equal(await exists('4_x.pdf'), true);
   if (mode === 'migrated') {
@@ -147,6 +153,11 @@ if (mode === 'seed') {
     assert.equal(await exists('resources/u3/5_c.pdf'), true);
   }
   console.log(`${mode}: OK`);
+} else if (mode === 'stripfail') {
+  // The already-migrated post p5 could not be stripped: its old object must survive --delete-old.
+  assert.equal(await exists('5_c.pdf'), true);
+  assert.equal(await token('resources/u3/5_c.pdf'), 'tok-old-run');
+  console.log('stripfail: OK');
 } else {
   console.error('unknown mode');
   process.exit(1);
