@@ -54,3 +54,7 @@ tools/firebase-debug.log
 
 # SDD scratch
 .superpowers/
+
+# Cloud Functions
+functions/node_modules/
+functions/lib/
