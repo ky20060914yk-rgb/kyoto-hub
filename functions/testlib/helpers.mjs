@@ -9,6 +9,9 @@ let n = 0;
 /** A unique id per call — tests never clean up, they just never collide. */
 export const uid = (prefix = 'u') => `${prefix}${Date.now().toString(36)}${++n}`;
 
+/** A unique, stable KU email per uid (welcome grants are once per email, P2-15). */
+export const emailOf = (u) => `${u}@st.kyoto-u.ac.jp`;
+
 export const KU = (u) => ({ uid: u, token: { email: `${u}@st.kyoto-u.ac.jp`, email_verified: true } });
 
 /** A well-formed post document (what the client creates). */

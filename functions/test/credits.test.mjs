@@ -1,13 +1,13 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { db, uid } from '../testlib/helpers.mjs';
-import { claimWelcome } from '../lib/welcome.js';
+import { db, uid, emailOf } from '../testlib/helpers.mjs';
+import { claimWelcome, welcomeKey } from '../lib/welcome.js';
 import { readBalance, writeCredit } from '../lib/credits.js';
 
 test('claimWelcome grants +3 once and records a ledger row', async () => {
   const u = uid();
-  assert.deepEqual(await claimWelcome(db, u), { granted: true, balance: 3 });
-  assert.deepEqual(await claimWelcome(db, u), { granted: false, balance: 3 });
+  assert.deepEqual(await claimWelcome(db, u, emailOf(u)), { granted: true, balance: 3 });
+  assert.deepEqual(await claimWelcome(db, u, emailOf(u)), { granted: false, balance: 3 });
 
   const led = await db.collection('credits_ledger').doc(`signup_${u}`).get();
   assert.equal(led.get('delta'), 3);
@@ -20,14 +20,14 @@ test('claimWelcome grants +3 once and records a ledger row', async () => {
 
 test('concurrent claims grant exactly once', async () => {
   const u = uid();
-  const rs = await Promise.all([claimWelcome(db, u), claimWelcome(db, u), claimWelcome(db, u)]);
+  const rs = await Promise.all([claimWelcome(db, u, emailOf(u)), claimWelcome(db, u, emailOf(u)), claimWelcome(db, u, emailOf(u))]);
   assert.equal(rs.filter((r) => r.granted).length, 1);
   assert.equal((await db.collection('credit_balances').doc(u).get()).get('balance'), 3);
 });
 
 test('balance doc carries university_id and the welcome flag', async () => {
   const u = uid();
-  await claimWelcome(db, u);
+  await claimWelcome(db, u, emailOf(u));
   const b = await db.collection('credit_balances').doc(u).get();
   assert.equal(b.get('university_id'), 'kyoto_u');
   assert.equal(b.get('welcomeGranted'), true);
@@ -54,7 +54,7 @@ test('readBalance treats a missing doc as zero', async () => {
 
 test('writeCredit merges a patch into the balance doc without losing other fields', async () => {
   const u = uid();
-  await claimWelcome(db, u); // welcomeGranted: true, balance 3
+  await claimWelcome(db, u, emailOf(u)); // welcomeGranted: true, balance 3
   await db.runTransaction(async (tx) => {
     const cur = await readBalance(tx, db, u);
     writeCredit(tx, db, { uid: u, delta: 2, reason: 'first_review', ledgerId: `fr_${u}` }, cur,
@@ -107,3 +107,40 @@ test('writeCredit rejects a non-integer or NaN delta', async () => {
   }
   assert.equal((await db.collection('credit_balances').doc(u).get()).exists, false);
 });
+
+// ---- P2-15: welcome + referral are once per EMAIL, not per uid
+const ledgerCount = async (u) => (await db.collection('credits_ledger').where('uid', '==', u).get()).size;
+
+test('P2-15: the same email on a second uid (delete + re-signup) gets nothing', async () => {
+  const a = uid(); const b = uid(); const email = emailOf(uid('shared'));
+  assert.deepEqual(await claimWelcome(db, a, email), { granted: true, balance: 3 });
+  assert.deepEqual(await claimWelcome(db, b, email), { granted: false, balance: 0 });
+  assert.equal(await ledgerCount(b), 0);
+  assert.equal((await db.collection('credit_balances').doc(b).get()).exists, false);
+  const claim = await db.collection('welcome_claims').doc(welcomeKey(email)).get();
+  assert.equal(claim.get('uid'), a);
+  assert.equal(claim.get('university_id'), 'kyoto_u');
+});
+
+test('P2-15: the email match ignores case and surrounding whitespace', async () => {
+  const a = uid(); const b = uid(); const c = uid(); const base = emailOf(uid('Case'));
+  assert.equal((await claimWelcome(db, a, base)).granted, true);
+  assert.equal((await claimWelcome(db, b, `  ${base.toUpperCase()} `)).granted, false);
+  assert.equal((await claimWelcome(db, c, base.toLowerCase())).granted, false);
+  assert.equal(await ledgerCount(b) + await ledgerCount(c), 0);
+});
+
+test('P2-15: concurrent claims by two uids with one email grant exactly once', async () => {
+  const a = uid(); const b = uid(); const email = emailOf(uid('race'));
+  const rs = await Promise.all([claimWelcome(db, a, email), claimWelcome(db, b, email)]);
+  assert.equal(rs.filter((r) => r.granted).length, 1);
+  const total = (await bal(a)) + (await bal(b));
+  assert.equal(total, 3);
+});
+
+test('P2-15: different emails are unaffected', async () => {
+  const a = uid(); const b = uid();
+  assert.deepEqual(await claimWelcome(db, a, emailOf(a)), { granted: true, balance: 3 });
+  assert.deepEqual(await claimWelcome(db, b, emailOf(b)), { granted: true, balance: 3 });
+});
+const bal = async (u) => (await db.collection('credit_balances').doc(u).get()).get('balance') ?? 0;

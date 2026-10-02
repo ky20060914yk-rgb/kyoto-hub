@@ -227,7 +227,7 @@ class _SignupScreenState extends State<SignupScreen> {
               SizedBox(width: 8),
               Expanded(
                 child: Text(
-                  '検証を完了するまで、過去問のダウンロードや投稿機能は利用できません。検証後に、ご登録ボーナス3クレジットが付与されます。',
+                  '検証を完了するまで、過去問のダウンロードや投稿機能は利用できません。検証後に、ご登録ボーナス3クレジットが付与されます（同じメールアドレスでは1回のみ）。',
                   style: TextStyle(
                     fontSize: 11.5,
                     fontWeight: FontWeight.w600,

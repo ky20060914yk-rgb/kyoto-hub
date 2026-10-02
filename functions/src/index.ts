@@ -31,8 +31,10 @@ const storageDeps = {
 
 const opts = { region: REGION, maxInstances: 10 } as const; // cost guard
 
-export const claimWelcomeCredits = onCall(opts, async (req) =>
-  claimWelcome(db, requireKuVerified(req.auth)));
+export const claimWelcomeCredits = onCall(opts, async (req) => {
+  const uid = requireKuVerified(req.auth);
+  return claimWelcome(db, uid, String(req.auth?.token.email ?? ''));
+});
 
 export const downloadResource = onCall(opts, async (req) => {
   const uid = requireKuVerified(req.auth);

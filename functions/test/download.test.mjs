@@ -1,10 +1,10 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { db, uid, seedPost, fakeDeps } from '../testlib/helpers.mjs';
+import { db, uid, emailOf, seedPost, fakeDeps } from '../testlib/helpers.mjs';
 import { claimWelcome } from '../lib/welcome.js';
 import { processDownload } from '../lib/download.js';
 
-const withCredits = async () => { const u = uid(); await claimWelcome(db, u); return u; }; // balance 3
+const withCredits = async () => { const u = uid(); await claimWelcome(db, u, emailOf(u)); return u; }; // balance 3
 const bal = async (u) => (await db.collection('credit_balances').doc(u).get()).get('balance');
 
 test('a paid download charges 1 credit, records the ledger, bumps the count, signs 10 min', async () => {

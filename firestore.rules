@@ -308,6 +308,12 @@ service cloud.firestore {
       allow read, write: if false;
     }
 
+    // One welcome/referral grant per email (P2-15): written by claimWelcome via
+    // the Admin SDK only; the key is a hash of the address.
+    match /welcome_claims/{key} {
+      allow read, write: if false;
+    }
+
     match /{document=**} {
       allow read, write: if false;
     }

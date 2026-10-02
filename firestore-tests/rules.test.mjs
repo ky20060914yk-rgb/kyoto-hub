@@ -1049,6 +1049,15 @@ test('invitation_codes: Admin-only — no client may read, list or write (P2-2)'
   await assertFails(deleteDoc(doc(db, 'invitation_codes/ABC234')));
 });
 
+test('welcome_claims: Admin-only — no client may get, list, create, update or delete (P2-15)', async () => {
+  const db = asKu();
+  await assertFails(getDoc(doc(db, 'welcome_claims/abc')));
+  await assertFails(getDocs(collection(db, 'welcome_claims')));
+  await assertFails(setDoc(doc(db, 'welcome_claims/new'), { uid: 'u1', university_id: 'kyoto_u' }));
+  await assertFails(updateDoc(doc(db, 'welcome_claims/abc'), { uid: 'u1' }));
+  await assertFails(deleteDoc(doc(db, 'welcome_claims/abc')));
+});
+
 test('users: pendingReferralCode is a short plain string on the caller’s own doc only', async () => {
   const db = asKu();
   await assertSucceeds(setDoc(doc(db, 'users/u1'), { displayName: 'me', university_id: 'kyoto_u', pendingReferralCode: 'ABC234' }));
