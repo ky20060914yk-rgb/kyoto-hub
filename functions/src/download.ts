@@ -38,9 +38,15 @@ export async function processDownload(
     const fulfilled = await db.collection('requests')
       .where('fulfilledPostId', '==', input.postId)
       .where('authorId', '==', uid)
-      .limit(1)
+      .limit(10)
       .get();
-    free = !fulfilled.empty;
+    // `fulfilledPostId` alone is not trustworthy (legacy rules let a client
+    // write it). Only the Function links a request to its fulfilling post, so
+    // require the request to be the one the post was created for, or a
+    // Function-written `fulfill_<requestId>` ledger row.
+    for (const r of fulfilled.docs) {
+      if (r.id === post.requestId || (await ledgerRef(db, `fulfill_${r.id}`).get()).exists) { free = true; break; }
+    }
   }
 
   const ledgerId = `dl_${uid}_${input.postId}`;

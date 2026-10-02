@@ -60,13 +60,34 @@ test('the author downloads their own post free, without bumping the count', asyn
 
 test('the requester whose request this post fulfilled downloads free', async () => {
   const requester = uid(); const pid = uid('p'); const rid = uid('r');
-  await seedPost(pid);
+  await seedPost(pid, { requestId: rid });
   await db.collection('requests').doc(rid).set({
     authorId: requester, university_id: 'kyoto_u', isFulfilled: true, fulfilledPostId: pid,
   });
   const r = await processDownload(db, fakeDeps(), requester, { postId: pid });
   assert.equal(r.charged, false);
   assert.equal(r.balance, 0);
+});
+
+test('a request with a client-forged fulfilledPostId pointing at an unrelated post is NOT free', async () => {
+  const u = await withCredits(); const pid = uid('p'); const rid = uid('r');
+  await seedPost(pid); // not created for this request, no fulfill ledger
+  await db.collection('requests').doc(rid).set({
+    authorId: u, university_id: 'kyoto_u', isFulfilled: true, fulfilledPostId: pid,
+  });
+  const r = await processDownload(db, fakeDeps(), u, { postId: pid });
+  assert.equal(r.charged, true);
+  assert.equal(r.balance, 2);
+});
+
+test('a fulfill_<requestId> ledger row (written only by the Function) also makes it free', async () => {
+  const u = uid(); const pid = uid('p'); const rid = uid('r');
+  await seedPost(pid); // post without requestId (e.g. capped path aside)
+  await db.collection('requests').doc(rid).set({
+    authorId: u, university_id: 'kyoto_u', isFulfilled: true, fulfilledPostId: pid,
+  });
+  await db.collection('credits_ledger').doc(`fulfill_${rid}`).set({ uid: 'author', delta: 1, reason: 'request_fulfilled', refId: rid });
+  assert.equal((await processDownload(db, fakeDeps(), u, { postId: pid })).charged, false);
 });
 
 test('someone else’s fulfilled request does not make the post free for the caller', async () => {
