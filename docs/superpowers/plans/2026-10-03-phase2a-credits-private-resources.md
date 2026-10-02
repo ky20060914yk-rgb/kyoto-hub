@@ -88,7 +88,7 @@
   "engines": { "node": "22" },
   "scripts": {
     "build": "tsc",
-    "test": "npm run build && firebase emulators:exec --only firestore --project demo-fn \"node --test test/\""
+    "test": "npm run build && firebase emulators:exec --only firestore --project demo-fn \"node --test test/*.test.mjs\""
   },
   "dependencies": {
     "firebase-admin": "^14.5.0",
@@ -317,7 +317,7 @@ export JAVA_HOME="/c/Program Files/Eclipse Adoptium/jdk-21.0.12.101-hotspot"
 export PATH="$JAVA_HOME/bin:$PATH"
 cd "$(dirname "$0")/../functions"
 npm run build
-firebase emulators:exec --only firestore --project demo-fn "node --test test/"
+firebase emulators:exec --only firestore --project demo-fn "node --test test/*.test.mjs"
 ```
 
 - [ ] **Step 10: Run to verify it passes**
