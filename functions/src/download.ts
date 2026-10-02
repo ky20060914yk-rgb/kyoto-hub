@@ -14,6 +14,9 @@ export async function processDownload(
   uid: string,
   input: { postId: string; fileIndex?: number },
 ): Promise<DownloadResult> {
+  if (typeof input.postId !== 'string' || input.postId.length === 0 || input.postId.includes('/')) {
+    throw new HttpsError('invalid-argument', 'bad post id');
+  }
   const postRef = db.collection('posts').doc(input.postId);
   const post = (await postRef.get()).data();
   if (!post) throw new HttpsError('not-found', 'post not found');
@@ -22,6 +25,11 @@ export async function processDownload(
   const idx = input.fileIndex ?? 0;
   if (!Number.isInteger(idx) || idx < 0 || idx >= paths.length) {
     throw new HttpsError('invalid-argument', 'bad file index');
+  }
+  const p = paths[idx];
+  const prefix = `resources/${post.authorId}/`;
+  if (typeof p !== 'string' || !p.startsWith(prefix) || p.length <= prefix.length || p.split('/').includes('..')) {
+    throw new HttpsError('invalid-argument', 'bad file path');
   }
 
   const isAuthor = post.authorId === uid;

@@ -42,6 +42,8 @@ test('insufficient credits: failed-precondition, nothing signed, nothing written
     (e) => e.code === 'failed-precondition' && /insufficient-credits/.test(e.message));
   assert.equal(deps.signed.length, 0);
   assert.equal((await db.collection('posts').doc(pid).get()).get('downloadCount'), 0);
+  assert.equal((await db.collection('credits_ledger').doc(`dl_${u}_${pid}`).get()).exists, false);
+  assert.equal((await db.collection('credit_balances').doc(u).get()).exists, false); // balance unchanged (still absent = 0)
 });
 
 test('the author downloads their own post free, without bumping the count', async () => {
@@ -92,4 +94,51 @@ test('a post with no filePaths (legacy, un-migrated) is invalid-argument, not a 
   await seedPost(pid, { filePaths: [] });
   await assert.rejects(processDownload(db, fakeDeps(), u, { postId: pid }), (e) => e.code === 'invalid-argument');
   assert.equal(await bal(u), 3);
+});
+
+test('a file path outside the author prefix or containing .. is invalid-argument (no sign, no charge)', async () => {
+  const u = await withCredits();
+  for (const bad of ['resources/someone_else/1_a.pdf', 'resources/author/../victim/1_a.pdf', 'resources/author/', '/etc/passwd']) {
+    const pid = uid('p');
+    await seedPost(pid, { filePaths: [bad] });
+    const deps = fakeDeps();
+    await assert.rejects(processDownload(db, deps, u, { postId: pid }), (e) => e.code === 'invalid-argument');
+    assert.equal(deps.signed.length, 0);
+    assert.equal((await db.collection('credits_ledger').doc(`dl_${u}_${pid}`).get()).exists, false);
+  }
+  assert.equal(await bal(u), 3);
+});
+
+test('postId must be a non-empty string', async () => {
+  const u = await withCredits();
+  for (const postId of ['', undefined, 42, 'a/b']) {
+    await assert.rejects(processDownload(db, fakeDeps(), u, { postId }), (e) => e.code === 'invalid-argument');
+  }
+});
+
+test('concurrent downloads of the same post by the same user charge exactly once', async () => {
+  const u = await withCredits(); const pid = uid('p');
+  await seedPost(pid);
+  const rs = await Promise.all([
+    processDownload(db, fakeDeps(), u, { postId: pid }),
+    processDownload(db, fakeDeps(), u, { postId: pid }),
+  ]);
+  assert.equal(rs.filter((r) => r.charged).length, 1);
+  assert.equal(await bal(u), 2);
+  assert.equal((await db.collection('posts').doc(pid).get()).get('downloadCount'), 1);
+  assert.equal((await db.collection('credits_ledger').where('uid', '==', u).get()).size, 2);
+});
+
+test('a signing failure after commit is not refunded; the retry is free', async () => {
+  // Deliberate: the unlock marker is the ledger row, so the user keeps the unlock and retries at no cost.
+  const u = await withCredits(); const pid = uid('p');
+  await seedPost(pid);
+  let n = 0;
+  const flaky = { sign: async (path) => { if (n++ === 0) throw new Error('sign failed'); return `https://signed.test/${path}`; } };
+  await assert.rejects(processDownload(db, flaky, u, { postId: pid }), /sign failed/);
+  assert.equal(await bal(u), 2);
+  const retry = await processDownload(db, flaky, u, { postId: pid });
+  assert.equal(retry.charged, false);
+  assert.equal(await bal(u), 2);
+  assert.equal((await db.collection('posts').doc(pid).get()).get('downloadCount'), 1);
 });
