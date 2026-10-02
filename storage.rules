@@ -1,0 +1,35 @@
+rules_version = '2';
+service firebase.storage {
+  match /b/{bucket}/o {
+
+    // Same start-anchored KU check as firestore.rules `kuVerified()`.
+    function kuVerified() {
+      return request.auth != null
+        && request.auth.token.email is string
+        && request.auth.token.email.lower().matches('^[^@]+@st[.]kyoto-u[.]ac[.]jp$')
+        && request.auth.token.email_verified == true;
+    }
+
+    // Plan 2A: the bucket is PRIVATE. A verified KU user may only CREATE an
+    // object under their own `resources/<uid>/` prefix. Nobody can read through
+    // the client SDK — downloads are 10-minute signed URLs issued by the
+    // `downloadResource` Function (Admin SDK bypasses these rules). Overwrite
+    // and delete are denied: cleanup is the `onPostDeleted` trigger, and an
+    // owner overwriting a file after the post was validated would defeat that
+    // validation.
+    match /resources/{uid}/{file} {
+      allow read: if false;
+      allow create: if resource == null   // never overwrite an existing object
+        && kuVerified()
+        && request.auth.uid == uid
+        && request.resource.size <= 20 * 1024 * 1024
+        && (request.resource.contentType == 'application/pdf'
+            || request.resource.contentType.matches('image/.*'));
+      allow update, delete: if false;
+    }
+
+    match /{allPaths=**} {
+      allow read, write: if false;
+    }
+  }
+}

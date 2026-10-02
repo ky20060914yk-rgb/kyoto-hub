@@ -3,7 +3,8 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "test": "firebase emulators:exec --only firestore --project demo-rules \"node --test rules.test.mjs\""
+    "test": "firebase emulators:exec --only firestore --project demo-rules \"node --test rules.test.mjs\"",
+    "test:storage": "firebase emulators:exec --only storage --project demo-rules \"node --test storage.test.mjs\""
   },
   "devDependencies": {
     "@firebase/rules-unit-testing": "^4.0.1",
