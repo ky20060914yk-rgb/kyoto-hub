@@ -98,3 +98,14 @@ class MaterialRequest {
     );
   }
 }
+
+/// Mirrors the server (`download.ts`): a download is free for [uid] when they
+/// wrote [post], or when one of their requests is the one [post] was created
+/// for (`post.requestId == request.id`) and is fulfilled with it. A bare
+/// `fulfilledPostId` is not trusted.
+bool isFreeDownload(Post post, String? uid, Iterable<MaterialRequest> requests) {
+  if (uid == null) return false;
+  if (post.authorId == uid) return true;
+  return requests.any((r) =>
+      r.authorId == uid && r.fulfilledPostId == post.id && post.requestId == r.id);
+}

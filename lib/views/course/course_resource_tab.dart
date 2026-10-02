@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../../models/request.dart';
 import '../../models/post.dart';
 import '../../models/subject.dart';
 import '../../services/app_store.dart';
@@ -658,16 +659,7 @@ class _CourseResourceTabState extends State<CourseResourceTab> {
   }
 
   void _showDownloadConfirmDialog(Post post) {
-    bool isFree = false;
-    final curUid = widget.store.currentUser?.uid;
-    if (post.authorId == curUid) {
-      isFree = true;
-    } else {
-      final isRequester = widget.store.requests.any((r) => r.fulfilledPostId == post.id && r.authorId == curUid);
-      if (isRequester) {
-        isFree = true;
-      }
-    }
+    final isFree = isFreeDownload(post, widget.store.currentUser?.uid, widget.store.requests);
 
     final balance = widget.store.creditBalance;
     final canPay = isFree || balance >= 1;
@@ -1099,8 +1091,7 @@ class _CourseResourceTabState extends State<CourseResourceTab> {
                                 padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
                               ),
                               child: Text(
-                                post.authorId == widget.store.currentUser?.uid ||
-                                        widget.store.requests.any((r) => r.fulfilledPostId == post.id && r.authorId == widget.store.currentUser?.uid)
+                                isFreeDownload(post, widget.store.currentUser?.uid, widget.store.requests)
                                     ? '無料'
                                     : '1クレジット',
                               ),
