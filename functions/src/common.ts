@@ -43,3 +43,7 @@ export function requireKuVerified(auth: AuthLike | undefined | null): string {
 export function jstDay(now: Date = new Date()): string {
   return new Date(now.getTime() + 9 * 3600 * 1000).toISOString().slice(0, 10);
 }
+
+/** RFC 5987 `attachment; filename*=` value: also escapes ' ( ) * (not in attr-char). */
+export const attachmentDisposition = (filename: string): string =>
+  `attachment; filename*=UTF-8''${encodeURIComponent(filename).replace(/['()*]/g, (ch) => `%${ch.charCodeAt(0).toString(16).toUpperCase()}`)}`;

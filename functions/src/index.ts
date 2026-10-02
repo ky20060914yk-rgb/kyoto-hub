@@ -3,7 +3,7 @@ import { getFirestore } from 'firebase-admin/firestore';
 import { getStorage } from 'firebase-admin/storage';
 import { HttpsError, onCall } from 'firebase-functions/v2/https';
 import { onDocumentCreated, onDocumentDeleted } from 'firebase-functions/v2/firestore';
-import { REGION, requireKuVerified } from './common.js';
+import { REGION, requireKuVerified, attachmentDisposition } from './common.js';
 import { claimWelcome } from './welcome.js';
 import { processDownload } from './download.js';
 import { handlePostCreated } from './postCreated.js';
@@ -21,7 +21,7 @@ const storageDeps = {
       version: 'v4',
       action: 'read',
       expires: Date.now() + o.expiresMs,
-      responseDisposition: `attachment; filename*=UTF-8''${encodeURIComponent(o.filename)}`,
+      responseDisposition: attachmentDisposition(o.filename),
     });
     return url;
   },
