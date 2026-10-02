@@ -151,11 +151,31 @@ class _SummaryCard extends StatelessWidget {
                   height: 96,
                   child: Center(child: CircularProgressIndicator()),
                 )
-              : _summaryBody(context, stats),
+              : Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    if (stats.reviewCount < 5) _scarceTag(),
+                    _summaryBody(context, stats),
+                  ],
+                ),
         );
       },
     );
   }
+
+  // P2-13: a thin course earns the reviewer a +1 bonus (see the credit rules).
+  Widget _scarceTag() => Container(
+        margin: const EdgeInsets.only(bottom: 10),
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+        decoration: BoxDecoration(
+          color: const Color(0xFFFEF3C7),
+          borderRadius: BorderRadius.circular(20),
+        ),
+        child: const Text(
+          'レビュー募集中・投稿すると +1クレジット',
+          style: TextStyle(fontSize: 11.5, fontWeight: FontWeight.bold, color: Color(0xFF92400E)),
+        ),
+      );
 
   Widget _summaryBody(BuildContext context, CourseStats stats) {
     if (stats.reviewCount == 0) {

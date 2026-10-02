@@ -11,8 +11,8 @@ class MaterialRequest {
   final int? year; // Requested year e.g. 2023
   final String title;
   final String description;
-  final int costSpent; // 1pt for pastExam, 0pt for testPrep/other
-  final int rewardPoints; // Point reward to the provider
+  final int costSpent; // legacy field; requests no longer cost credits (always 0)
+  final int rewardPoints; // legacy field; fulfilment bonus is a fixed server-side +3 (always 0)
   final DateTime createdAt;
   final bool isFulfilled;
   final String? fulfilledPostId;

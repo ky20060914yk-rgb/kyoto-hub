@@ -17,7 +17,7 @@ class _ContactScreenState extends State<ContactScreen> {
 
   final Map<String, String> _categoryLabels = {
     'circle_ad': '① サークル広告の出稿申し込み',
-    'point_refund': '② ポイント返却のお問い合わせ (虚偽資料・未受領等の申告)',
+    'point_refund': '② クレジット返却のお問い合わせ (虚偽資料・ダウンロード失敗等の申告)',
     'other': '③ その他お問い合わせ',
   };
 

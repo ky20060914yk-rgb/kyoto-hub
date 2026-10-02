@@ -16,8 +16,8 @@ const _brand = Color(0xFF0F4C81);
 /// The list is **category-agnostic**: the three [PostCategory] feeds are merged
 /// into one `createdAt`-descending list and each card carries a small category
 /// chip. The upload/request modals keep a category picker so posts are still
-/// filed under a category (and the past-exam year/dedup/5pt-cost rules are
-/// unchanged).
+/// filed under a category (and the past-exam year/dedup rules are
+/// unchanged; downloads cost a flat 1 credit).
 class CourseResourceTab extends StatefulWidget {
   const CourseResourceTab({super.key, required this.store, required this.subject});
 

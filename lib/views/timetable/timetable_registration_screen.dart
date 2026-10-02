@@ -434,7 +434,7 @@ class _TimetableRegistrationScreenState extends State<TimetableRegistrationScree
             const Padding(
               padding: EdgeInsets.fromLTRB(16, 12, 16, 8),
               child: Text(
-                '各マスをタップすると、科目の名前や教員名で検索し、時間割に登録できます。獲得したポイントは過去問ダウンロードのほか、学内のサークル・新歓等の宣伝広告にも利用可能です。',
+                '各マスをタップすると、科目の名前や教員名で検索し、時間割に登録できます。登録した科目の過去問やレビューをチェックしてみましょう。',
                 style: TextStyle(fontSize: 12, color: Color(0xFF64748B)),
               ),
             ),

@@ -1,3 +1,4 @@
+import '../../widgets/credit_rules_dialog.dart';
 import 'dart:async';
 
 import 'package:flutter/foundation.dart' show setEquals;
@@ -86,7 +87,7 @@ class _HomeScreenState extends State<HomeScreen> {
 
   void _onStoreChanged() {
     // Only refetch when the registered course ids actually changed — the store
-    // notifies for many unrelated reasons (points, posts, requests…).
+    // notifies for many unrelated reasons (credits, posts, requests…).
     if (setEquals(_currentTimetableIds(), _lastTimetableIds)) return;
     _refreshRegistered();
   }
@@ -197,88 +198,6 @@ class _HomeScreenState extends State<HomeScreen> {
     });
   }
 
-  void _showPointExplanationDialog() {
-    showDialog(
-      context: context,
-      builder: (context) {
-        return AlertDialog(
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-          title: Row(
-            children: const [
-              Icon(Icons.stars_rounded, color: Color(0xFFFBBF24), size: 24),
-              SizedBox(width: 8),
-              Text('ポイント制度のルール', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
-            ],
-          ),
-          content: SingleChildScrollView(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                const Text('京大InfoHubでは、良質な資料を共有し合うコミュニティを維持するため、以下のポイント制度を採用しています。', style: TextStyle(fontSize: 12.5, color: Color(0xFF475569))),
-                const SizedBox(height: 12),
-                _buildRuleSection('獲得する', [
-                  '👤 メール認証完了ボーナス: +30 pt',
-                  '✉️ 招待コード経由での登録: 双方に +10 pt',
-                  '📤 過去問のアップロード: +5 pt\n(※2021年以降のもの。1日3回まで付与)',
-                  '🎁 ダウンロードマイルストーン:\n 自分の資料が 5DL されると +5 pt\n 自分の資料が 10DL されると +10 pt',
-                  '🤝 リクエストの解決: 依頼者が設定した報酬ptを獲得',
-                  '🪙 資料DLロイヤリティ: 自分の資料がDLされるたびに、消費ポイントの80%が即座に還元 (例: 過去問なら +4 pt)',
-                ], const Color(0xFF10B981)),
-                const SizedBox(height: 12),
-                _buildRuleSection('消費する', [
-                  '📄 過去問のダウンロード: 5 pt',
-                  '💡 テスト対策資料などのDL: 0 〜 20 pt',
-                  '❓ 過去問リクエストの作成: 1 pt ＋ 任意の設定報酬pt',
-                  '🎁 リクエスト依頼者特典: 自分のリクエストに回答された資料は無料でDLできます！',
-                ], const Color(0xFFEF4444)),
-                const SizedBox(height: 12),
-                _buildRuleSection('その他の制限', [
-                  '⚠️ 古い過去問 (2020年以前): アップロード時の+5ptは付与されません (DLロイヤリティとマイルストーン報酬のみ対象)。',
-                  '⚠️ 同一年度の重複禁止: 同一科目の同じ年度の過去問は、重複してアップロードできません。',
-                  '⚠️ 通報ペナルティ: 転載や無関係なアップロードが3回通報されると自動削除され、獲得ポイントが全額没収されます。',
-                ], const Color(0xFF64748B)),
-              ],
-            ),
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(context),
-              child: const Text('閉じる', style: TextStyle(fontWeight: FontWeight.bold, color: Color(0xFF0F4C81))),
-            ),
-          ],
-        );
-      },
-    );
-  }
-
-  Widget _buildRuleSection(String title, List<String> rules, Color badgeColor) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Container(
-          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-          decoration: BoxDecoration(
-            color: badgeColor.withAlpha(20),
-            borderRadius: BorderRadius.circular(4),
-          ),
-          child: Text(
-            title,
-            style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: badgeColor),
-          ),
-        ),
-        const SizedBox(height: 6),
-        ...rules.map((rule) => Padding(
-              padding: const EdgeInsets.only(left: 4, bottom: 4),
-              child: Text(
-                rule,
-                style: const TextStyle(fontSize: 11.5, color: Color(0xFF334155), height: 1.35),
-              ),
-            )),
-      ],
-    );
-  }
-
   void _showDirectRegisterDialog(Subject subject) {
     String selectedDay = 'Mon';
     int selectedPeriod = 1;
@@ -376,7 +295,7 @@ class _HomeScreenState extends State<HomeScreen> {
         ),
         actions: [
           GestureDetector(
-            onTap: _showPointExplanationDialog,
+            onTap: () => showCreditRulesDialog(context),
             child: Container(
               margin: const EdgeInsets.only(right: 16),
               padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
