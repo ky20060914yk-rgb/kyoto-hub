@@ -68,7 +68,11 @@ service cloud.firestore {
     // token carrying the email claim has necessarily been refreshed.
     match /users/{uid} {
       allow read: if owns(uid) || kuDomain();
-      allow create, update: if owns(uid);
+      // pendingReferralCode (P2-2) is only a hint the server validates later;
+      // keep it a short plain string. Other users' docs are never writable.
+      allow create, update: if owns(uid)
+        && request.resource.data.get('pendingReferralCode', '') is string
+        && request.resource.data.get('pendingReferralCode', '').size() <= 16;
       allow delete: if false;
     }
 
@@ -81,7 +85,7 @@ service cloud.firestore {
     // User-generated content: readable by signed-in users, created by verified
     // KU users as themselves, edited/removed by the author.
     //
-    // Three narrow carve-outs let non-authors write:
+    // Two narrow carve-outs let non-authors write:
     //   * `reports` alone, so a post can be flagged — verified KU only (I4), so
     //     an outsider Firebase account cannot mass-flag into the auto-delete
     //     below. The flag is append-only, exactly one entry per write, and the
@@ -94,9 +98,8 @@ service cloud.firestore {
     //     what makes it one report per account: without it an account already
     //     in the array would still satisfy `hasAny([uid])` while appending
     //     someone else's uid, and could walk the array to 3 on its own;
-    //   * the download counters, for the *downloader*'s `updatePostMilestones`
-    //     write — strictly +1 and the reward flags may only go false -> true,
-    //     so no arbitrary counts and no un-flipping (I5);
+    //   * (Plan 2A) the download counters are Function-only: no client may write
+    //     `downloadCount`, and the author may not touch `filePaths` either;
     //   * delete once `reports` reaches 3, which is the app's auto-moderation
     //     (I2) — the client removes the post it just pushed over the threshold.
     // The author branch pins `authorId` and `university_id` (M5) so an author
@@ -107,42 +110,53 @@ service cloud.firestore {
     // whole document through the moderation delete path below.
     match /posts/{id} {
       allow read: if kuDomain();
-      allow create: if kuVerified() && request.resource.data.authorId == request.auth.uid;
+      // Plan 2A: files live in the private bucket under resources/<uid>/. The
+      // first path is checked here (rules cannot loop); the onPostCreated
+      // trigger validates every path and deletes the post if any is bad.
+      // `downloadCount` and `reports` cannot be pre-seeded.
+      allow create: if kuVerified()
+        && request.resource.data.authorId == request.auth.uid
+        && request.resource.data.get('downloadCount', 0) == 0
+        && request.resource.data.get('reports', []) == []
+        && request.resource.data.filePaths is list
+        && request.resource.data.filePaths.size() >= 1
+        && request.resource.data.filePaths.size() <= 5
+        && request.resource.data.filePaths[0] is string
+        && request.resource.data.filePaths[0].matches('resources/' + request.auth.uid + '/.+');
       allow update: if signedIn()
         && ((resource.data.authorId == request.auth.uid
              && request.resource.data.authorId == resource.data.authorId
              && request.resource.data.university_id == resource.data.university_id
-             && !request.resource.data.diff(resource.data).affectedKeys().hasAny(['reports']))
+             && !request.resource.data.diff(resource.data).affectedKeys()
+                  .hasAny(['reports', 'downloadCount', 'filePaths']))
             || (kuVerified()
                 && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['reports'])
                 && request.resource.data.reports.size()
                      == resource.data.get('reports', []).size() + 1
                 && request.resource.data.reports.hasAll(resource.data.get('reports', []))
                 && request.resource.data.reports.hasAny([request.auth.uid])
-                && !resource.data.get('reports', []).hasAny([request.auth.uid]))
-            || (kuVerified()
-                && request.resource.data.diff(resource.data).affectedKeys()
-                     .hasOnly(['downloadCount', 'is5DownloadsRewarded', 'is10DownloadsRewarded'])
-                && request.resource.data.downloadCount == resource.data.get('downloadCount', 0) + 1
-                && (resource.data.get('is5DownloadsRewarded', false) == false
-                    || request.resource.data.is5DownloadsRewarded == true)
-                && (resource.data.get('is10DownloadsRewarded', false) == false
-                    || request.resource.data.is10DownloadsRewarded == true)));
+                && !resource.data.get('reports', []).hasAny([request.auth.uid])));
       allow delete: if signedIn()
         && (resource.data.authorId == request.auth.uid
             || (kuVerified() && resource.data.get('reports', []).size() >= 3));
     }
 
-    // The author owns the request; a *fulfiller* (anyone verified) may mark it
-    // solved, and nothing else — mirrors the `posts.reports` carve-out (I3).
+    // Plan 2A: fulfilment is done by the onPostCreated trigger (Admin SDK), so
+    // no client — not even the author — may write the fulfilment fields. The
+    // author could otherwise point `fulfilledPostId` at any post and unlock it
+    // for free. Create pins the request unfulfilled with no cost or reward.
     match /requests/{id} {
       allow read: if kuDomain();
-      allow create: if kuVerified() && request.resource.data.authorId == request.auth.uid;
+      allow create: if kuVerified()
+        && request.resource.data.authorId == request.auth.uid
+        && request.resource.data.get('isFulfilled', false) == false
+        && request.resource.data.get('fulfilledPostId', null) == null
+        && request.resource.data.get('costSpent', 0) == 0
+        && request.resource.data.get('rewardPoints', 0) == 0;
       allow update: if signedIn()
-        && (resource.data.authorId == request.auth.uid
-            || (kuVerified()
-                && request.resource.data.diff(resource.data).affectedKeys()
-                     .hasOnly(['isFulfilled', 'fulfilledPostId'])));
+        && resource.data.authorId == request.auth.uid
+        && !request.resource.data.diff(resource.data).affectedKeys()
+             .hasAny(['isFulfilled', 'fulfilledPostId', 'authorId']);
       allow delete: if signedIn() && resource.data.authorId == request.auth.uid;
     }
 
@@ -172,8 +186,7 @@ service cloud.firestore {
 
     match /transactions/{id} {
       allow read: if signedIn() && resource.data.userId == request.auth.uid;
-      allow create: if kuVerified();   // client-authored ledger; server-authored in Phase 2
-      allow update, delete: if false;
+      allow write: if false;   // Plan 2A: legacy client-authored ledger, now read-only
     }
 
     // Write-only mailbox: users file inquiries, only the console/admin reads.
@@ -274,6 +287,24 @@ service cloud.firestore {
         && request.resource.data.get('ratingSum', 0) is int
         && request.resource.data.get('ratingSum', 0) >= 0;
       allow delete: if false;
+    }
+
+    // Credits (Plan 2A). Written ONLY by Cloud Functions (Admin SDK bypasses
+    // rules). A user may read their own balance and their own ledger rows; the
+    // ledger query must carry `where('uid', '==', <own uid>)`.
+    match /credit_balances/{uid} {
+      allow read: if owns(uid);
+      allow write: if false;
+    }
+    match /credits_ledger/{ledgerId} {
+      allow read: if signedIn() && resource.data.uid == request.auth.uid;
+      allow write: if false;
+    }
+
+    // Invitation codes (P2-2): Admin-only. Explicit deny (also the catch-all's
+    // answer) so codes can be neither read, listed nor enumerated by a client.
+    match /invitation_codes/{code} {
+      allow read, write: if false;
     }
 
     match /{document=**} {

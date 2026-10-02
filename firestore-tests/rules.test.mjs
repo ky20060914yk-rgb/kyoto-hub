@@ -73,8 +73,8 @@ const fullRequest = (over = {}) => ({
   year: 2024,
   title: '線形代数の過去問がほしい',
   description: '2023年度のものを探しています',
-  costSpent: 1,
-  rewardPoints: 10,
+  costSpent: 0,
+  rewardPoints: 0,
   isFulfilled: false,
   fulfilledPostId: null,
   createdAt: '2026-09-01T00:00:00.000',
@@ -130,6 +130,16 @@ const reviewDoc = (over = {}) => ({
   ...over,
 });
 
+// What `Post.toMap()` emits after Plan 2A: private storage paths, no price.
+const validPost = (over = {}) => ({
+  id: 'p_new', university_id: 'kyoto_u', authorId: 'u1', authorName: 'me',
+  subjectId: 'c_1', subjectName: '線形代数', category: 'past_exam', year: 2024,
+  title: 't', description: '', fileNames: ['a.pdf'],
+  filePaths: ['resources/u1/1_a.pdf'], downloadCount: 0, reports: [],
+  createdAt: '2026-09-01T00:00:00.000',
+  ...over,
+});
+
 // Seed baseline documents with rules bypassed so read/update tests exercise the
 // rule under test rather than a missing-document condition.
 beforeEach(async () => {
@@ -158,16 +168,6 @@ beforeEach(async () => {
       authorId: 'u1', university_id: 'kyoto_u', title: 't',
       reports: ['ra'], downloadCount: 0,
     });
-    // Download-counter fixtures: one with no reward claimed yet, one that has
-    // already claimed the 5-download reward.
-    await setDoc(doc(db, 'posts/dl_u1'), {
-      authorId: 'u1', university_id: 'kyoto_u', title: 't', reports: [],
-      downloadCount: 4, is5DownloadsRewarded: false, is10DownloadsRewarded: false,
-    });
-    await setDoc(doc(db, 'posts/dl_rewarded_u1'), {
-      authorId: 'u1', university_id: 'kyoto_u', title: 't', reports: [],
-      downloadCount: 7, is5DownloadsRewarded: true, is10DownloadsRewarded: false,
-    });
     await setDoc(doc(db, 'requests/req_u1'), {
       authorId: 'u1', university_id: 'kyoto_u', title: 'r',
       isFulfilled: false, fulfilledPostId: null,
@@ -189,6 +189,14 @@ beforeEach(async () => {
     await setDoc(doc(db, 'transactions/tx_u1'), {
       userId: 'u1', university_id: 'kyoto_u', amount: 5, type: 'upload_reward',
     });
+    await setDoc(doc(db, 'credit_balances/u1'), { balance: 3, university_id: 'kyoto_u' });
+    await setDoc(doc(db, 'credits_ledger/signup_u1'), {
+      uid: 'u1', delta: 3, reason: 'signup_bonus', balanceAfter: 3, university_id: 'kyoto_u',
+    });
+    await setDoc(doc(db, 'requests/req_self'), {
+      authorId: 'u1', university_id: 'kyoto_u', title: 'r', isFulfilled: false, fulfilledPostId: null,
+    });
+    await setDoc(doc(db, 'invitation_codes/ABC234'), { uid: 'u1', university_id: 'kyoto_u' });
     await setDoc(doc(db, 'inquiries/i_1'), { userId: 'u1', university_id: 'kyoto_u', body: 'hi' });
     // u1's review of course `ck`; the document id encodes both (`<courseKey>_<authorId>`).
     await setDoc(doc(db, 'reviews/ck_u1'), reviewDoc());
@@ -367,40 +375,36 @@ test('anonymous cannot read posts', async () => {
 });
 
 test('verified KU user can create a post they author', async () => {
-  await assertSucceeds(setDoc(doc(asKu(), 'posts/p1'), {
-    authorId: 'u1', university_id: 'kyoto_u', subjectId: 'c_1', title: 't', category: 'past_exam',
-  }));
+  await assertSucceeds(setDoc(doc(asKu(), 'posts/p1'), validPost({ id: 'p1' })));
 });
 
 test('unverified user cannot create a post', async () => {
   const db = env.authenticatedContext('u2', KU_UNVERIFIED).firestore();
-  await assertFails(setDoc(doc(db, 'posts/p2'), { authorId: 'u2', university_id: 'kyoto_u' }));
+  await assertFails(setDoc(doc(db, 'posts/p2'), validPost({ id: 'p2', authorId: 'u2', filePaths: ['resources/u2/1_a.pdf'] })));
 });
 
 test('non-KU email cannot create a post even if verified', async () => {
   const db = env.authenticatedContext('u3', OUTSIDER).firestore();
-  await assertFails(setDoc(doc(db, 'posts/p3'), { authorId: 'u3', university_id: 'kyoto_u' }));
+  await assertFails(setDoc(doc(db, 'posts/p3'), validPost({ id: 'p3', authorId: 'u3', filePaths: ['resources/u3/1_a.pdf'] })));
 });
 
 test('address with an extra @ before the KU domain cannot create a post (R5 anchoring)', async () => {
   const db = env.authenticatedContext('u4', SPOOFER).firestore();
-  await assertFails(setDoc(doc(db, 'posts/p_spoof'), { authorId: 'u4', university_id: 'kyoto_u' }));
+  await assertFails(setDoc(doc(db, 'posts/p_spoof'), validPost({ id: 'p_spoof', authorId: 'u4', filePaths: ['resources/u4/1_a.pdf'] })));
 });
 
 test('address whose real domain only ends with the KU domain cannot create a post (R5 anchoring)', async () => {
   const db = env.authenticatedContext('u5', SPOOFER_SUFFIX).firestore();
-  await assertFails(setDoc(doc(db, 'posts/p_spoof2'), { authorId: 'u5', university_id: 'kyoto_u' }));
+  await assertFails(setDoc(doc(db, 'posts/p_spoof2'), validPost({ id: 'p_spoof2', authorId: 'u5', filePaths: ['resources/u5/1_a.pdf'] })));
 });
 
 test('an upper-cased KU address is still a KU address (M1)', async () => {
   const db = env.authenticatedContext('u6', KU_UPPERCASE).firestore();
-  await assertSucceeds(setDoc(doc(db, 'posts/p_upper'), {
-    authorId: 'u6', university_id: 'kyoto_u', title: 't',
-  }));
+  await assertSucceeds(setDoc(doc(db, 'posts/p_upper'), validPost({ id: 'p_upper', authorId: 'u6', filePaths: ['resources/u6/1_a.pdf'] })));
 });
 
 test('cannot create a post attributed to someone else', async () => {
-  await assertFails(setDoc(doc(asKu(), 'posts/p4'), { authorId: 'u2', university_id: 'kyoto_u' }));
+  await assertFails(setDoc(doc(asKu(), 'posts/p4'), validPost({ id: 'p4', authorId: 'u2' })));
 });
 
 test('author can update and delete their own post', async () => {
@@ -484,28 +488,39 @@ test('a non-author cannot delete a post below the report threshold (I2)', async 
   await assertFails(deleteDoc(doc(outsider, 'posts/reported_u1')));
 });
 
-test('a downloader may increment downloadCount by exactly one (I5)', async () => {
-  await assertSucceeds(updateDoc(doc(asKu2(), 'posts/dl_u1'), {
-    downloadCount: 5, is5DownloadsRewarded: true, is10DownloadsRewarded: false,
-  }));
+// --- posts: download counters are server-only (Plan 2A) ----------------------
+
+test('nobody but a Function can change downloadCount — not a downloader, not the author', async () => {
+  await env.withSecurityRulesDisabled(async (ctx) => {
+    await setDoc(doc(ctx.firestore(), 'posts/dl_u1'), validPost({ id: 'dl_u1', downloadCount: 4 }));
+  });
+  await assertFails(updateDoc(doc(asKu2(), 'posts/dl_u1'), { downloadCount: 5 }));
+  await assertFails(updateDoc(doc(asKu(), 'posts/dl_u1'), { downloadCount: 999 }));
 });
 
-test('a downloader cannot jump downloadCount (I5)', async () => {
-  const db = asKu2();
-  await assertFails(updateDoc(doc(db, 'posts/dl_u1'), { downloadCount: 14 }));
-  await assertFails(updateDoc(doc(db, 'posts/dl_u1'), { downloadCount: 3 }));
+test('an author cannot rewrite filePaths after creation (cannot swap in another file)', async () => {
+  await env.withSecurityRulesDisabled(async (ctx) => {
+    await setDoc(doc(ctx.firestore(), 'posts/fp_u1'), validPost({ id: 'fp_u1' }));
+  });
+  await assertFails(updateDoc(doc(asKu(), 'posts/fp_u1'), { filePaths: ['resources/u2/1_b.pdf'] }));
+  await assertSucceeds(updateDoc(doc(asKu(), 'posts/fp_u1'), { title: 'edited' }));
 });
 
-test('a downloader cannot un-flip a reward flag (I5)', async () => {
-  await assertFails(updateDoc(doc(asKu2(), 'posts/dl_rewarded_u1'), {
-    downloadCount: 8, is5DownloadsRewarded: false,
-  }));
+test('post create requires filePaths under the caller’s own resources/ prefix', async () => {
+  const db = asKu();
+  await assertSucceeds(setDoc(doc(db, 'posts/ok_1'), validPost({ id: 'ok_1' })));
+  await assertFails(setDoc(doc(db, 'posts/bad_1'), validPost({ id: 'bad_1', filePaths: ['resources/u2/1_b.pdf'] })));
+  await assertFails(setDoc(doc(db, 'posts/bad_2'), validPost({ id: 'bad_2', filePaths: [] })));
+  const noPaths = validPost({ id: 'bad_3' });
+  delete noPaths.filePaths; // (`filePaths: undefined` would make the SDK throw before the rules run)
+  await assertFails(setDoc(doc(db, 'posts/bad_3'), noPaths));
+  await assertFails(setDoc(doc(db, 'posts/bad_4'), validPost({ id: 'bad_4', filePaths: Array(6).fill('resources/u1/x.pdf') })));
 });
 
-test('the download-counter carve-out does not smuggle other fields (I5)', async () => {
-  await assertFails(updateDoc(doc(asKu2(), 'posts/dl_u1'), {
-    downloadCount: 5, title: 'vandalised',
-  }));
+test('post create cannot pre-set downloadCount or reports', async () => {
+  const db = asKu();
+  await assertFails(setDoc(doc(db, 'posts/bad_5'), validPost({ id: 'bad_5', downloadCount: 50 })));
+  await assertFails(setDoc(doc(db, 'posts/bad_6'), validPost({ id: 'bad_6', reports: ['x', 'y', 'z'] })));
 });
 
 // --- requests ----------------------------------------------------------------
@@ -524,46 +539,28 @@ test('requests: verified author only for create, author only for update/delete',
   await assertSucceeds(deleteDoc(doc(mine, 'requests/req_u1')));
 });
 
-test('a fulfiller may mark a request solved and nothing else (I3)', async () => {
-  const db = asKu2();
-  await assertSucceeds(updateDoc(doc(db, 'requests/req_u1'), {
-    isFulfilled: true, fulfilledPostId: 'p_new',
-  }));
-  await assertFails(updateDoc(doc(db, 'requests/req_u1'), {
-    isFulfilled: true, fulfilledPostId: 'p_new', title: 'vandalised',
-  }));
-  const outsider = env.authenticatedContext('u3', OUTSIDER).firestore();
-  await assertFails(updateDoc(doc(outsider, 'requests/req_u1'), { isFulfilled: true }));
+// --- requests: fulfilment is Function-only (Plan 2A) -------------------------
+
+test('a non-author can no longer touch a request at all (the trigger fulfils it)', async () => {
+  await assertFails(updateDoc(doc(asKu2(), 'requests/req_u1'), { isFulfilled: true, fulfilledPostId: 'p_new' }));
+  await assertFails(setDoc(doc(asKu2(), 'requests/req_full'), fullRequest({ costSpent: 0, rewardPoints: 0 })));
 });
 
-// --- requests: the *real* fulfilment write is a full-document set (I4) -------
-//
-// `app_store.addPost()` marks a request solved through
-// `_firestore.createMaterialRequest(requests[i].copyWith(...))`, which is a
-// `set()` of the entire MaterialRequest.toMap(), not a two-key `update()`. The
-// `hasOnly` carve-out is evaluated on `diff().affectedKeys()`, so a full write
-// whose other fields are byte-identical is still allowed — these tests pin that
-// down against the exact document shape the client sends.
-
-test('a fulfiller may re-set the WHOLE request document with only the fulfilment fields changed (I4)', async () => {
-  await assertSucceeds(setDoc(doc(asKu2(), 'requests/req_full'),
-    fullRequest({ isFulfilled: true, fulfilledPostId: 'post_123' })));
+test('an author cannot self-fulfil their request (that would unlock any post for free)', async () => {
+  const db = asKu();
+  await assertFails(updateDoc(doc(db, 'requests/req_self'), { isFulfilled: true }));
+  await assertFails(updateDoc(doc(db, 'requests/req_self'), { fulfilledPostId: 'some_post' }));
+  await assertFails(setDoc(doc(db, 'requests/req_full'),
+    fullRequest({ costSpent: 0, rewardPoints: 0, isFulfilled: true, fulfilledPostId: 'p_x' })));
+  await assertSucceeds(updateDoc(doc(db, 'requests/req_self'), { title: 'edited' }));
 });
 
-test('a full-document fulfilment write that also edits the title is rejected (I4)', async () => {
-  await assertFails(setDoc(doc(asKu2(), 'requests/req_full'),
-    fullRequest({ isFulfilled: true, fulfilledPostId: 'post_123', title: 'vandalised' })));
-});
-
-test('an unchanged full-document re-set by a non-author is allowed, a changed one is not (I4)', async () => {
-  await assertSucceeds(setDoc(doc(asKu2(), 'requests/req_full'), fullRequest()));
-  await assertFails(setDoc(doc(asKu2(), 'requests/req_full'),
-    fullRequest({ rewardPoints: 9999 })));
-});
-
-test('an outsider cannot land the full-document fulfilment write (I4)', async () => {
-  await assertFails(setDoc(doc(asOutsider(), 'requests/req_full'),
-    fullRequest({ isFulfilled: true, fulfilledPostId: 'post_123' })));
+test('a request is created unfulfilled with no cost or reward', async () => {
+  const db = asKu();
+  await assertSucceeds(setDoc(doc(db, 'requests/req_ok'), fullRequest({ id: 'req_ok', costSpent: 0, rewardPoints: 0 })));
+  await assertFails(setDoc(doc(db, 'requests/req_pre'), fullRequest({ id: 'req_pre', costSpent: 0, rewardPoints: 0, isFulfilled: true })));
+  await assertFails(setDoc(doc(db, 'requests/req_rw'), fullRequest({ id: 'req_rw', rewardPoints: 10 })));
+  await assertFails(setDoc(doc(db, 'requests/req_co'), fullRequest({ id: 'req_co', costSpent: 1 })));
 });
 
 test('unverified user cannot create a request', async () => {
@@ -677,13 +674,9 @@ test('transactions are readable only by their owner', async () => {
   await assertFails(getDoc(doc(asAnon(), 'transactions/tx_u1')));
 });
 
-test('verified KU user can create a transaction; unverified cannot', async () => {
-  await assertSucceeds(setDoc(doc(asKu(), 'transactions/tx_new'), {
+test('transactions can no longer be created by any client (ledger is server-authored)', async () => {
+  await assertFails(setDoc(doc(asKu(), 'transactions/tx_new'), {
     userId: 'u1', university_id: 'kyoto_u', amount: 1, type: 'upload_reward',
-  }));
-  const db = env.authenticatedContext('u2', KU_UNVERIFIED).firestore();
-  await assertFails(setDoc(doc(db, 'transactions/tx_unverified'), {
-    userId: 'u2', university_id: 'kyoto_u', amount: 1,
   }));
 });
 
@@ -1012,6 +1005,53 @@ test('users: the invitation-code lookup query is allowed', async () => {
     collection(asKu(), 'users'),
     where('invitationCode', '==', 'KUXXXX'),
   )));
+});
+
+// --- credits: Function-only writes, own-only reads (Plan 2A) -------------------
+
+test('credit_balances: read own only; no client write of any kind', async () => {
+  await assertSucceeds(getDoc(doc(asKu(), 'credit_balances/u1')));
+  await assertFails(getDoc(doc(asKu2(), 'credit_balances/u1')));
+  await assertFails(getDoc(doc(asAnon(), 'credit_balances/u1')));
+  await assertFails(setDoc(doc(asKu(), 'credit_balances/u1'), { balance: 9999, university_id: 'kyoto_u' }));
+  await assertFails(updateDoc(doc(asKu(), 'credit_balances/u1'), { balance: 9999 }));
+  await assertFails(setDoc(doc(asKu(), 'credit_balances/brandnew'), { balance: 5 }));
+  await assertFails(deleteDoc(doc(asKu(), 'credit_balances/u1')));
+});
+
+test('credits_ledger: read own rows only; no client write of any kind', async () => {
+  await assertSucceeds(getDoc(doc(asKu(), 'credits_ledger/signup_u1')));
+  await assertFails(getDoc(doc(asKu2(), 'credits_ledger/signup_u1')));
+  await assertFails(setDoc(doc(asKu(), 'credits_ledger/forged'), { uid: 'u1', delta: 100, reason: 'x' }));
+  await assertFails(updateDoc(doc(asKu(), 'credits_ledger/signup_u1'), { delta: 100 }));
+  await assertFails(deleteDoc(doc(asKu(), 'credits_ledger/signup_u1')));
+});
+
+test('credits_ledger: the per-user stream query is allowed, another user’s is not', async () => {
+  await assertSucceeds(getDocs(query(collection(asKu(), 'credits_ledger'), where('uid', '==', 'u1'))));
+  await assertFails(getDocs(query(collection(asKu(), 'credits_ledger'), where('uid', '==', 'u2'))));
+  await assertFails(getDocs(collection(asKu(), 'credits_ledger')));
+});
+
+test('invitation_codes: Admin-only — no client may read, list or write (P2-2)', async () => {
+  const db = asKu();
+  await assertFails(getDoc(doc(db, 'invitation_codes/ABC234')));
+  await assertFails(getDocs(collection(db, 'invitation_codes')));
+  await assertFails(getDocs(query(collection(db, 'invitation_codes'), where('uid', '==', 'u1'))));
+  await assertFails(setDoc(doc(db, 'invitation_codes/ZZZ999'), { uid: 'u1' }));
+  await assertFails(updateDoc(doc(db, 'invitation_codes/ABC234'), { uid: 'u1' }));
+  await assertFails(deleteDoc(doc(db, 'invitation_codes/ABC234')));
+});
+
+test('users: pendingReferralCode is a short plain string on the caller’s own doc only', async () => {
+  const db = asKu();
+  await assertSucceeds(setDoc(doc(db, 'users/u1'), { displayName: 'me', university_id: 'kyoto_u', pendingReferralCode: 'ABC234' }));
+  await assertSucceeds(updateDoc(doc(db, 'users/u1'), { pendingReferralCode: 'XYZ789' }));
+  await assertFails(updateDoc(doc(db, 'users/u1'), { pendingReferralCode: 'X'.repeat(17) }));
+  await assertFails(updateDoc(doc(db, 'users/u1'), { pendingReferralCode: 123 }));
+  await assertFails(updateDoc(doc(db, 'users/u1'), { pendingReferralCode: ['ABC234'] }));
+  await assertFails(updateDoc(doc(db, 'users/u2'), { pendingReferralCode: 'ABC234' }));
+  await assertFails(setDoc(doc(db, 'users/u2'), { displayName: 'hax', pendingReferralCode: 'ABC234' }));
 });
 
 // --- catch-all ---------------------------------------------------------------
