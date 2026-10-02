@@ -48,6 +48,7 @@ export function writeCredit(
   cur: Balance,
   patch: Partial<Balance> = {},
 ): Balance {
+  if (!Number.isInteger(ev.delta)) throw new HttpsError('invalid-argument', 'bad-delta');
   const next: Balance = { ...cur, ...patch, balance: cur.balance + ev.delta };
   if (next.balance < 0) throw new HttpsError('failed-precondition', 'insufficient-credits');
   tx.set(balanceRef(db, ev.uid), { ...next, university_id: UNIVERSITY_ID });

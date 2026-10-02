@@ -65,3 +65,45 @@ test('writeCredit merges a patch into the balance doc without losing other field
   assert.equal(b.get('welcomeGranted'), true);
   assert.equal(b.get('reviewBonusesUsed'), 1);
 });
+
+test('writeCredit twice with the same ledgerId rejects the second call and keeps the balance', async () => {
+  const u = uid();
+  const ev = { uid: u, delta: 2, reason: 'upload', ledgerId: `dup_${u}` };
+  await db.runTransaction(async (tx) => writeCredit(tx, db, ev, await readBalance(tx, db, u)));
+  await assert.rejects(
+    db.runTransaction(async (tx) => writeCredit(tx, db, ev, await readBalance(tx, db, u))),
+  );
+  assert.equal((await db.collection('credit_balances').doc(u).get()).get('balance'), 2);
+  assert.equal((await db.collection('credits_ledger').where('uid', '==', u).get()).size, 1);
+});
+
+test('writeCredit allows spending down to exactly zero', async () => {
+  const u = uid();
+  await db.collection('credit_balances').doc(u).set({ balance: 1 });
+  await db.runTransaction(async (tx) => {
+    writeCredit(tx, db, { uid: u, delta: -1, reason: 'download', ledgerId: `z_${u}` }, await readBalance(tx, db, u));
+  });
+  assert.equal((await db.collection('credit_balances').doc(u).get()).get('balance'), 0);
+});
+
+test('a patch cannot override the computed balance', async () => {
+  const u = uid();
+  await db.runTransaction(async (tx) => {
+    writeCredit(tx, db, { uid: u, delta: 1, reason: 'upload', ledgerId: `p_${u}` },
+      await readBalance(tx, db, u), { balance: 999 });
+  });
+  assert.equal((await db.collection('credit_balances').doc(u).get()).get('balance'), 1);
+});
+
+test('writeCredit rejects a non-integer or NaN delta', async () => {
+  const u = uid();
+  for (const delta of [1.5, NaN]) {
+    await assert.rejects(
+      db.runTransaction(async (tx) => {
+        writeCredit(tx, db, { uid: u, delta, reason: 'upload', ledgerId: `n_${u}` }, await readBalance(tx, db, u));
+      }),
+      (e) => e.code === 'invalid-argument' && /bad-delta/.test(e.message),
+    );
+  }
+  assert.equal((await db.collection('credit_balances').doc(u).get()).exists, false);
+});
