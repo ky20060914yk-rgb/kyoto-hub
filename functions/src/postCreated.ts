@@ -8,7 +8,9 @@ export interface PostCreatedResult {
 }
 
 const INVALID: PostCreatedResult = { valid: false, duplicate: false, granted: 0, capped: false, fulfilled: false };
-const tsMillis = (d: DocumentSnapshot): number => d.get('created_at_ts')?.toMillis?.() ?? 0;
+// Server-assigned creation time: the client-written `created_at_ts` is forgeable.
+const createMillis = (d: DocumentSnapshot): number => d.createTime?.toMillis() ?? 0;
+const yearKey = (v: unknown): string => String(v ?? null);
 
 /**
  * Validates a freshly created post and pays the upload credit. The doc is
@@ -28,9 +30,10 @@ export async function handlePostCreated(
   if (!post) return INVALID;
 
   const authorId = String(post.authorId ?? '');
+  const subjectOk = typeof post.subjectId === 'string' && post.subjectId !== '';
   const paths: unknown = post.filePaths;
   const prefix = `resources/${authorId}/`;
-  const wellFormed = authorId !== '' && Array.isArray(paths) && paths.length >= 1 && paths.length <= 5 &&
+  const wellFormed = authorId !== '' && subjectOk && Array.isArray(paths) && paths.length >= 1 && paths.length <= 5 &&
     paths.every((p) => typeof p === 'string' && p.startsWith(prefix) && p.length > prefix.length &&
       !p.split('/').includes('..'));
   const present = wellFormed && (await Promise.all((paths as string[]).map((p) => deps.exists(p)))).every(Boolean);
@@ -40,18 +43,20 @@ export async function handlePostCreated(
   }
 
   // Duplicate past exam: same course + year + category already exists from an
-  // earlier post (ties broken by id so two simultaneous uploads pay only one).
+  // earlier post, ordered by SERVER createTime (ties broken by id so two
+  // simultaneous uploads pay only one). The year is compared in code so a
+  // missing / string / float year cannot dodge the check.
   let duplicate = false;
-  if (post.category === 'past_exam' && Number.isInteger(post.year)) {
+  if (post.category === 'past_exam') {
     const same = await db.collection('posts')
       .where('subjectId', '==', post.subjectId)
       .where('category', '==', 'past_exam')
-      .where('year', '==', post.year)
       .get();
-    const mine = tsMillis(snap);
+    const mine = createMillis(snap);
+    const myYear = yearKey(post.year);
     duplicate = same.docs.some((d) => {
-      if (d.id === postId) return false;
-      const theirs = tsMillis(d);
+      if (d.id === postId || yearKey(d.get('year')) !== myYear) return false;
+      const theirs = createMillis(d);
       return theirs < mine || (theirs === mine && d.id < postId);
     });
   }

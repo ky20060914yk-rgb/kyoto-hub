@@ -86,3 +86,21 @@ test('an empty author id or course key grants nothing it should not', async () =
   const r = await handleReviewCreated(db, { id: 'y', authorId: uid(), courseKey: '' });
   assert.equal(r.scarce, false); // no count query on an empty key
 });
+
+test('a capped first-review bonus releases its slot: reviewBonusesUsed unchanged, +2 still earned after the reset', async () => {
+  const u = uid();
+  const day1 = new Date('2026-10-03T03:00:00Z');
+  await db.collection('credit_balances').doc(u).set({
+    balance: 4, university_id: 'kyoto_u', reviewBonusesUsed: 1, reviewGrantDay: '2026-10-03', reviewGrantsToday: 5,
+  });
+  const k1 = uid('ck'); await crowd(k1, 6);
+  const r1 = await review(u, k1, day1);
+  assert.deepEqual({ first: r1.first, granted: r1.granted, capped: r1.capped }, { first: false, granted: 0, capped: true });
+  const b1 = (await db.collection('credit_balances').doc(u).get()).data();
+  assert.equal(b1.reviewBonusesUsed, 1); // the refused grant did not consume a slot
+  assert.equal(b1.balance, 4);
+  const k2 = uid('ck'); await crowd(k2, 6);
+  const r2 = await review(u, k2, new Date('2026-10-03T16:00:00Z')); // next JST day
+  assert.deepEqual({ first: r2.first, granted: r2.granted }, { first: true, granted: 2 });
+  assert.equal((await db.collection('credit_balances').doc(u).get()).get('reviewBonusesUsed'), 2);
+});

@@ -15,7 +15,7 @@ export async function handlePostDeleted(
   const prefix = `resources/${authorId}/`;
   const paths = !authorId || !Array.isArray(post.filePaths)
     ? []
-    : post.filePaths.filter((p): p is string => typeof p === 'string' && p.startsWith(prefix));
+    : post.filePaths.filter((p): p is string => typeof p === 'string' && p.startsWith(prefix) && !p.split('/').includes('..'));
   for (const p of paths) {
     try { await deps.remove(p); } catch { /* already gone */ }
   }

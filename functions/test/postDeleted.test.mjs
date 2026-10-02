@@ -35,3 +35,9 @@ test('a failing remove (already gone) does not stop the others', async () => {
   assert.deepEqual(removed, ['resources/u1/b.pdf']);
   assert.deepEqual(out, ['resources/u1/a.pdf', 'resources/u1/b.pdf']);
 });
+
+test('a .. segment inside the author prefix is never removed', async () => {
+  const deps = fakeDeps();
+  const removed = await handlePostDeleted(deps, { authorId: 'u1', filePaths: ['resources/u1/../victim/x.pdf', 'resources/u1/ok.pdf'] });
+  assert.deepEqual(removed, ['resources/u1/ok.pdf']);
+});
