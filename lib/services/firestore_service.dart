@@ -4,7 +4,6 @@ import '../models/post.dart';
 import '../models/request.dart';
 import '../models/textbook_request.dart';
 import '../models/talk_room.dart';
-import '../models/transaction.dart';
 import '../models/inquiry.dart';
 
 class FirestoreService {
@@ -68,12 +67,6 @@ class FirestoreService {
         .map((snapshot) => snapshot.docs.map((d) => Post.fromMap(d.data())).toList());
   }
 
-  Future<void> incrementPostDownloadCount(String postId) async {
-    await _db.collection('posts').doc(postId).update({
-      'downloadCount': FieldValue.increment(1),
-    });
-  }
-
   Future<void> deletePost(String postId) async {
     await _db.collection('posts').doc(postId).delete();
   }
@@ -130,52 +123,7 @@ class FirestoreService {
     });
   }
 
-  // --- 7. POINT TRANSACTIONS ---
-
-  Future<void> recordTransaction(PointTransaction tx) async {
-    final data = tx.toMap();
-    data['university_id'] = universityId;
-    // Phase-1 ledger rows are written by the client and are therefore not
-    // trustworthy for balances; `schema: 1` marks them so a Phase-2
-    // server-authored reconciliation can tell them apart (I6/R15).
-    data['schema'] = 1;
-    await _db.collection('transactions').doc(tx.id).set(data);
-  }
-
-  Stream<List<PointTransaction>> streamTransactions(String userId) {
-    return _db
-        .collection('transactions')
-        .where('university_id', isEqualTo: universityId)
-        .where('userId', isEqualTo: userId)
-        .snapshots()
-        .map((snapshot) => snapshot.docs.map((d) => PointTransaction.fromMap(d.data())).toList());
-  }
-
-  Future<UserProfile?> getUserByInvitationCode(String invitationCode) async {
-    final query = await _db
-        .collection('users')
-        .where('university_id', isEqualTo: universityId)
-        .where('invitationCode', isEqualTo: invitationCode)
-        .limit(1)
-        .get();
-    if (query.docs.isNotEmpty) {
-      return UserProfile.fromMap(query.docs.first.data());
-    }
-    return null;
-  }
-
-  Future<void> updatePostMilestones({
-    required String postId,
-    required int downloadCount,
-    required bool is5DownloadsRewarded,
-    required bool is10DownloadsRewarded,
-  }) async {
-    await _db.collection('posts').doc(postId).update({
-      'downloadCount': downloadCount,
-      'is5DownloadsRewarded': is5DownloadsRewarded,
-      'is10DownloadsRewarded': is10DownloadsRewarded,
-    });
-  }
+  // --- 7. POST REPORTS ---
 
   Future<void> updatePostReports(String postId, List<String> reports) async {
     await _db.collection('posts').doc(postId).update({

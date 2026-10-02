@@ -191,7 +191,6 @@ class _CourseResourceTabState extends State<CourseResourceTab> {
     PickedFile? pickedFile;
     int selectedYear = DateTime.now().year;
     PostCategory category = initialCategory;
-    double customCost = initialCategory == PostCategory.pastExam ? 5.0 : 10.0;
 
     showModalBottomSheet(
       context: context,
@@ -217,7 +216,7 @@ class _CourseResourceTabState extends State<CourseResourceTab> {
                   children: [
                     Text('${category.label}を投稿する', style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
                     const SizedBox(height: 4),
-                    const Text('資料を投稿するとボーナス+5pt（2020年以前は0pt）が獲得できます。他ユーザーのDL実績に応じて、さらにマイルストーン報酬（5DLで+5pt, 10DLで+10pt）を獲得可能です。', style: TextStyle(fontSize: 11, color: Color(0xFF64748B))),
+                    const Text('資料を投稿すると、確認後に3クレジットが付与されます（1日の付与上限あり・重複資料は対象外）。', style: TextStyle(fontSize: 11, color: Color(0xFF64748B))),
                     const SizedBox(height: 16),
 
                     // Category picker (was the tab selection before Task 8)
@@ -228,14 +227,6 @@ class _CourseResourceTabState extends State<CourseResourceTab> {
                     if (requestId == null)
                       _categoryPicker(category, (cat) {
                         setModalState(() {
-                          // The slider default only matters outside pastExam
-                          // (which is a fixed 5pt). Both header buttons now
-                          // open on 過去問, seeding customCost at 5.0 — so
-                          // crossing OUT of pastExam has to restore the 10pt
-                          // default the non-pastExam form used to get.
-                          if (category == PostCategory.pastExam && cat != PostCategory.pastExam) {
-                            customCost = 10.0;
-                          }
                           category = cat;
                         });
                       })
@@ -256,26 +247,8 @@ class _CourseResourceTabState extends State<CourseResourceTab> {
                               if (val != null) setModalState(() => selectedYear = val);
                             },
                           ),
-                          const Spacer(),
-                          Container(
-                            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-                            decoration: BoxDecoration(color: const Color(0xFFEFF6FF), borderRadius: BorderRadius.circular(6)),
-                            child: const Text('DLコスト: 5pt (一律固定)', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Color(0xFF1D4ED8))),
-                          ),
                         ],
                       ),
-                      const SizedBox(height: 12),
-                    ] else ...[
-                      Text('ダウンロード設定コスト: ${customCost.round()} pt', style: const TextStyle(fontWeight: FontWeight.bold)),
-                      Slider(
-                        value: customCost,
-                        min: 0,
-                        max: 20,
-                        divisions: 20,
-                        label: '${customCost.round()} pt',
-                        onChanged: (val) => setModalState(() => customCost = val),
-                      ),
-                      const Text('※0pt (無料) 〜 20pt の範囲で自由設定が可能です (投稿者に80%還元)', style: TextStyle(fontSize: 11, color: Color(0xFF64748B))),
                       const SizedBox(height: 12),
                     ],
 
@@ -403,14 +376,14 @@ class _CourseResourceTabState extends State<CourseResourceTab> {
                                     ),
                                   );
 
-                                  final uploadedName = await widget.store.uploadFileToStorage(
+                                  final uploadedPath = await widget.store.uploadFileToStorage(
                                     pickedFile!.name,
                                     pickedFile!.bytes,
                                   );
 
                                   navigator.pop(); // Close spinner
 
-                                  if (uploadedName == null) {
+                                  if (uploadedPath == null) {
                                     messenger.showSnackBar(
                                       SnackBar(content: Text(widget.store.lastNoticeMessage ?? 'ファイルのアップロードに失敗しました。')),
                                     );
@@ -423,8 +396,8 @@ class _CourseResourceTabState extends State<CourseResourceTab> {
                                     year: category == PostCategory.pastExam ? selectedYear : null,
                                     title: titleController.text.trim(),
                                     description: descController.text.trim(),
-                                    fileNames: [uploadedName],
-                                    downloadCost: category == PostCategory.pastExam ? 5 : customCost.round(),
+                                    fileNames: [pickedFile!.name],
+                                    filePaths: [uploadedPath],
                                     requestId: requestId,
                                   );
                                   navigator.pop();
@@ -455,7 +428,6 @@ class _CourseResourceTabState extends State<CourseResourceTab> {
     final titleController = TextEditingController();
     final descController = TextEditingController();
     int selectedYear = DateTime.now().year;
-    double rewardPoints = 10.0; // Point reward to uploader
     PostCategory category = initialCategory;
 
     showModalBottomSheet(
@@ -468,9 +440,6 @@ class _CourseResourceTabState extends State<CourseResourceTab> {
       builder: (context) {
         return StatefulBuilder(
           builder: (context, setModalState) {
-            final cost = category == PostCategory.pastExam ? 1 : 0;
-            final totalCost = cost + rewardPoints.round();
-
             return Padding(
               padding: EdgeInsets.only(
                 left: 20, right: 20, top: 20,
@@ -483,13 +452,10 @@ class _CourseResourceTabState extends State<CourseResourceTab> {
                   children: [
                     Text('【${category.label}】のリクエスト投稿', style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
                     const SizedBox(height: 4),
-                    // The 1pt fee is charged on past-exam requests only (`cost`
-                    // above is 0 otherwise), so the notice tracks the picker.
-                    if (category == PostCategory.pastExam)
-                      Text(
-                        '※ 過去問リクエストには手数料1ptが消費されます',
-                        style: TextStyle(fontSize: 11, color: Colors.grey[600]),
-                      ),
+                    Text(
+                      '※ リクエストは無料です。資料が投稿されると通知されます。',
+                      style: TextStyle(fontSize: 11, color: Colors.grey[600]),
+                    ),
                     const SizedBox(height: 16),
 
                     // Category picker (was the tab selection before Task 8)
@@ -536,33 +502,6 @@ class _CourseResourceTabState extends State<CourseResourceTab> {
                     ),
                     const SizedBox(height: 16),
 
-                    // Points configuration
-                    Text('提供者への報酬ポイント: ${rewardPoints.round()} pt', style: const TextStyle(fontWeight: FontWeight.bold)),
-                    Slider(
-                      value: rewardPoints,
-                      min: 5,
-                      max: 50,
-                      divisions: 9,
-                      label: '${rewardPoints.round()} pt',
-                      onChanged: (val) => setModalState(() => rewardPoints = val),
-                    ),
-                    const SizedBox(height: 8),
-
-                    Container(
-                      padding: const EdgeInsets.all(12),
-                      decoration: BoxDecoration(color: const Color(0xFFFEF3C7), borderRadius: BorderRadius.circular(8)),
-                      child: Row(
-                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                        children: [
-                          const Text('合計消費ポイント:', style: TextStyle(fontWeight: FontWeight.bold, color: Color(0xFFD97706))),
-                          Text(
-                            '$totalCost pt',
-                            style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Color(0xFFD97706)),
-                          ),
-                        ],
-                      ),
-                    ),
-
                     const SizedBox(height: 24),
                     Row(
                       mainAxisAlignment: MainAxisAlignment.end,
@@ -584,7 +523,6 @@ class _CourseResourceTabState extends State<CourseResourceTab> {
                                     year: category == PostCategory.pastExam ? selectedYear : null,
                                     title: titleController.text.trim(),
                                     description: descController.text.trim(),
-                                    rewardPoints: rewardPoints.round(),
                                   );
                                   if (success) {
                                     navigator.pop();
@@ -724,8 +662,9 @@ class _CourseResourceTabState extends State<CourseResourceTab> {
       }
     }
 
-    final cost = isFree ? 0 : post.downloadCost;
-    final userPoints = widget.store.currentUser?.points ?? 0;
+    final balance = widget.store.creditBalance;
+    final canPay = isFree || balance >= 1;
+    final noFile = post.filePaths.isEmpty; // un-migrated legacy post
 
     showDialog(
       context: context,
@@ -809,14 +748,14 @@ class _CourseResourceTabState extends State<CourseResourceTab> {
                 decoration: BoxDecoration(
                   color: isFree
                       ? const Color(0xFFECFDF5)
-                      : (userPoints >= cost ? const Color(0xFFEFF6FF) : const Color(0xFFFEF2F2)),
+                      : (canPay ? const Color(0xFFEFF6FF) : const Color(0xFFFEF2F2)),
                   borderRadius: BorderRadius.circular(10),
                 ),
                 child: Row(
                   children: [
                     Icon(
-                      isFree ? Icons.check_circle_outline_rounded : (userPoints >= cost ? Icons.stars_rounded : Icons.info_outline_rounded),
-                      color: isFree ? const Color(0xFF10B981) : (userPoints >= cost ? const Color(0xFF2563EB) : const Color(0xFFEF4444)),
+                      isFree ? Icons.check_circle_outline_rounded : (canPay ? Icons.stars_rounded : Icons.info_outline_rounded),
+                      color: isFree ? const Color(0xFF10B981) : (canPay ? const Color(0xFF2563EB) : const Color(0xFFEF4444)),
                       size: 18,
                     ),
                     const SizedBox(width: 8),
@@ -825,20 +764,22 @@ class _CourseResourceTabState extends State<CourseResourceTab> {
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
                           Text(
-                            isFree
-                                ? 'あなたは無料でダウンロードできます！'
-                                : '必要ポイント: $cost pt  (保有: $userPoints pt)',
+                            noFile
+                                ? 'この資料は移行中のためダウンロードできません'
+                                : isFree
+                                    ? 'あなたは無料でダウンロードできます！'
+                                    : '1クレジットを消費します（保有: $balanceクレジット）',
                             style: TextStyle(
                               fontSize: 12,
                               fontWeight: FontWeight.bold,
                               color: isFree
                                   ? const Color(0xFF065F46)
-                                  : (userPoints >= cost ? const Color(0xFF1E40AF) : const Color(0xFF991B1B)),
+                                  : (canPay ? const Color(0xFF1E40AF) : const Color(0xFF991B1B)),
                             ),
                           ),
-                          if (!isFree && userPoints < cost)
+                          if (!noFile && !isFree && balance < 1)
                             const Text(
-                              'ポイントが不足しています。',
+                              'クレジットが足りません。',
                               style: TextStyle(fontSize: 10, color: Color(0xFF991B1B)),
                             ),
                         ],
@@ -855,21 +796,17 @@ class _CourseResourceTabState extends State<CourseResourceTab> {
               child: const Text('キャンセル', style: TextStyle(color: Colors.grey)),
             ),
             ElevatedButton(
-              onPressed: (!isFree && userPoints < cost)
+              onPressed: (noFile || !canPay)
                   ? null
-                  : () {
+                  : () async {
+                      final messenger = ScaffoldMessenger.of(context);
                       Navigator.pop(context);
-                      final success = widget.store.downloadPost(post);
-                      if (success) {
-                        setState(() {});
-                        ScaffoldMessenger.of(context).showSnackBar(
-                          SnackBar(content: Text(widget.store.lastNoticeMessage ?? 'ダウンロードを開始しました。')),
-                        );
-                      } else {
-                        ScaffoldMessenger.of(context).showSnackBar(
-                          SnackBar(content: Text(widget.store.lastNoticeMessage ?? 'エラーが発生しました。')),
-                        );
-                      }
+                      final ok = await widget.store.downloadPost(post);
+                      if (!mounted) return;
+                      setState(() {});
+                      messenger.showSnackBar(SnackBar(
+                          content: Text(widget.store.lastNoticeMessage ??
+                              (ok ? 'ダウンロードを開始しました。' : 'エラーが発生しました。'))));
                     },
               style: ElevatedButton.styleFrom(
                 backgroundColor: _brand,
@@ -979,23 +916,6 @@ class _CourseResourceTabState extends State<CourseResourceTab> {
                                   decoration: req.isFulfilled ? TextDecoration.lineThrough : null,
                                   color: req.isFulfilled ? const Color(0xFF64748B) : Colors.black87,
                                 ),
-                              ),
-                            ),
-                            Container(
-                              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                              decoration: BoxDecoration(
-                                color: req.isFulfilled ? Colors.grey[300] : const Color(0xFFFEF3C7),
-                                borderRadius: BorderRadius.circular(12),
-                              ),
-                              child: Row(
-                                children: [
-                                  const Icon(Icons.card_giftcard_rounded, size: 12, color: Color(0xFFD97706)),
-                                  const SizedBox(width: 3),
-                                  Text(
-                                    '${req.rewardPoints}pt',
-                                    style: const TextStyle(fontSize: 10.5, fontWeight: FontWeight.bold, color: Color(0xFFD97706)),
-                                  ),
-                                ],
                               ),
                             ),
                           ],
@@ -1174,8 +1094,8 @@ class _CourseResourceTabState extends State<CourseResourceTab> {
                               child: Text(
                                 post.authorId == widget.store.currentUser?.uid ||
                                         widget.store.requests.any((r) => r.fulfilledPostId == post.id && r.authorId == widget.store.currentUser?.uid)
-                                    ? '無料 DL'
-                                    : '${post.downloadCost} pt DL',
+                                    ? '無料'
+                                    : '1クレジット',
                               ),
                             ),
                           ],

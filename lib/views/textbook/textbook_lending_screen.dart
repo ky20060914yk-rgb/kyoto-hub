@@ -48,7 +48,7 @@ class _TextbookLendingScreenState extends State<TextbookLendingScreen> {
                 children: [
                   const Text('参考書リクエストを投稿', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
                   const SizedBox(height: 4),
-                  const Text('※貸し出しに応答があった時点で、一律 20pt が引き落とされます', style: TextStyle(fontSize: 12, color: Color(0xFFD97706))),
+                  const Text('※参考書の貸し借りにクレジットは必要ありません', style: TextStyle(fontSize: 12, color: Color(0xFFD97706))),
                   const SizedBox(height: 16),
 
                   // 1. Course Selection (Dropdown from registered timetable courses)
@@ -153,7 +153,7 @@ class _TextbookLendingScreenState extends State<TextbookLendingScreen> {
                       children: [
                         Text('教科書・参考書の探索 & 譲渡', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14, color: Color(0xFF1E40AF))),
                         SizedBox(height: 2),
-                        Text('貸し手に応答があった時点で即座に一律 20pt 決済が行われ、受け渡し調整チャットが開設されます。', style: TextStyle(fontSize: 11, color: Color(0xFF3B82F6))),
+                        Text('貸し手が応答すると、受け渡し調整チャットが開設されます。', style: TextStyle(fontSize: 11, color: Color(0xFF3B82F6))),
                       ],
                     ),
                   ),
@@ -253,7 +253,7 @@ class _TextbookLendingScreenState extends State<TextbookLendingScreen> {
                                   borderRadius: BorderRadius.circular(6),
                                 ),
                                 child: Text(
-                                  isMatched ? 'マッチング済' : '募集中 (20pt)',
+                                  isMatched ? 'マッチング済' : '募集中',
                                   style: const TextStyle(color: Colors.white, fontSize: 11, fontWeight: FontWeight.bold),
                                 ),
                               ),
@@ -306,7 +306,7 @@ class _TextbookLendingScreenState extends State<TextbookLendingScreen> {
                                   backgroundColor: const Color(0xFF0F4C81),
                                   foregroundColor: Colors.white,
                                 ),
-                                child: Text(isMyRequest ? '自分の投稿です' : '本を貸す (即時20pt決済)'),
+                                child: Text(isMyRequest ? '自分の投稿です' : '本を貸す'),
                               ),
                             ),
                           ],

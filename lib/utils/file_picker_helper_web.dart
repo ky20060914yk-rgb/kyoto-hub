@@ -12,7 +12,7 @@ class PickedFile {
 Future<PickedFile?> pickFile() async {
   final completer = Completer<PickedFile?>();
   final uploadInput = html.FileUploadInputElement();
-  uploadInput.accept = '.pdf,.doc,.docx,.png,.jpg,.jpeg';
+  uploadInput.accept = '.pdf,.png,.jpg,.jpeg,.webp';
   uploadInput.click();
 
   uploadInput.onChange.listen((e) {

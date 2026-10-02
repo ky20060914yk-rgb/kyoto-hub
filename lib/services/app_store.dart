@@ -1,5 +1,6 @@
 import 'package:flutter/foundation.dart';
 import 'package:firebase_auth/firebase_auth.dart' as fb_auth;
+import 'dart:async';
 import 'dart:math';
 
 import '../models/user_profile.dart';
@@ -8,14 +9,14 @@ import '../models/post.dart';
 import '../models/request.dart';
 import '../models/textbook_request.dart';
 import '../models/talk_room.dart';
-import '../models/transaction.dart';
+import '../models/credit_ledger_entry.dart';
 import '../models/inquiry.dart';
 import '../models/review.dart';
 import '../repositories/course_repository.dart';
 import 'firestore_service.dart';
 import 'review_service.dart';
 import 'ranking_service.dart';
-import '../firebase_options.dart';
+import 'credit_service.dart';
 import '../utils/download_helper.dart';
 import 'package:firebase_storage/firebase_storage.dart' as fb_storage;
 
@@ -39,7 +40,6 @@ class AppStore extends ChangeNotifier {
   List<MaterialRequest> requests = [];
   List<TextbookRequest> textbookRequests = [];
   List<TalkRoom> talkRooms = [];
-  List<PointTransaction> transactions = [];
   List<Inquiry> inquiries = [];
 
   String? lastNoticeMessage;
@@ -51,7 +51,43 @@ class AppStore extends ChangeNotifier {
     notifyListeners();
   }
 
-  AppStore(this.courses, this.reviews, this.ranking) {
+  /// Credit balance/ledger streams and the signed-download callable (Plan 2A).
+  final CreditService credits;
+  int creditBalance = 0;
+  List<CreditLedgerEntry> ledger = [];
+  String? invitationCode; // own code, issued server-side (P2-2)
+  StreamSubscription<String?>? _codeSub;
+  StreamSubscription<int>? _balanceSub;
+  StreamSubscription<List<CreditLedgerEntry>>? _ledgerSub;
+
+  void _watchCredits(String uid) {
+    _balanceSub?.cancel();
+    _codeSub?.cancel();
+    _ledgerSub?.cancel();
+    _balanceSub = credits.streamBalance(uid).listen((b) {
+      creditBalance = b;
+      notifyListeners();
+    }, onError: (_) {});
+    _codeSub = credits.streamInvitationCode(uid).listen((c) {
+      invitationCode = c;
+      notifyListeners();
+    }, onError: (_) {});
+    _ledgerSub = credits.streamLedger(uid).listen((l) {
+      ledger = l;
+      notifyListeners();
+    }, onError: (_) {});
+  }
+
+  /// Idempotent server-side (a flag on the balance doc), so calling it on every
+  /// verified login is cheap and also back-fills users who verified before
+  /// Plan 2A shipped.
+  Future<void> _claimWelcome() async {
+    try {
+      await credits.claimWelcome();
+    } catch (_) {/* best-effort; retried on next login */}
+  }
+
+  AppStore(this.courses, this.reviews, this.ranking, this.credits) {
     // _initSampleData(); // Commented out for production release
     _initFirebaseSync();
   }
@@ -78,18 +114,10 @@ class AppStore extends ChangeNotifier {
                 universityId: 'kyoto_u',
                 email: email,
                 displayName: '京大生_$randomNum',
-                points: 30,
-                invitationCode: 'KU${uid.substring(uid.length - 4).toUpperCase()}',
                 createdAt: DateTime.now(),
               );
               await _firestore.saveUserProfile(profile);
 
-              _addTransaction(
-                userId: uid,
-                type: 'signup_bonus',
-                amount: 30,
-                description: '新規登録ボーナス（過去問約6年分相当）',
-              );
             }
 
             currentUser = profile;
@@ -108,16 +136,13 @@ class AppStore extends ChangeNotifier {
           final profile = await _firestore.getUserProfile(fbUser.uid);
           if (profile != null) {
             currentUser = profile;
+            _watchCredits(fbUser.uid);
+            if (fbUser.emailVerified) _claimWelcome();
 
             final timetable = await _firestore.getUserTimetable(fbUser.uid);
             userTimetable = timetable;
 
             notifyListeners();
-
-            _firestore.streamTransactions(fbUser.uid).listen((remoteTxs) {
-              transactions = remoteTxs;
-              notifyListeners();
-            }, onError: (_) {});
           }
         }
       }, onError: (_) {});
@@ -201,6 +226,13 @@ class AppStore extends ChangeNotifier {
 
   // --- 1. AUTH & SIGNUP FLOW ---
 
+  /// Rules cap the hint at 16 chars; the server validates it for real.
+  String? _cleanReferral(String? raw) {
+    final t = raw?.trim().toUpperCase() ?? '';
+    if (t.isEmpty) return null;
+    return t.length > 16 ? t.substring(0, 16) : t;
+  }
+
   Future<bool> signUpWithPassword(String email, String password, {String? referralCode}) async {
     if (!email.endsWith('@st.kyoto-u.ac.jp')) {
       lastNoticeMessage = 'エラー: @st.kyoto-u.ac.jp のメールアドレスのみ登録可能です';
@@ -230,15 +262,14 @@ class AppStore extends ChangeNotifier {
         universityId: 'kyoto_u',
         email: email,
         displayName: '京大生_$randomNum',
-        points: 0,
-        invitationCode: 'KU${uid.substring(uid.length - 4).toUpperCase()}',
         createdAt: DateTime.now(),
         isVerified: false,
-        pendingReferralCode: referralCode,
+        pendingReferralCode: _cleanReferral(referralCode),
       );
 
       await _firestore.saveUserProfile(profile);
       currentUser = profile;
+      _watchCredits(uid); // authStateChanges may fire before the profile exists
 
       showOnboardingFlow = true;
       notifyListeners();
@@ -284,6 +315,12 @@ class AppStore extends ChangeNotifier {
   }
 
   void logout() {
+    _balanceSub?.cancel();
+    _codeSub?.cancel();
+    _ledgerSub?.cancel();
+    creditBalance = 0;
+    invitationCode = null;
+    ledger = [];
     currentUser = null;
     userTimetable.clear();
     notifyListeners();
@@ -301,62 +338,13 @@ class AppStore extends ChangeNotifier {
     await fbUser.getIdToken(true);
     final isEmailVerified = fbUser.emailVerified;
 
-    if (isEmailVerified) {
-      if (currentUser != null && !currentUser!.isVerified) {
-        int bonus = 30; // Signup bonus
-        _addTransaction(
-          userId: currentUser!.uid,
-          type: 'signup_bonus',
-          amount: 30,
-          description: '新規登録ボーナス（過去問約6年分相当）',
-        );
-
-        // Resolve the referrer first (a read), but credit them only AFTER this
-        // user's own verified/bonus state is persisted: writing another user's
-        // profile is denied by the `users` ownership rule, so it must never sit
-        // between us and our own save.
-        UserProfile? referrer;
-        final refCode = currentUser!.pendingReferralCode;
-        if (refCode != null && refCode.trim().isNotEmpty) {
-          referrer = await _firestore.getUserByInvitationCode(refCode.trim());
-        }
-
-        if (referrer != null) {
-          // Reward referred (new user)
-          bonus += 10;
-          _addTransaction(
-            userId: currentUser!.uid,
-            type: 'referral_bonus',
-            amount: 10,
-            description: '招待コード特典（被招待者ボーナス）',
-          );
-        }
-
-        currentUser = currentUser!.copyWith(
-          isVerified: true,
-          points: bonus,
-          pendingReferralCode: null,
-        );
-
-        await _firestore.saveUserProfile(currentUser!);
-
-        if (referrer != null) {
-          // Cross-user write: denied by the `users` ownership rule, so it is
-          // best-effort only. Reconciled server-side in Phase 2.
-          final updatedReferrer = referrer.copyWith(points: referrer.points + 10);
-          await _firestore.saveUserProfile(updatedReferrer).catchError((_) {});
-          _addTransaction(
-            userId: referrer.uid,
-            type: 'referral_bonus',
-            amount: 10,
-            description: '招待コード特典（招待ボーナス） [${currentUser!.displayName} が登録]',
-          );
-        }
-
-        lastNoticeMessage = 'メールアドレスの検証が完了しました！ ボーナス ${bonus}pt を付与しました！';
-        notifyListeners();
-        return true;
-      }
+    if (isEmailVerified && currentUser != null && !currentUser!.isVerified) {
+      currentUser = currentUser!.copyWith(isVerified: true);
+      await _firestore.saveUserProfile(currentUser!);
+      await _claimWelcome();
+      lastNoticeMessage = 'メールアドレスの検証が完了しました！ ご登録ボーナスとして3クレジットを付与しました。';
+      notifyListeners();
+      return true;
     }
     return isEmailVerified;
   }
@@ -472,245 +460,91 @@ class AppStore extends ChangeNotifier {
     required String title,
     required String description,
     required List<String> fileNames,
-    required int downloadCost,
+    required List<String> filePaths,
     String? requestId,
   }) async {
     if (currentUser == null) return false;
-
     final sub = await courses.byId(subjectId);
-    final subjectName = sub?.name ?? '不明な科目';
-
-    int cost = downloadCost;
-    if (category == PostCategory.pastExam) {
-      cost = 5;
-    } else {
-      cost = cost.clamp(0, 20);
-    }
-
-    final newPostId = 'post_${DateTime.now().millisecondsSinceEpoch}';
-    final bucket = DefaultFirebaseOptions.currentPlatform.storageBucket ?? 'kyodai-sns.firebasestorage.app';
-
     final newPost = Post(
-      id: newPostId,
+      id: 'post_${DateTime.now().millisecondsSinceEpoch}',
       universityId: 'kyoto_u',
       subjectId: subjectId,
-      subjectName: subjectName,
+      subjectName: sub?.name ?? '不明な科目',
       authorId: currentUser!.uid,
       authorName: currentUser!.displayName,
       category: category,
       year: year,
       title: title,
       description: description,
-      fileUrls: fileNames.map((n) => 'https://firebasestorage.googleapis.com/v0/b/$bucket/o/${Uri.encodeComponent(n)}?alt=media').toList(),
+      filePaths: filePaths,
       fileNames: fileNames,
-      downloadCost: cost,
       createdAt: DateTime.now(),
       requestId: requestId,
     );
-
     posts.insert(0, newPost);
+    // Credits are granted by the `onPostCreated` trigger once it has validated
+    // the files; the balance arrives through the `credits` stream. If the post
+    // is rejected the trigger deletes it and the posts stream drops it.
     _firestore.createPost(newPost).catchError((_) {});
-
     _bumpPostCountFor(newPost, 1);
-
-    int bonusAmount = 0;
-
-    // Check daily limit of upload rewards (up to 3 uploads per day)
-    final now = DateTime.now();
-    final todayUploadsCount = posts.where((p) {
-      return p.authorId == currentUser!.uid &&
-          p.createdAt.year == now.year &&
-          p.createdAt.month == now.month &&
-          p.createdAt.day == now.day;
-    }).length;
-
-    final bool isLimitReached = todayUploadsCount > 3; // > 3 since we just added newPost to local posts!
-
-    if (!isLimitReached) {
-      if (category == PostCategory.pastExam && year != null && year <= 2020) {
-        // 2020 or earlier: 0pt initial reward
-        bonusAmount = 0;
-      } else {
-        bonusAmount = 5;
-        _addTransaction(
-          userId: currentUser!.uid,
-          type: 'post_reward',
-          amount: 5,
-          description: '投稿ボーナス (+5pt) [${category.label}]',
-        );
-      }
-    }
-
-    // Check if fulfilling a request
-    if (requestId != null) {
-      final reqIdx = requests.indexWhere((r) => r.id == requestId);
-      if (reqIdx != -1) {
-        final req = requests[reqIdx];
-        if (!req.isFulfilled) {
-          final reward = req.rewardPoints;
-          bonusAmount += reward;
-
-          requests[reqIdx] = req.copyWith(isFulfilled: true, fulfilledPostId: newPostId);
-          _firestore.createMaterialRequest(requests[reqIdx]).catchError((_) {});
-
-          _addTransaction(
-            userId: currentUser!.uid,
-            type: 'request_fulfillment_reward',
-            amount: reward,
-            description: 'リクエスト解決報酬獲得 (+${reward}pt) [${req.title}]',
-          );
-        }
-      }
-    }
-
-    currentUser = currentUser!.copyWith(points: currentUser!.points + bonusAmount);
-    _firestore.saveUserProfile(currentUser!).catchError((_) {});
-
-    if (isLimitReached) {
-      lastNoticeMessage = '資料のアップロードが成功しました！（本日のポイント付与上限に達したため、ボーナスptは付与されません）';
-    } else {
-      lastNoticeMessage = '資料のアップロードが成功しました！ ボーナス+${bonusAmount}ptを獲得！';
-    }
+    lastNoticeMessage = '資料をアップロードしました！確認後、クレジットが付与されます。';
     notifyListeners();
     return true;
   }
 
-  bool downloadPost(Post post) {
+  Future<bool> downloadPost(Post post) async {
     if (currentUser == null) return false;
-
-    // Check if free for the current user (author or requester)
-    bool isFree = false;
-    if (post.authorId == currentUser!.uid) {
-      isFree = true;
-    } else {
-      final isRequester = requests.any((r) => r.fulfilledPostId == post.id && r.authorId == currentUser!.uid);
-      if (isRequester) {
-        isFree = true;
-      }
-    }
-
-    final cost = isFree ? 0 : post.downloadCost;
-
-    if (cost > 0 && currentUser!.points < cost) {
-      lastNoticeMessage = 'ポイントが不足しています。必要: ${cost}pt, 保有: ${currentUser!.points}pt';
+    try {
+      final r = await credits.downloadResource(post.id);
+      startDownload(r.url);
+      lastNoticeMessage = r.charged
+          ? '資料のダウンロードを開始しました（1クレジット消費）'
+          : '資料のダウンロードを開始しました';
+      notifyListeners();
+      return true;
+    } on CreditException catch (e) {
+      lastNoticeMessage = switch (e.kind) {
+        CreditErrorKind.insufficient => 'クレジットが足りません。資料をアップロードするとクレジットを獲得できます。',
+        CreditErrorKind.notFound => 'この資料は削除されたか、見つかりませんでした。',
+        _ => 'ダウンロードに失敗しました。時間をおいて再度お試しください。',
+      };
+      notifyListeners();
+      return false;
+    } catch (_) {
+      lastNoticeMessage = 'ダウンロードに失敗しました。時間をおいて再度お試しください。';
       notifyListeners();
       return false;
     }
-
-    currentUser = currentUser!.copyWith(
-      points: currentUser!.points - cost,
-      downloadCount: currentUser!.downloadCount + 1,
-    );
-
-    _firestore.saveUserProfile(currentUser!).catchError((_) {});
-
-    if (cost > 0) {
-      _addTransaction(
-        userId: currentUser!.uid,
-        type: 'download_deduction',
-        amount: -cost,
-        description: '資料ダウンロード [${post.title}] (${cost}pt消費)',
-      );
-    } else {
-      _addTransaction(
-        userId: currentUser!.uid,
-        type: 'download_free',
-        amount: 0,
-        description: '資料ダウンロード (無料/特典) [${post.title}]',
-      );
-    }
-
-    final index = posts.indexWhere((p) => p.id == post.id);
-    if (index != -1) {
-      final newDLCount = posts[index].downloadCount + 1;
-
-      // Calculate standard royalty for uploader (80%)
-      final uploaderReward = (cost * 0.8).floor();
-      if (uploaderReward > 0 && post.authorId != currentUser!.uid) {
-        _addTransaction(
-          userId: post.authorId,
-          type: 'uploader_royalty',
-          amount: uploaderReward,
-          description: '資料ダウンロード還元 (+80%) [${post.title}]',
-        );
-
-        _firestore.getUserProfile(post.authorId).then((authorProfile) {
-          if (authorProfile != null) {
-            final updatedAuthor = authorProfile.copyWith(points: authorProfile.points + uploaderReward);
-            _firestore.saveUserProfile(updatedAuthor).catchError((_) {});
-          }
-        }).catchError((_) {});
-      }
-
-      // Check per-post milestones (5 DL = +5pt, 10 DL = +10pt)
-      bool trigger5 = false;
-      bool trigger10 = false;
-      int milestoneReward = 0;
-      String? milestoneType;
-      String? milestoneDesc;
-
-      if (newDLCount == 5 && !posts[index].is5DownloadsRewarded && post.authorId != currentUser!.uid) {
-        milestoneReward = 5;
-        milestoneType = 'uploader_milestone_5';
-        milestoneDesc = 'ダウンロード数5件達成ボーナス (+5pt) [${post.title}]';
-        trigger5 = true;
-      } else if (newDLCount == 10 && !posts[index].is10DownloadsRewarded && post.authorId != currentUser!.uid) {
-        milestoneReward = 10;
-        milestoneType = 'uploader_milestone_10';
-        milestoneDesc = 'ダウンロード数10件達成ボーナス (+10pt) [${post.title}]';
-        trigger10 = true;
-      }
-
-      if (milestoneReward > 0 && milestoneType != null && milestoneDesc != null) {
-        _addTransaction(
-          userId: post.authorId,
-          type: milestoneType,
-          amount: milestoneReward,
-          description: milestoneDesc,
-        );
-
-        _firestore.getUserProfile(post.authorId).then((authorProfile) {
-          if (authorProfile != null) {
-            final updatedAuthor = authorProfile.copyWith(points: authorProfile.points + milestoneReward);
-            _firestore.saveUserProfile(updatedAuthor).catchError((_) {});
-          }
-        }).catchError((_) {});
-      }
-
-      final updatedPost = posts[index].copyWith(
-        downloadCount: newDLCount,
-        is5DownloadsRewarded: trigger5 ? true : posts[index].is5DownloadsRewarded,
-        is10DownloadsRewarded: trigger10 ? true : posts[index].is10DownloadsRewarded,
-      );
-      posts[index] = updatedPost;
-
-      _firestore.updatePostMilestones(
-        postId: post.id,
-        downloadCount: newDLCount,
-        is5DownloadsRewarded: updatedPost.is5DownloadsRewarded,
-        is10DownloadsRewarded: updatedPost.is10DownloadsRewarded,
-      ).catchError((_) {});
-    }
-
-    if (post.fileUrls.isNotEmpty) {
-      openUrlInNewTab(post.fileUrls.first);
-    }
-
-    lastNoticeMessage = isFree
-        ? '資料ダウンロードを開始しました！ (無料特典)'
-        : 'Cloud Storageから資料ダウンロードを開始しました！ (${cost}pt消費)';
-    notifyListeners();
-    return true;
   }
 
+  /// Uploads to the private per-user prefix and returns the storage PATH.
+  /// Storage rules allow create-only at `resources/<uid>/<one flat segment>`,
+  /// so every attempt (including retries) uses a fresh timestamped name.
   Future<String?> uploadFileToStorage(String fileName, Uint8List fileBytes) async {
+    final uid = currentUser?.uid;
+    if (uid == null) return null;
+    if (fileBytes.length > 20 * 1024 * 1024) {
+      lastNoticeMessage = 'ファイルサイズは20MBまでです。';
+      notifyListeners();
+      return null;
+    }
     try {
-      final uniqueName = '${DateTime.now().millisecondsSinceEpoch}_$fileName';
-      final ref = fb_storage.FirebaseStorage.instance.ref().child(uniqueName);
-      await ref.putData(fileBytes);
-      return uniqueName;
+      final safe = fileName.replaceAll(RegExp(r'[^\w.\-぀-ヿ一-鿿]'), '_');
+      final path = 'resources/$uid/${DateTime.now().millisecondsSinceEpoch}_$safe';
+      final lower = fileName.toLowerCase();
+      final contentType = lower.endsWith('.pdf')
+          ? 'application/pdf'
+          : lower.endsWith('.png')
+              ? 'image/png'
+              : lower.endsWith('.webp')
+                  ? 'image/webp'
+                  : 'image/jpeg';
+      await fb_storage.FirebaseStorage.instance
+          .ref()
+          .child(path)
+          .putData(fileBytes, fb_storage.SettableMetadata(contentType: contentType));
+      return path;
     } catch (e) {
-      print('Firebase Storage upload error: $e');
       lastNoticeMessage = 'ストレージへのファイルアップロードに失敗しました。';
       notifyListeners();
       return null;
@@ -727,44 +561,6 @@ class AppStore extends ChangeNotifier {
 
     _bumpPostCountFor(post, -1);
 
-    if (currentUser != null && post.authorId == currentUser!.uid) {
-      int deductPoints = 0;
-      if (post.category == PostCategory.pastExam && post.year != null && post.year! <= 2020) {
-        deductPoints = 0;
-      } else {
-        deductPoints = 5;
-        _addTransaction(
-          userId: currentUser!.uid,
-          type: 'post_deleted_penalty',
-          amount: -5,
-          description: '投稿削除に伴うボーナス回収 (-5pt) [${post.title}]',
-        );
-      }
-
-      if (post.is5DownloadsRewarded) {
-        deductPoints += 5;
-        _addTransaction(
-          userId: currentUser!.uid,
-          type: 'milestone_5_deleted_penalty',
-          amount: -5,
-          description: '5DLマイルストーンボーナス回収 (-5pt) [${post.title}]',
-        );
-      }
-      if (post.is10DownloadsRewarded) {
-        deductPoints += 10;
-        _addTransaction(
-          userId: currentUser!.uid,
-          type: 'milestone_10_deleted_penalty',
-          amount: -10,
-          description: '10DLマイルストーンボーナス回収 (-10pt) [${post.title}]',
-        );
-      }
-
-      currentUser = currentUser!.copyWith(points: (currentUser!.points - deductPoints).clamp(0, 99999));
-      await _firestore.saveUserProfile(currentUser!).catchError((_) {});
-    }
-
-    lastNoticeMessage = '投稿を削除し、付与されたボーナスポイントを回収しました。';
     notifyListeners();
   }
 
@@ -797,36 +593,7 @@ class AppStore extends ChangeNotifier {
       // here too or the ranking counter drifts upward forever.
       _bumpPostCountFor(post, -1);
 
-      // Claw back points from uploader!
-      final uploaderProfile = await _firestore.getUserProfile(post.authorId);
-      if (uploaderProfile != null) {
-        int penalty = 0;
-        if (post.category == PostCategory.pastExam && post.year != null && post.year! <= 2020) {
-          penalty = 0;
-        } else {
-          penalty = 5;
-        }
-
-        if (post.is5DownloadsRewarded) penalty += 5;
-        if (post.is10DownloadsRewarded) penalty += 10;
-
-        final updatedUploader = uploaderProfile.copyWith(
-          points: (uploaderProfile.points - penalty).clamp(0, 99999)
-        );
-        // Cross-user write (the uploader's profile, from the reporter's
-        // session): denied by the `users` ownership rule, so it is best-effort.
-        // Without the guard the PERMISSION_DENIED would escape reportPost() and
-        // hang the report dialog, which has no try/catch.
-        await _firestore.saveUserProfile(updatedUploader).catchError((_) {});
-
-        _addTransaction(
-          userId: post.authorId,
-          type: 'report_deletion_penalty',
-          amount: -penalty,
-          description: '通報過多による投稿自動削除に伴うポイント回収 (-${penalty}pt) [${post.title}]',
-        );
-      }
-      lastNoticeMessage = '通報が3件に達したため、投稿は自動削除されポイントが回収されました。';
+      lastNoticeMessage = '通報が3件に達したため、投稿は自動削除されました。';
     } else {
       posts[idx] = updatedPost;
       await _firestore.updatePostReports(postId, updatedReports).catchError((_) {});
@@ -841,30 +608,8 @@ class AppStore extends ChangeNotifier {
     int? year,
     required String title,
     required String description,
-    required int rewardPoints,
   }) async {
     if (currentUser == null) return false;
-
-    final cost = category == PostCategory.pastExam ? 1 : 0;
-    final totalCost = cost + rewardPoints;
-
-    if (currentUser!.points < totalCost) {
-      lastNoticeMessage = 'ポイントが不足しています。必要: ${totalCost}pt, 保有: ${currentUser!.points}pt';
-      notifyListeners();
-      return false;
-    }
-
-    if (totalCost > 0) {
-      currentUser = currentUser!.copyWith(points: currentUser!.points - totalCost);
-      _firestore.saveUserProfile(currentUser!).catchError((_) {});
-
-      _addTransaction(
-        userId: currentUser!.uid,
-        type: 'request_cost',
-        amount: -totalCost,
-        description: '過去問リクエスト投稿 [報酬: ${rewardPoints}pt含む] (-${totalCost}pt)',
-      );
-    }
 
     final sub = await courses.byId(subjectId);
 
@@ -879,8 +624,8 @@ class AppStore extends ChangeNotifier {
       year: year,
       title: title,
       description: description,
-      costSpent: cost,
-      rewardPoints: rewardPoints,
+      costSpent: 0,
+      rewardPoints: 0,
       createdAt: DateTime.now(),
     );
 
@@ -968,14 +713,7 @@ class AppStore extends ChangeNotifier {
       _firestore.createTextbookRequest(textbookRequests[idx]).catchError((_) {});
     }
 
-    _addTransaction(
-      userId: req.requesterId,
-      type: 'textbook_borrow',
-      amount: -20,
-      description: '参考書貸し借り一律決済 (-20pt) [${req.bookTitle}]',
-    );
-
-    lastNoticeMessage = '貸し出しに応答しました！20pt決済が行われ、トークルームを作成しました。';
+    lastNoticeMessage = '貸し出しに応答しました！トークルームを作成しました。';
     notifyListeners();
     return true;
   }
@@ -1127,24 +865,5 @@ class AppStore extends ChangeNotifier {
       await reviews.markHelpful(reviewId: reviewId, uid: user.uid);
     } catch (_) {/* best-effort */}
     notifyListeners();
-  }
-
-  void _addTransaction({
-    required String userId,
-    required String type,
-    required int amount,
-    required String description,
-  }) {
-    final tx = PointTransaction(
-      id: 'tx_${DateTime.now().millisecondsSinceEpoch}_${transactions.length}',
-      universityId: 'kyoto_u',
-      userId: userId,
-      type: type,
-      amount: amount,
-      description: description,
-      createdAt: DateTime.now(),
-    );
-    transactions.insert(0, tx);
-    _firestore.recordTransaction(tx).catchError((_) {});
   }
 }

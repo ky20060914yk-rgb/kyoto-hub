@@ -50,15 +50,12 @@ class Post {
   final int? year; // Academic year e.g. 2024 (for past_exam)
   final String title;
   final String description;
-  final List<String> fileUrls;
+  final List<String> filePaths; // private-bucket paths: resources/<uid>/<file>
   final List<String> fileNames;
-  final int downloadCost; // 5pt fixed for pastExam, 0-20pt for testPrep/other
   final int downloadCount;
   final DateTime createdAt;
   final String? requestId;
   final List<String> reports;
-  final bool is5DownloadsRewarded;
-  final bool is10DownloadsRewarded;
 
   Post({
     required this.id,
@@ -71,15 +68,12 @@ class Post {
     this.year,
     required this.title,
     required this.description,
-    required this.fileUrls,
+    required this.filePaths,
     required this.fileNames,
-    required this.downloadCost,
     this.downloadCount = 0,
     required this.createdAt,
     this.requestId,
     this.reports = const [],
-    this.is5DownloadsRewarded = false,
-    this.is10DownloadsRewarded = false,
   });
 
   Map<String, dynamic> toMap() {
@@ -94,15 +88,12 @@ class Post {
       'year': year,
       'title': title,
       'description': description,
-      'fileUrls': fileUrls,
+      'filePaths': filePaths,
       'fileNames': fileNames,
-      'downloadCost': downloadCost,
       'downloadCount': downloadCount,
       'createdAt': createdAt.toIso8601String(),
       'requestId': requestId,
       'reports': reports,
-      'is5DownloadsRewarded': is5DownloadsRewarded,
-      'is10DownloadsRewarded': is10DownloadsRewarded,
     };
   }
 
@@ -118,23 +109,18 @@ class Post {
       year: map['year'],
       title: map['title'] ?? '',
       description: map['description'] ?? '',
-      fileUrls: List<String>.from(map['fileUrls'] ?? []),
+      filePaths: List<String>.from(map['filePaths'] ?? []),
       fileNames: List<String>.from(map['fileNames'] ?? []),
-      downloadCost: map['downloadCost'] ?? 0,
       downloadCount: map['downloadCount'] ?? 0,
       createdAt: map['createdAt'] != null ? DateTime.parse(map['createdAt']) : DateTime.now(),
       requestId: map['requestId'],
       reports: List<String>.from(map['reports'] ?? []),
-      is5DownloadsRewarded: map['is5DownloadsRewarded'] ?? false,
-      is10DownloadsRewarded: map['is10DownloadsRewarded'] ?? false,
     );
   }
 
   Post copyWith({
     int? downloadCount,
     List<String>? reports,
-    bool? is5DownloadsRewarded,
-    bool? is10DownloadsRewarded,
   }) {
     return Post(
       id: id,
@@ -147,15 +133,12 @@ class Post {
       year: year,
       title: title,
       description: description,
-      fileUrls: fileUrls,
+      filePaths: filePaths,
       fileNames: fileNames,
-      downloadCost: downloadCost,
       downloadCount: downloadCount ?? this.downloadCount,
       createdAt: createdAt,
       requestId: requestId,
       reports: reports ?? this.reports,
-      is5DownloadsRewarded: is5DownloadsRewarded ?? this.is5DownloadsRewarded,
-      is10DownloadsRewarded: is10DownloadsRewarded ?? this.is10DownloadsRewarded,
     );
   }
 }

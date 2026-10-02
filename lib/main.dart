@@ -6,6 +6,7 @@ import 'repositories/course_repository.dart';
 import 'services/app_store.dart';
 import 'services/review_service.dart';
 import 'services/ranking_service.dart';
+import 'services/credit_service.dart';
 import 'views/auth/signup_screen.dart';
 import 'views/navigation_root_screen.dart';
 
@@ -35,6 +36,7 @@ class _KyotoExamHubAppState extends State<KyotoExamHubApp> {
     CourseRepository(FirebaseFirestore.instance),
     ReviewService(FirebaseFirestore.instance),
     RankingService(FirebaseFirestore.instance),
+    CreditService.live(FirebaseFirestore.instance),
   );
 
   @override

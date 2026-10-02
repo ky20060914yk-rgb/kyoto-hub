@@ -389,7 +389,7 @@ class _HomeScreenState extends State<HomeScreen> {
                   const Icon(Icons.stars_rounded, color: Color(0xFFFBBF24), size: 16),
                   const SizedBox(width: 4),
                   Text(
-                    '${widget.store.currentUser?.points ?? 0} pt',
+                    '${widget.store.creditBalance} クレジット',
                     style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 13),
                   ),
                   const SizedBox(width: 4),

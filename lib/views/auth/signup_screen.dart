@@ -227,7 +227,7 @@ class _SignupScreenState extends State<SignupScreen> {
               SizedBox(width: 8),
               Expanded(
                 child: Text(
-                  '検証を完了するまで、過去問のダウンロードや投稿機能は利用できません。また、新規登録ボーナス(30pt)や招待ポイントも付与されません。',
+                  '検証を完了するまで、過去問のダウンロードや投稿機能は利用できません。検証後に、ご登録ボーナス3クレジットが付与されます。',
                   style: TextStyle(
                     fontSize: 11.5,
                     fontWeight: FontWeight.w600,
@@ -410,7 +410,7 @@ class _SignupScreenState extends State<SignupScreen> {
         if (!_isLoginMode) ...[
           const SizedBox(height: 16),
           const Text(
-            '招待コード (任意)',
+            '招待コード（任意）',
             style: TextStyle(
               fontSize: 13,
               fontWeight: FontWeight.w600,
@@ -420,8 +420,11 @@ class _SignupScreenState extends State<SignupScreen> {
           const SizedBox(height: 6),
           TextField(
             controller: _referralController,
+            maxLength: 16,
             decoration: InputDecoration(
-              hintText: '招待コードをお持ちの場合は入力 (+10pt)',
+              hintText: '招待コードをお持ちの場合は入力',
+              helperText: 'お友だちの招待コードを入力すると、認証完了後にあなたもお友だちも 3クレジット がもらえます',
+              helperMaxLines: 2,
               prefixIcon: const Icon(Icons.card_giftcard_outlined, size: 20),
               contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
               border: OutlineInputBorder(

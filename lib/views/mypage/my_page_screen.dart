@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import '../../services/app_store.dart';
 import '../../models/post.dart';
 import '../../models/review.dart';
@@ -346,7 +347,7 @@ class _MyPageScreenState extends State<MyPageScreen> {
     final myPosts = user != null
         ? widget.store.posts.where((p) => p.authorId == user.uid).toList()
         : <Post>[];
-    final txs = widget.store.transactions;
+    final txs = widget.store.ledger;
 
     return Scaffold(
       backgroundColor: const Color(0xFFF8FAFC),
@@ -450,18 +451,18 @@ class _MyPageScreenState extends State<MyPageScreen> {
                           Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
-                              const Text('保有ポイント残高', style: TextStyle(color: Colors.white70, fontSize: 12)),
+                              const Text('保有クレジット残高', style: TextStyle(color: Colors.white70, fontSize: 12)),
                               const SizedBox(height: 4),
                               Row(
                                 crossAxisAlignment: CrossAxisAlignment.baseline,
                                 textBaseline: TextBaseline.alphabetic,
                                 children: [
                                   Text(
-                                    '${user?.points ?? 0}',
+                                    '${widget.store.creditBalance}',
                                     style: const TextStyle(color: Colors.white, fontSize: 32, fontWeight: FontWeight.bold),
                                   ),
                                   const SizedBox(width: 4),
-                                  const Text('pt', style: TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.bold)),
+                                  const Text('クレジット', style: TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.bold)),
                                 ],
                               ),
                             ],
@@ -494,9 +495,19 @@ class _MyPageScreenState extends State<MyPageScreen> {
                         children: [
                           const Icon(Icons.card_giftcard, size: 18, color: Color(0xFF0F4C81)),
                           const SizedBox(width: 8),
-                          Text('あなたの招待コード: ${user?.invitationCode ?? ''}', style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
+                          Text('あなたの招待コード: ${widget.store.invitationCode ?? '発行中…'}', style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
+                          if (widget.store.invitationCode != null)
+                            IconButton(
+                              icon: const Icon(Icons.copy_rounded, size: 16),
+                              tooltip: 'コピー',
+                              visualDensity: VisualDensity.compact,
+                              onPressed: () {
+                                Clipboard.setData(ClipboardData(text: widget.store.invitationCode!));
+                                ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('招待コードをコピーしました')));
+                              },
+                            ),
                           const Spacer(),
-                          const Text('招待時 +10pt', style: TextStyle(fontSize: 11, color: Color(0xFF0F4C81), fontWeight: FontWeight.bold)),
+                          const Text('友だち登録で あなたも友だちも +3クレジット', style: TextStyle(fontSize: 11, color: Color(0xFF0F4C81), fontWeight: FontWeight.bold)),
                         ],
                       ),
                     ),
@@ -578,8 +589,6 @@ class _MyPageScreenState extends State<MyPageScreen> {
                       trailing: Row(
                         mainAxisSize: MainAxisSize.min,
                         children: [
-                          Text('${p.downloadCost}pt', style: const TextStyle(fontWeight: FontWeight.bold, color: Color(0xFFD97706))),
-                          const SizedBox(width: 4),
                           IconButton(
                             icon: const Icon(Icons.delete_outline_rounded, color: Colors.redAccent, size: 20),
                             onPressed: () {
@@ -595,14 +604,14 @@ class _MyPageScreenState extends State<MyPageScreen> {
             const SizedBox(height: 24),
 
             // Transaction Audit History
-            const Text('ポイント取引・獲得履歴', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Color(0xFF1E293B))),
+            const Text('クレジット履歴', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Color(0xFF1E293B))),
             const SizedBox(height: 10),
             if (txs.isEmpty)
               Container(
                 width: double.infinity,
                 padding: const EdgeInsets.all(20),
                 decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(12), border: Border.all(color: const Color(0xFFE2E8F0))),
-                child: const Center(child: Text('取引履歴はありません。', style: TextStyle(color: Color(0xFF94A3B8), fontSize: 13))),
+                child: const Center(child: Text('クレジット履歴はありません。', style: TextStyle(color: Color(0xFF94A3B8), fontSize: 13))),
               )
             else
               ListView.builder(
@@ -611,7 +620,7 @@ class _MyPageScreenState extends State<MyPageScreen> {
                 itemCount: txs.length,
                 itemBuilder: (context, index) {
                   final tx = txs[index];
-                  final isPlus = tx.amount >= 0;
+                  final isPlus = tx.delta >= 0;
 
                   return Card(
                     margin: const EdgeInsets.only(bottom: 8),
@@ -623,10 +632,10 @@ class _MyPageScreenState extends State<MyPageScreen> {
                         backgroundColor: isPlus ? const Color(0xFF10B981).withAlpha(20) : const Color(0xFFEF4444).withAlpha(20),
                         child: Icon(isPlus ? Icons.add : Icons.remove, color: isPlus ? const Color(0xFF10B981) : const Color(0xFFEF4444)),
                       ),
-                      title: Text(tx.description, style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600)),
+                      title: Text(tx.label, style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600)),
                       subtitle: Text('${tx.createdAt.month}/${tx.createdAt.day} ${tx.createdAt.hour}:${tx.createdAt.minute.toString().padLeft(2, '0')}'),
                       trailing: Text(
-                        '${isPlus ? "+" : ""}${tx.amount} pt',
+                        '${isPlus ? "+" : ""}${tx.delta} クレジット',
                         style: TextStyle(
                           fontWeight: FontWeight.bold,
                           fontSize: 15,
