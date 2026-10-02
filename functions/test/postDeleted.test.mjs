@@ -1,8 +1,8 @@
 // postDeleted.test.mjs
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { fakeDeps } from '../testlib/helpers.mjs';
-import { handlePostDeleted } from '../lib/postDeleted.js';
+import { db, uid, fakeDeps } from '../testlib/helpers.mjs';
+import { handlePostDeleted, handlePostGone } from '../lib/postDeleted.js';
 
 test('removes the author’s own files', async () => {
   const deps = fakeDeps();
@@ -40,4 +40,35 @@ test('a .. segment inside the author prefix is never removed', async () => {
   const deps = fakeDeps();
   const removed = await handlePostDeleted(deps, { authorId: 'u1', filePaths: ['resources/u1/../victim/x.pdf', 'resources/u1/ok.pdf'] });
   assert.deepEqual(removed, ['resources/u1/ok.pdf']);
+});
+
+const owned = (a) => ({ authorId: a, filePaths: [`resources/${a}/1_a.pdf`] });
+
+test('handlePostGone: a post that exists in NEITHER collection has its files removed', async () => {
+  const a = uid('a'); const deps = fakeDeps();
+  assert.deepEqual(await handlePostGone(db, deps, uid('p'), owned(a)), [`resources/${a}/1_a.pdf`]);
+  assert.deepEqual(deps.removed, [`resources/${a}/1_a.pdf`]);
+});
+
+test('handlePostGone: a hide (the doc moved to hidden_posts) keeps the files', async () => {
+  const a = uid('a'); const id = uid('p'); const deps = fakeDeps();
+  await db.doc(`hidden_posts/${id}`).set({ ...owned(a), university_id: 'kyoto_u' });
+  assert.deepEqual(await handlePostGone(db, deps, id, owned(a)), []);
+  assert.deepEqual(deps.removed, []);
+});
+
+test('handlePostGone: a restore (the doc is back in posts) keeps the files', async () => {
+  const a = uid('a'); const id = uid('p'); const deps = fakeDeps();
+  await db.doc(`posts/${id}`).set({ ...owned(a), university_id: 'kyoto_u' });
+  assert.deepEqual(await handlePostGone(db, deps, id, owned(a)), []);
+  assert.deepEqual(deps.removed, []);
+});
+
+test('handlePostGone keeps the author-prefix guard', async () => {
+  const deps = fakeDeps();
+  const out = await handlePostGone(db, deps, uid('p'), {
+    authorId: 'attacker', filePaths: ['resources/victim/x.pdf', 'resources/attacker/y.pdf'],
+  });
+  assert.deepEqual(out, ['resources/attacker/y.pdf']);
+  assert.deepEqual(deps.removed, ['resources/attacker/y.pdf']);
 });
