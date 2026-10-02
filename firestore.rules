@@ -45,6 +45,11 @@ service cloud.firestore {
         && request.resource.data.name.size() > 0
         && request.resource.data.university_id == 'kyoto_u'
         && request.resource.data.id == courseId
+        // Client-created courses live in the `c_custom_<millis>` namespace
+        // (what CourseRepository.addCustomCourse generates). Seeded catalog ids
+        // are `c_<16 hex>`, written by Admin; the review-bonus trigger relies on
+        // a client never being able to mint a catalog-looking id (P2-13).
+        && courseId.matches('^c_custom_[0-9]+$')
         && request.resource.data.period is int
         && request.resource.data.period >= 1 && request.resource.data.period <= 5
         && request.resource.data.dayOfWeek in ['Mon', 'Tue', 'Wed', 'Thu', 'Fri']

@@ -11,8 +11,12 @@ const crowd = async (courseKey, n) => {
     await db.collection('reviews').doc(uid('x')).set({ courseKey, authorId: uid('o'), university_id: 'kyoto_u' });
   }
 };
+// A seeded catalog course (hash id, like tools/seed_courses.mjs) carrying `courseKey`.
+const seedCourse = (courseKey, id = `c_${uid('h')}`) =>
+  db.collection('courses').doc(id).set({ id, courseKey, name: 'n', university_id: 'kyoto_u' });
 // Create the review doc (the trigger fires after it exists) and run the handler.
-const review = async (author, courseKey, now) => {
+const review = async (author, courseKey, now, { real = true } = {}) => {
+  if (real) await seedCourse(courseKey);
   const id = `${courseKey}_${author}`;
   await db.collection('reviews').doc(id).set({ courseKey, authorId: author, university_id: 'kyoto_u' });
   return handleReviewCreated(db, { id, authorId: author, courseKey }, now);
@@ -84,6 +88,7 @@ test('a courseKey with / and % is slugged like the client (%->%25, /->%2F)', asy
   const u = uid(); const k = `fbl/pbl 100%|${uid()}`;
   const id = `${k.replaceAll('%', '%25').replaceAll('/', '%2F')}_${u}`;
   await db.collection('reviews').doc(id).set({ courseKey: k, authorId: u, university_id: 'kyoto_u' });
+  await seedCourse(k);
   const r = await handleReviewCreated(db, { id, authorId: u, courseKey: k });
   assert.equal(r.granted, 3);
 });
@@ -133,4 +138,34 @@ test('a capped first-review bonus releases its slot: reviewBonusesUsed unchanged
   const r2 = await review(u, k2, new Date('2026-10-03T16:00:00Z')); // next JST day
   assert.deepEqual({ first: r2.first, granted: r2.granted }, { first: true, granted: 2 });
   assert.equal((await db.collection('credit_balances').doc(u).get()).get('reviewBonusesUsed'), 2);
+});
+
+test('P2-13: a review on a courseKey with no course doc earns no scarce bonus but still counts toward first-3', async () => {
+  const u = uid(); const k = uid('ghost');
+  const r = await review(u, k, undefined, { real: false });
+  assert.deepEqual({ first: r.first, scarce: r.scarce, granted: r.granted }, { first: true, scarce: false, granted: 2 });
+  assert.equal(await bal(u), 2);
+  assert.equal((await db.collection('credit_balances').doc(u).get()).get('reviewBonusesUsed'), 1);
+  assert.equal((await db.collection('credits_ledger').doc(`reviewscarce_${u}_${k}`).get()).exists, false);
+});
+
+test('P2-13: a client-created (c_custom_) course is not a real course; a catalog doc with the same key is', async () => {
+  const u = uid(); const k = uid('cust');
+  await seedCourse(k, `c_custom_${Date.now()}`);
+  const a = await review(u, k, undefined, { real: false });
+  assert.equal(a.scarce, false);
+  // the catalog later gains the course (same key): a different author earns it
+  const v = uid(); await seedCourse(k);
+  const b = await review(v, k, undefined, { real: false });
+  assert.equal(b.scarce, true);
+  assert.equal(await bal(v), 3);
+});
+
+test('P2-13: a real course still pays the scarce bonus once, idempotently', async () => {
+  const u = uid(); const k = uid('real');
+  const a = await review(u, k);
+  assert.deepEqual({ first: a.first, scarce: a.scarce, granted: a.granted }, { first: true, scarce: true, granted: 3 });
+  const again = await handleReviewCreated(db, { id: `${k}_${u}`, authorId: u, courseKey: k });
+  assert.equal(again.granted, 0);
+  assert.equal(await bal(u), 3);
 });

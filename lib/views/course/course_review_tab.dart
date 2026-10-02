@@ -63,7 +63,11 @@ class _CourseReviewTabState extends State<CourseReviewTab> {
     return ListView(
       padding: const EdgeInsets.all(16),
       children: [
-        _SummaryCard(stats$: _stats$),
+        _SummaryCard(
+          stats$: _stats$,
+          // P2-13: user-added courses ('c_custom_…') never pay the scarce bonus.
+          offersScarceBonus: !widget.subject.id.startsWith('c_custom_'),
+        ),
         const SizedBox(height: 16),
         _WriteButton(mine$: _mine$, store: widget.store, onWrite: _openForm),
         const SizedBox(height: 20),
@@ -131,9 +135,10 @@ class _CourseReviewTabState extends State<CourseReviewTab> {
 // ---------------------------------------------------------------------------
 
 class _SummaryCard extends StatelessWidget {
-  const _SummaryCard({required this.stats$});
+  const _SummaryCard({required this.stats$, required this.offersScarceBonus});
 
   final Stream<CourseStats> stats$;
+  final bool offersScarceBonus;
 
   @override
   Widget build(BuildContext context) {
@@ -154,7 +159,7 @@ class _SummaryCard extends StatelessWidget {
               : Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    if (stats.reviewCount < 5) _scarceTag(),
+                    if (offersScarceBonus && stats.reviewCount < 5) _scarceTag(),
                     _summaryBody(context, stats),
                   ],
                 ),

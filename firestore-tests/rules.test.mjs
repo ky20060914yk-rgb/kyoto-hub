@@ -226,21 +226,21 @@ test('a KU user can read courses', async () => {
 });
 
 test('verified KU user can create a valid course', async () => {
-  await assertSucceeds(setDoc(doc(asKu(), 'courses/c_new'), validCourse('c_new')));
+  await assertSucceeds(setDoc(doc(asKu(), 'courses/c_custom_100'), validCourse('c_custom_100')));
 });
 
 test('course create is rejected with an empty name', async () => {
-  await assertFails(setDoc(doc(asKu(), 'courses/c_empty'), validCourse('c_empty', { name: '' })));
+  await assertFails(setDoc(doc(asKu(), 'courses/c_custom_101'), validCourse('c_custom_101', { name: '' })));
 });
 
 test('course create is rejected for another university', async () => {
-  await assertFails(setDoc(doc(asKu(), 'courses/c_other'),
-    validCourse('c_other', { university_id: 'osaka_u' })));
+  await assertFails(setDoc(doc(asKu(), 'courses/c_custom_102'),
+    validCourse('c_custom_102', { university_id: 'osaka_u' })));
 });
 
 test('unverified user cannot create a course', async () => {
-  await assertFails(setDoc(doc(asKuUnverified(), 'courses/c_unverified'),
-    validCourse('c_unverified')));
+  await assertFails(setDoc(doc(asKuUnverified(), 'courses/c_custom_103'),
+    validCourse('c_custom_103')));
 });
 
 // --- courses: the create shape must satisfy the reader (C1) ------------------
@@ -249,41 +249,51 @@ test('unverified user cannot create a course', async () => {
 // that keeps a *new* doc from being written in a shape the catalog cannot use.
 
 test('course create is rejected when `id` is missing (C1)', async () => {
-  const data = validCourse('c_noid');
+  const data = validCourse('c_custom_104');
   delete data.id;
-  await assertFails(setDoc(doc(asKu(), 'courses/c_noid'), data));
+  await assertFails(setDoc(doc(asKu(), 'courses/c_custom_104'), data));
 });
 
 test('course create is rejected when `id` does not match the document id (C1)', async () => {
-  await assertFails(setDoc(doc(asKu(), 'courses/c_mismatch'), validCourse('c_something_else')));
+  await assertFails(setDoc(doc(asKu(), 'courses/c_custom_105'), validCourse('c_custom_106')));
 });
 
 test('course create is rejected for an out-of-range period (C1)', async () => {
-  await assertFails(setDoc(doc(asKu(), 'courses/c_p0'), validCourse('c_p0', { period: 0 })));
-  await assertFails(setDoc(doc(asKu(), 'courses/c_p6'), validCourse('c_p6', { period: 6 })));
+  await assertFails(setDoc(doc(asKu(), 'courses/c_custom_107'), validCourse('c_custom_107', { period: 0 })));
+  await assertFails(setDoc(doc(asKu(), 'courses/c_custom_108'), validCourse('c_custom_108', { period: 6 })));
 });
 
 test('course create is rejected when `period` is not an int (C1)', async () => {
-  await assertFails(setDoc(doc(asKu(), 'courses/c_pstr'), validCourse('c_pstr', { period: '2' })));
-  await assertFails(setDoc(doc(asKu(), 'courses/c_pnum'), validCourse('c_pnum', { period: 2.5 })));
+  await assertFails(setDoc(doc(asKu(), 'courses/c_custom_109'), validCourse('c_custom_109', { period: '2' })));
+  await assertFails(setDoc(doc(asKu(), 'courses/c_custom_110'), validCourse('c_custom_110', { period: 2.5 })));
 });
 
 test('course create is rejected for a weekend dayOfWeek (C1)', async () => {
-  await assertFails(setDoc(doc(asKu(), 'courses/c_sat'), validCourse('c_sat', { dayOfWeek: 'Sat' })));
+  await assertFails(setDoc(doc(asKu(), 'courses/c_custom_111'), validCourse('c_custom_111', { dayOfWeek: 'Sat' })));
 });
 
 test('course create is rejected when `courseKey` is missing (C1)', async () => {
-  const data = validCourse('c_nokey');
+  const data = validCourse('c_custom_112');
   delete data.courseKey;
-  await assertFails(setDoc(doc(asKu(), 'courses/c_nokey'), data));
+  await assertFails(setDoc(doc(asKu(), 'courses/c_custom_112'), data));
 });
 
 test('course create is rejected for a non-string `lecturer` (C1)', async () => {
-  await assertFails(setDoc(doc(asKu(), 'courses/c_lec'), validCourse('c_lec', { lecturer: 123 })));
+  await assertFails(setDoc(doc(asKu(), 'courses/c_custom_113'), validCourse('c_custom_113', { lecturer: 123 })));
 });
 
 test('course create is rejected for a non-string `faculty` (C1)', async () => {
-  await assertFails(setDoc(doc(asKu(), 'courses/c_fac'), validCourse('c_fac', { faculty: [] })));
+  await assertFails(setDoc(doc(asKu(), 'courses/c_custom_114'), validCourse('c_custom_114', { faculty: [] })));
+});
+
+// P2-13: client-created courses must be recognisable. The reviewCreated trigger
+// pays the scarce-course bonus only for catalog courses, i.e. ids that do NOT
+// start with `c_custom_`; the rule pins client-created ids to that namespace.
+test('course create is rejected outside the c_custom_<millis> id namespace (P2-13)', async () => {
+  await assertFails(setDoc(doc(asKu(), 'courses/c_a2936c7a40d9318f'), validCourse('c_a2936c7a40d9318f')));
+  await assertFails(setDoc(doc(asKu(), 'courses/c_custom_x'), validCourse('c_custom_x')));
+  await assertFails(setDoc(doc(asKu(), 'courses/c_custom_'), validCourse('c_custom_')));
+  await assertSucceeds(setDoc(doc(asKu(), 'courses/c_custom_1760000000000'), validCourse('c_custom_1760000000000')));
 });
 
 // --- reads require a KU-domain address (I3) ----------------------------------

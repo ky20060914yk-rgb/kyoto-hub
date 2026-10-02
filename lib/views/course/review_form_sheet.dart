@@ -214,7 +214,7 @@ class _ReviewFormSheetBodyState extends State<_ReviewFormSheetBody> {
             ),
             const SizedBox(height: 6),
             const Text(
-              '最初の3件のレビューは +2クレジット、レビューの少ない科目なら さらに +1クレジット',
+              '最初の3件のレビューは +2クレジット、レビューの少ない科目（自分で追加した科目を除く）なら さらに +1クレジット',
               style: TextStyle(fontSize: 11.5, color: Color(0xFF92400E)),
             ),
             const SizedBox(height: 14),
