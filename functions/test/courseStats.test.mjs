@@ -34,7 +34,7 @@ test('rakutanScore: neutral 50 with no reviews, clamps at 0 and at 100', () => {
   assert.equal(aggregateCourseStats('k', [], NO_POSTS).score, 50);
   assert.equal(aggregateCourseStats('k', [{ rating: 1, rakutan: 'muzu', attendance: 'heavy' }], NO_POSTS).score, 0);
   assert.equal(aggregateCourseStats('k', [{ rating: 5, rakutan: 'raku', attendance: 'none' }], NO_POSTS).score, 100);
-  assert.equal(rakutanScore(fixture.expected), 63.75);
+  assert.equal(rakutanScore(fixture.expected), 53.57142857142857);
 });
 
 test('an empty course: zero counters, every bucket key present, no lastReviewAt', () => {
@@ -147,4 +147,22 @@ test('handlePostWritten resolves subjectId -> courseKey; an unknown course is sk
   assert.equal((await statsDoc(ck)).pastExamPostCount, 1);
   assert.deepEqual(await handlePostWritten(db, p, { ...p, downloadCount: 5 }), []);
   assert.deepEqual(await handlePostWritten(db, undefined, { subjectId: uid('nocourse'), category: 'past_exam' }), []);
+});
+
+test('lastReviewAt takes only ISO-8601 updatedAt strings (Dart tryParse parity); V8-only formats are ignored', () => {
+  const out = aggregateCourseStats('k', [
+    { updatedAt: 'Sep 1 2030' }, { updatedAt: '2030' }, { updatedAt: 12345 }, { updatedAt: '2026-09-01T10:00:00.000' },
+  ], NO_POSTS);
+  assert.equal(out.lastReviewAt, '2026-09-01T10:00:00.000');
+  assert.equal('lastReviewAt' in aggregateCourseStats('k', [{ updatedAt: 'Sep 1 2030' }], NO_POSTS), false);
+});
+
+test('keys whose slug is not a usable document id are never recounted', async () => {
+  assert.deepEqual(reviewStatsKeys(undefined, { courseKey: '__bad__', rating: 3 }), []);
+  assert.deepEqual(reviewStatsKeys(undefined, { courseKey: 'x'.repeat(201), rating: 3 }), []);
+  assert.deepEqual(reviewStatsKeys(undefined, { courseKey: 'ok|key', rating: 3 }), ['ok|key']);
+  const id = uid('c');
+  await db.collection('courses').doc(id).set({ id, courseKey: '__bad__', name: 'n', university_id: 'kyoto_u' });
+  assert.deepEqual(await handlePostWritten(db, undefined, { subjectId: id, category: 'past_exam' }), []);
+  await assert.rejects(recomputeCourseStats(db, '__bad__'));
 });

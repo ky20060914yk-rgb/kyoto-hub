@@ -1,22 +1,131 @@
 {
   "courseKey": "parity|山田太郎",
   "reviews": [
-    { "courseKey": "parity|山田太郎", "authorId": "a", "rating": 5, "rakutan": "raku", "attendance": "none", "grading": "exam_only", "pastExam": "as_is", "bringIn": "no", "createdAt": "2026-09-01T10:00:00.000", "updatedAt": "2026-09-01T10:00:00.000" },
-    { "courseKey": "parity|山田太郎", "authorId": "b", "rating": 2, "rakutan": "muzu", "attendance": "heavy", "grading": "report_mainly", "pastExam": "not_useful", "bringIn": "yes", "createdAt": "2026-09-03T09:00:00.000", "updatedAt": "2026-09-03T09:00:00.000" },
-    { "courseKey": "parity|山田太郎", "authorId": "c", "rating": 4, "rakutan": "raku", "attendance": "light", "grading": "exam_report", "pastExam": "similar", "bringIn": "na", "createdAt": "2026-09-02T08:00:00.000", "updatedAt": "2026-09-02T08:00:00.000" },
-    { "courseKey": "parity|山田太郎", "authorId": "d", "rating": 9, "rakutan": "zzz", "grading": 42, "pastExam": null, "bringIn": "NO", "createdAt": "2026-08-30T00:00:00.000", "updatedAt": "2026-08-30T00:00:00.000" }
+    {
+      "courseKey": "parity|山田太郎",
+      "authorId": "a",
+      "rating": 5,
+      "rakutan": "raku",
+      "attendance": "none",
+      "grading": "exam_only",
+      "pastExam": "as_is",
+      "bringIn": "no",
+      "createdAt": "2026-09-01T10:00:00.000",
+      "updatedAt": "2026-09-01T10:00:00.000"
+    },
+    {
+      "courseKey": "parity|山田太郎",
+      "authorId": "b",
+      "rating": 2,
+      "rakutan": "muzu",
+      "attendance": "heavy",
+      "grading": "report_mainly",
+      "pastExam": "not_useful",
+      "bringIn": "yes",
+      "createdAt": "2026-09-03T09:00:00.000",
+      "updatedAt": "2026-09-03T09:00:00.000"
+    },
+    {
+      "courseKey": "parity|山田太郎",
+      "authorId": "c",
+      "rating": 4,
+      "rakutan": "raku",
+      "attendance": "light",
+      "grading": "exam_report",
+      "pastExam": "similar",
+      "bringIn": "na",
+      "createdAt": "2026-09-02T08:00:00.000",
+      "updatedAt": "2026-09-02T08:00:00.000"
+    },
+    {
+      "courseKey": "parity|山田太郎",
+      "authorId": "d",
+      "rating": 9,
+      "rakutan": "zzz",
+      "grading": 42,
+      "pastExam": null,
+      "bringIn": "NO",
+      "createdAt": "2026-08-30T00:00:00.000",
+      "updatedAt": "2026-08-30T00:00:00.000"
+    },
+    {
+      "courseKey": "parity|山田太郎",
+      "authorId": "e",
+      "rating": "5",
+      "rakutan": [
+        "raku"
+      ],
+      "attendance": [
+        "none"
+      ],
+      "grading": "exam_report",
+      "pastExam": "trend_only",
+      "bringIn": "na",
+      "createdAt": "2026-08-01T00:00:00.000",
+      "updatedAt": "2026-08-01T00:00:00.000"
+    },
+    {
+      "courseKey": "parity|山田太郎",
+      "authorId": "f",
+      "rating": 3.7,
+      "rakutan": "futsu",
+      "attendance": "light",
+      "grading": {
+        "x": 1
+      },
+      "pastExam": "trend_only",
+      "bringIn": [
+        "yes"
+      ],
+      "createdAt": "2026-08-01T00:00:00.000",
+      "updatedAt": "2026-08-01T00:00:00.000"
+    },
+    {
+      "courseKey": "parity|山田太郎",
+      "authorId": "g",
+      "rating": -2,
+      "rakutan": "futsu",
+      "attendance": "light",
+      "grading": "exam_report",
+      "pastExam": 7,
+      "bringIn": "na",
+      "createdAt": "2026-08-01T00:00:00.000",
+      "updatedAt": "2026-08-02T00:00:00.000"
+    }
   ],
   "expected": {
     "courseKey": "parity|山田太郎",
     "university_id": "kyoto_u",
-    "reviewCount": 4,
-    "ratingSum": 16,
-    "rakutanCounts": { "raku": 2, "futsu": 1, "muzu": 1 },
-    "attendanceCounts": { "none": 1, "light": 2, "heavy": 1 },
-    "gradingCounts": { "exam_only": 1, "exam_report": 2, "report_mainly": 1, "attendance_heavy": 0 },
-    "pastExamCounts": { "as_is": 1, "similar": 1, "trend_only": 1, "not_useful": 1 },
-    "bringInCounts": { "no": 1, "yes": 1, "na": 2 },
+    "reviewCount": 7,
+    "ratingSum": 19,
+    "rakutanCounts": {
+      "raku": 2,
+      "futsu": 4,
+      "muzu": 1
+    },
+    "attendanceCounts": {
+      "none": 1,
+      "light": 5,
+      "heavy": 1
+    },
+    "gradingCounts": {
+      "exam_only": 1,
+      "exam_report": 5,
+      "report_mainly": 1,
+      "attendance_heavy": 0
+    },
+    "pastExamCounts": {
+      "as_is": 1,
+      "similar": 1,
+      "trend_only": 4,
+      "not_useful": 1
+    },
+    "bringInCounts": {
+      "no": 1,
+      "yes": 1,
+      "na": 5
+    },
     "lastReviewAt": "2026-09-03T09:00:00.000",
-    "score": 64
+    "score": 54
   }
 }

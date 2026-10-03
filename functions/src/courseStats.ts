@@ -39,17 +39,21 @@ export interface CourseStatsDoc {
 
 export interface PostCounts { pastExam: number; resource: number }
 
+const ISO_8601 = /^\d{4}-\d{2}-\d{2}([T ]\d{2}:\d{2}(:\d{2}(\.\d+)?)?(Z|[+-]\d{2}(:?\d{2})?)?)?$/;
+
 /** Review._rating: a whole number clamped to 0..5; anything else is 0. */
 const rating = (v: unknown): number => {
   const n = typeof v === 'number' && Number.isFinite(v) ? Math.trunc(v) : 0;
   return n < 0 ? 0 : n > 5 ? 5 : n;
 };
 
-/** `XxxX.fromString(map[k]?.toString() ?? '')`: an unknown value takes the enum's default. */
-const bucketValue = (b: Bucket, v: unknown): string => {
-  const s = v === null || v === undefined ? '' : String(v);
-  return BUCKETS[b].keys.includes(s) ? s : BUCKETS[b].fallback;
-};
+/**
+ * `XxxX.fromString(map[k]?.toString() ?? '')`: an unknown value takes the enum's
+ * default. Only a STRING can match (an array's toString() is never an enum key
+ * in Dart; JS String(['raku']) would be), so anything else takes the fallback.
+ */
+const bucketValue = (b: Bucket, v: unknown): string =>
+  typeof v === 'string' && BUCKETS[b].keys.includes(v) ? v : BUCKETS[b].fallback;
 
 /** CourseStats.rakutanScore (unrounded). Same operations, same order => bit-identical doubles. */
 export function rakutanScore(
@@ -76,7 +80,9 @@ export function aggregateCourseStats(courseKey: string, reviews: DocumentData[],
     ratingSum += rating(r.rating);
     for (const b of BUCKET_NAMES) counts[b][bucketValue(b, r[b])] += 1;
     const raw = typeof r.updatedAt === 'string' ? r.updatedAt : '';
-    const ms = Date.parse(raw);
+    // Only ISO-8601 (what Dart's DateTime.tryParse accepts and `toMap` writes);
+    // V8's Date.parse also takes "Sep 1 2030", which would diverge.
+    const ms = ISO_8601.test(raw) ? Date.parse(raw) : NaN;
     if (!Number.isNaN(ms) && (last === null || ms > last.ms)) last = { ms, raw }; // M-13
   }
   const doc: CourseStatsDoc = {
@@ -131,7 +137,7 @@ export async function computeCourseStats(db: Firestore, courseKey: string): Prom
  * last writer always counted after the last committed source write.
  */
 export async function recomputeCourseStats(db: Firestore, courseKey: string): Promise<CourseStatsDoc> {
-  if (!courseKey) throw new Error('recomputeCourseStats: empty courseKey');
+  if (!isDocId(reviewSlug(courseKey))) throw new Error('recomputeCourseStats: unusable courseKey');
   const ref = statsRef(db, courseKey);
   return db.runTransaction(async (tx) => {
     await tx.get(ref);
@@ -150,7 +156,7 @@ export function reviewStatsKeys(before?: DocumentData, after?: DocumentData): st
   if (before && after && REVIEW_STATS_FIELDS.every((f) => same(before[f], after[f]))) return [];
   const keys = new Set<string>();
   for (const d of [before, after]) {
-    if (typeof d?.courseKey === 'string' && d.courseKey !== '') keys.add(d.courseKey);
+    if (typeof d?.courseKey === 'string' && isDocId(reviewSlug(d.courseKey))) keys.add(d.courseKey);
   }
   return [...keys];
 }
@@ -175,7 +181,7 @@ export async function handlePostWritten(db: Firestore, before?: DocumentData, af
   const keys = new Set<string>();
   for (const id of postStatsSubjects(before, after)) {
     const ck = (await db.collection('courses').doc(id).get()).get('courseKey');
-    if (typeof ck === 'string' && ck !== '') keys.add(ck);
+    if (typeof ck === 'string' && isDocId(reviewSlug(ck))) keys.add(ck);
   }
   for (const k of keys) await recomputeCourseStats(db, k);
   return [...keys];
