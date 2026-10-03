@@ -76,3 +76,22 @@ Every mutating command is a dry run unless `--apply --operator <name>` is given;
 the operator name goes into `moderation_log`. `strip-legacy-reports` removes the
 pre-2B `posts.reports` arrays (they exposed reporter uids). Build first:
 `npm --prefix functions run build`. Emulator test: `bash test_moderate.sh`.
+
+## chat migration (Plan 3)
+
+Talk rooms used to keep every message in one `messages` array on the room
+document, and a room was client-writable. `migrate_chats.mjs` moves each array
+into the `talk_rooms/{id}/messages` subcollection (deterministic ids
+`legacy_NNNN`, only the four fields the new rules allow), keeps a preview of the
+last message with both read markers on it, and deletes the array in the same
+batch as the last messages. It also **resets every room that existed before the
+deploy** (summary, `lenderSent`/`borrowerSent`, `listingId`/`listingType`),
+because those fields could have been forged by a client: a migrated room is a
+legacy room and can never unlock a rating. "Before the deploy" is decided by
+the room's Firestore `createTime` against the moment of the first `--apply`
+(`admin_migrations/chats`; handled rooms are listed under
+`admin_migrations/chats/rooms`, Admin-only), so a re-run never touches a room
+created after it. Run it before the hosting deploy. Dry run by default;
+`--apply` writes; `--project` is required; idempotent and safe to re-run after a
+crash. Legacy times without an offset are read as JST. Credentials: Application
+Default Credentials only. Emulator test: `bash test_migrate_chats.sh`.
