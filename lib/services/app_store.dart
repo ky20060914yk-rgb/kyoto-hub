@@ -1,4 +1,5 @@
 import 'package:flutter/foundation.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart' as fb_auth;
 import 'dart:async';
 import 'dart:math';
@@ -32,8 +33,13 @@ class AppStore extends ChangeNotifier {
   /// Client-side rankings over course_stats pool.
   final RankingService ranking;
 
-  final FirestoreService _firestore = FirestoreService();
-  final fb_auth.FirebaseAuth _firebaseAuth = fb_auth.FirebaseAuth.instance;
+  /// Plan 3 (Task 9): injectable so tests run AppStore on `fake_cloud_firestore`.
+  final FirebaseFirestore _db;
+  late final FirestoreService _firestore = FirestoreService(_db);
+
+  /// Resolved on use, not at construction: a test (no Firebase app) can build an
+  /// AppStore; `_initFirebaseSync` then fails inside its own try/catch.
+  fb_auth.FirebaseAuth get _firebaseAuth => fb_auth.FirebaseAuth.instance;
 
   UserProfile? currentUser;
   Map<String, String> userTimetable = {};
@@ -129,7 +135,8 @@ class AppStore extends ChangeNotifier {
     }
   }
 
-  AppStore(this.courses, this.reviews, this.ranking, this.credits, this.moderation) {
+  AppStore(this.courses, this.reviews, this.ranking, this.credits, this.moderation, {FirebaseFirestore? db})
+      : _db = db ?? FirebaseFirestore.instance {
     // _initSampleData(); // Commented out for production release
     _initFirebaseSync();
   }

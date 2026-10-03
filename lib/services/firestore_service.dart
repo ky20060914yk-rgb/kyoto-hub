@@ -8,7 +8,10 @@ import 'talk_room_queries.dart';
 import '../models/inquiry.dart';
 
 class FirestoreService {
-  final FirebaseFirestore _db = FirebaseFirestore.instance;
+  /// Plan 3 (Task 9): the database is injectable so AppStore's behaviour can be
+  /// pinned against `fake_cloud_firestore`; production passes the default.
+  FirestoreService([FirebaseFirestore? db]) : _db = db ?? FirebaseFirestore.instance;
+  final FirebaseFirestore _db;
   static const String universityId = 'kyoto_u';
 
   // --- 1. USER PROFILE ---
