@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { test, before, after } from 'node:test';
 import { initializeTestEnvironment, assertFails, assertSucceeds } from '@firebase/rules-unit-testing';
-import { ref, uploadBytes, getBytes, deleteObject } from 'firebase/storage';
+import { ref, uploadBytes, getBytes, deleteObject, listAll } from 'firebase/storage';
 
 let env;
 before(async () => {
@@ -95,4 +95,14 @@ test('listing photos: any KU address may read; outsiders and anonymous may not; 
   await assertFails(getBytes(ref(env.unauthenticatedContext().storage(), 'listings/u1/seeded.jpg')));
   await assertFails(uploadBytes(ref(st('u1', KU), 'listings/u1/seeded.jpg'), bytes, jpeg));
   await assertFails(deleteObject(ref(st('u1', KU), 'listings/u1/seeded.jpg')));
+});
+
+test('listing photos: a KU address can GET a known object but cannot LIST the folders (no enumeration of every photo)', async () => {
+  await env.withSecurityRulesDisabled(async (ctx) => {
+    await uploadBytes(ref(ctx.storage(), 'listings/u1/listed.jpg'), bytes, jpeg);
+  });
+  await assertSucceeds(getBytes(ref(st('u2', KU_UNVERIFIED), 'listings/u1/listed.jpg')));
+  await assertFails(listAll(ref(st('u2', KU_UNVERIFIED), 'listings/u1')));
+  await assertFails(listAll(ref(st('u1', KU), 'listings/u1')));
+  await assertFails(listAll(ref(st('u1', KU), 'listings')));
 });

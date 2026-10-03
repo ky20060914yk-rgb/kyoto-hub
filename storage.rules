@@ -41,7 +41,8 @@ service firebase.storage {
     // overwrite or delete (operator removal cleans up via onListingDeleted).
     // SVG and every non-image type are refused (script-capable / not a photo).
     match /listings/{uid}/{file} {
-      allow read: if kuDomain();
+      // `get` only: a KU address can fetch an object whose path it knows (from a listing), never enumerate them.
+      allow get: if kuDomain();
       allow create: if resource == null
         && kuVerified()
         && request.auth.uid == uid
