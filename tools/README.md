@@ -55,3 +55,14 @@ node migrate_ids.mjs --project kyodai-sns              # apply
 
 `ku_custom_*` ids never existed in the catalog and are left untouched (the run
 reports how many it saw). Emulator test: `bash test_migrate.sh`.
+
+## course_stats recount (Plan 2B)
+
+`course_stats` is maintained by the `onReviewWritten` / `onPostWritten` Cloud
+Functions. `backfill_course_stats.mjs` runs the same recount (the compiled
+`functions/lib/courseStats.js`) over every course: once after the 2B deploy, and
+any time to repair drift. Dry run by default; `--apply` writes;
+`--apply --prune-orphans` also deletes aggregates no Function can own.
+Build first: `npm --prefix functions run build`. Emulator test:
+`bash test_backfill_course_stats.sh`. (Replaces the removed
+`backfill_post_counts.mjs`.)
