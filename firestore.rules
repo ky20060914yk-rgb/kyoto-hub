@@ -184,6 +184,9 @@ service cloud.firestore {
         allow create: if kuVerified()
           && roomParty(get(/databases/$(database)/documents/talk_rooms/$(id)).data)
           && get(/databases/$(database)/documents/talk_rooms/$(id)).data.get('closedBy', null) == null
+          // A block ends EVERY room of the pair, whichever side opened it (market_blocks/{blocker}_{blocked}, T-17).
+          && !exists(/databases/$(database)/documents/market_blocks/$(get(/databases/$(database)/documents/talk_rooms/$(id)).data.lenderId + '_' + get(/databases/$(database)/documents/talk_rooms/$(id)).data.borrowerId))
+          && !exists(/databases/$(database)/documents/market_blocks/$(get(/databases/$(database)/documents/talk_rooms/$(id)).data.borrowerId + '_' + get(/databases/$(database)/documents/talk_rooms/$(id)).data.lenderId))
           && request.resource.data.keys().hasOnly(['senderId', 'text', 'createdAt', 'university_id'])
           && request.resource.data.senderId == request.auth.uid
           && request.resource.data.text is string

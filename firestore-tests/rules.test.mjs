@@ -227,6 +227,11 @@ beforeEach(async () => {
     await setDoc(doc(db, 'talk_rooms/room_closed'), {
       lenderId: 'u1', borrowerId: 'u2', university_id: 'kyoto_u', closedBy: 'u2',
     });
+    // A pair (u1, u8) that blocked each other in ONE room: their other rooms are open documents (no closedBy) in
+    // both lender/borrower orderings, but the uid-keyed block doc `market_blocks/u8_u1` must refuse messages there.
+    await setDoc(doc(db, 'talk_rooms/room_b1'), { lenderId: 'u1', borrowerId: 'u8', university_id: 'kyoto_u', closedBy: null });
+    await setDoc(doc(db, 'talk_rooms/room_b2'), { lenderId: 'u8', borrowerId: 'u1', university_id: 'kyoto_u', closedBy: null });
+    await setDoc(doc(db, 'market_blocks/u8_u1'), { blocker: 'u8', blocked: 'u1', university_id: 'kyoto_u' });
     await setDoc(doc(db, 'textbook_listings/l_1'), {
       id: 'l_1', ownerId: 'u1', type: 'sell', title: '線形代数入門', status: 'active', price: 1500,
       expiresAt: Timestamp.fromMillis(Date.now() + 86400000), university_id: 'kyoto_u',
@@ -667,6 +672,16 @@ test('messages: immutable — no edit, no delete, not even by the sender (3)', a
 test('messages: a closed (blocked) room accepts nothing from either side (3, T-17)', async () => {
   await assertFails(setDoc(doc(asKu(), 'talk_rooms/room_closed/messages/c1'), goodMsg()));
   await assertFails(setDoc(doc(asKu2(), 'talk_rooms/room_closed/messages/c2'), goodMsg({ senderId: 'u2' })));
+});
+
+test('messages: a uid-keyed block between the parties refuses messages in EVERY room of the pair, both orderings (IMPORTANT 1)', async () => {
+  const u8 = () => env.authenticatedContext('u8', { sub: 'u8', email: 'h@st.kyoto-u.ac.jp', email_verified: true }).firestore();
+  for (const room of ['room_b1', 'room_b2']) {
+    await assertFails(setDoc(doc(asKu(), `talk_rooms/${room}/messages/x1`), goodMsg()));
+    await assertFails(setDoc(doc(u8(), `talk_rooms/${room}/messages/x2`), goodMsg({ senderId: 'u8' })));
+  }
+  // the block is about that pair only: the unrelated room_1 (u1, u2) still accepts messages
+  await assertSucceeds(setDoc(doc(asKu(), 'talk_rooms/room_1/messages/x3'), goodMsg()));
 });
 
 // --- talk_rooms: participants only (Plan 2B, M-15) --------------------------

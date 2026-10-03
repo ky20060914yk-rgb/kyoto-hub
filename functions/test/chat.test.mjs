@@ -63,6 +63,27 @@ test('T-17: block closes the room for both and stops new chats in either directi
   await assert.rejects(processOpenChat(db, as(owner), { listingId: theirs }, NOW), (e) => e.message === 'blocked');
 });
 
+test('IMPORTANT 1: block closes EVERY room between the two users, both orderings, idempotently', async () => {
+  const { owner, buyer, listingId } = await setup();
+  const second = (await processCreateListing(db, as(owner), LISTING(), NOW)).listingId;
+  const theirs = (await processCreateListing(db, as(buyer), LISTING(), NOW)).listingId;
+  const r1 = (await processOpenChat(db, as(buyer), { listingId }, NOW)).roomId;
+  const r2 = (await processOpenChat(db, as(buyer), { listingId: second }, NOW)).roomId; // same ordering
+  const r3 = (await processOpenChat(db, as(owner), { listingId: theirs }, NOW)).roomId; // reversed ordering
+  // an unrelated room of the owner stays open
+  const other = await seedUser(uid('c'));
+  const otherListing = (await processCreateListing(db, as(owner), LISTING(), NOW)).listingId;
+  const r4 = (await processOpenChat(db, as(other), { listingId: otherListing }, NOW)).roomId;
+  assert.deepEqual(await processBlockRoom(db, as(buyer), { roomId: r1 }), { changed: true });
+  for (const r of [r1, r2, r3]) assert.equal((await get(`talk_rooms/${r}`)).get('closedBy'), buyer, r);
+  assert.equal((await get(`talk_rooms/${r4}`)).get('closedBy'), null);
+  assert.deepEqual(await processBlockRoom(db, as(owner), { roomId: r3 }), { changed: false });
+  // a room opened by a crashed earlier call (block recorded, room still open) is closed on the retry
+  await db.doc(`talk_rooms/${r2}`).update({ closedBy: null });
+  assert.deepEqual(await processBlockRoom(db, as(owner), { roomId: r1 }), { changed: true });
+  assert.equal((await get(`talk_rooms/${r2}`)).get('closedBy'), owner);
+});
+
 test('T-18: the message trigger keeps a monotonic summary and records who has spoken', async () => {
   const { owner, buyer, listingId } = await setup();
   const { roomId } = await processOpenChat(db, as(buyer), { listingId }, NOW);

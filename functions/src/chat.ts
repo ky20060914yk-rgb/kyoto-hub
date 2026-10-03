@@ -1,4 +1,4 @@
-import { FieldValue, type DocumentData, type Firestore } from 'firebase-admin/firestore';
+import { FieldValue, type DocumentData, type DocumentReference, type Firestore } from 'firebase-admin/firestore';
 import { HttpsError } from 'firebase-functions/v2/https';
 import { UNIVERSITY_ID, isDocId, jstDay } from './common.js';
 import {
@@ -9,6 +9,7 @@ import { refreshReputation } from './ratings.js';
 
 export { roomIdFor };
 
+const ROOMS_PER_PAIR_MAX = 200;
 const CLOCK_SKEW_MS = 60_000; // trigger clock vs. server timestamp
 
 export const ROOM_WARNING =
@@ -101,14 +102,29 @@ export async function processBlockRoom(
     if (typeof other !== 'string' || other === '') throw new HttpsError('permission-denied', 'not-participant');
     const myKey = callerKey(caller);
     const otherKey = keyFromIdentity(await tx.get(identityRef(db, other)), other);
-    if (r.closedBy) return { changed: false };
-    tx.update(roomRef(db, roomId), { closedBy: caller.uid, closedAt: FieldValue.serverTimestamp() });
-    tx.set(blockRef(db, caller.uid, other), {
-      blocker: caller.uid, blocked: other, roomId, createdAt: FieldValue.serverTimestamp(), university_id: UNIVERSITY_ID,
-    });
-    tx.set(mailboxBlockRef(db, myKey, otherKey), {
-      blockerKey: myKey, blockedKey: otherKey, roomId, createdAt: FieldValue.serverTimestamp(), university_id: UNIVERSITY_ID,
-    });
+    // The block is about the PAIR: every room between them, in both lender/borrower orderings, is closed
+    // (bounded: ROOMS_PER_PAIR_MAX per ordering; a pair cannot hold more than ~one room per listing x requester).
+    const [mine, theirs, uidBlock, keyBlock] = await Promise.all([
+      tx.get(db.collection('talk_rooms').where('lenderId', '==', caller.uid).where('borrowerId', '==', other).limit(ROOMS_PER_PAIR_MAX)),
+      tx.get(db.collection('talk_rooms').where('lenderId', '==', other).where('borrowerId', '==', caller.uid).limit(ROOMS_PER_PAIR_MAX)),
+      tx.get(blockRef(db, caller.uid, other)),
+      tx.get(mailboxBlockRef(db, myKey, otherKey)),
+    ]);
+    const open = new Map<string, DocumentReference>();
+    for (const d of [...mine.docs, ...theirs.docs]) if (!d.get('closedBy')) open.set(d.id, d.ref);
+    if (!r.closedBy) open.set(roomId, roomRef(db, roomId));
+    if (open.size === 0) return { changed: false }; // everything between them is already closed (a block is written together with its closes)
+    for (const ref of open.values()) tx.update(ref, { closedBy: caller.uid, closedAt: FieldValue.serverTimestamp() });
+    if (!uidBlock.exists) {
+      tx.set(blockRef(db, caller.uid, other), {
+        blocker: caller.uid, blocked: other, roomId, createdAt: FieldValue.serverTimestamp(), university_id: UNIVERSITY_ID,
+      });
+    }
+    if (!keyBlock.exists) {
+      tx.set(mailboxBlockRef(db, myKey, otherKey), {
+        blockerKey: myKey, blockedKey: otherKey, roomId, createdAt: FieldValue.serverTimestamp(), university_id: UNIVERSITY_ID,
+      });
+    }
     return { changed: true };
   });
 }
