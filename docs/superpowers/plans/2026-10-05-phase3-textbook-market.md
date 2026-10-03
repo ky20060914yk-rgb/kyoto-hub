@@ -83,6 +83,19 @@ Resolved 2B rulings carried forward: **M-15** (participant-only rooms — unchan
 | Operator terminal injection | ESC sequences in titles / case details | `safeText` | moderate market `listcheck` (T15) |
 | Oversharing | Phone number in a public listing | Warnings in form and chat | MarketService + widget tests (T11, T13) |
 
+## Amendments made in review (authoritative over the code blocks below)
+
+Round 1 fixes, implemented in `functions/` with tests (the code blocks in Tasks 1-7 below are the ORIGINAL text; where they differ, this note and the committed code win):
+
+- **I-1** `rateDeal` verifies inside its transaction that `roomId === roomIdFor(listingId, borrowerId)` and that the listing exists with `ownerId === lenderId` (an operator-removed listing falls back to the `market_queue/{listingId}` tombstone's `ownerId`); anything else is `legacy-room`. `roomIdFor` moved to `marketCore.ts` (re-exported from `chat.ts`). `handleMessageCreated(db, roomId, msg, now?)` ignores a stored `lastMessageAt` more than 60 s in the future.
+- **I-2** Blocks are stored twice: `market_blocks/{blockerUid}_{blockedUid}` (operator) and `market_blocks/mb_{blockerKey}_{blockedKey}` (mailbox, `mailboxBlockRef`). `processOpenChat` and `handleListingCreated` check all four directions/keys; a re-signup does not shed a block.
+- **I-3** `rateDeal` refuses `failed-precondition 'rating-closed'` when the other side's rating is >= 14 days old (13.9 days accepted, exactly 14 refused).
+- **I-4** The 買いたい match query adds `where('expiresAt','>',now).orderBy('expiresAt','desc')`; **Task 8's `firestore.indexes.json` gains** `textbook_listings: type ASC, status ASC, expiresAt DESC` (already committed in `firestore.indexes.json`; Task 8 must keep it).
+- **I-5** `sanitizeLine`/`sanitizeText` strip `\p{Cc}`, `\p{Cf}` and the blank fillers U+3164/U+115F/U+1160/U+2800 (tab and newline are kept for folding); `displayNameFor` compares after NFKC and removing whitespace and Cf, and 運營 joins the reserved list; an invisible-only title is rejected.
+- **Minor** M-1/M-2 reputation recounts in `openListingChat` (only when a room was created) and `rateDeal` are best-effort; M-3 slices by code point (`clip`); M-4 re-filing after a closed case writes a NEW case `{roomId}_{side}_{n}` and never touches the closed one (duplicate = any open case of that reporter in that room); M-5 `removeListing` is idempotent (`{changed:false}` via the `removed` tombstone); M-6 titles match only if the shorter is >= 50% of the longer; M-7 own-listing and self-rating compare the mailbox key too (`reportMarket` as well).
+- **Task 14 (`migrate_chats`) MUST** reset `lastMessageText`/`lastMessageAt`/`lastSenderId`, `lenderSent`/`borrowerSent` and every listingId-derived claim on EVERY room that existed before the deploy (not only rooms with a `messages` array): pre-deploy rooms were client-writable and must not be trusted — the fixture's `new1` room that keeps `listingId: 'L'` must be reset too, and pre-deploy rooms never unlock a rating until real post-deploy messages set the flags.
+- **Rulings:** T-17 now says "block by uid AND mailbox"; T-10 gains "rating refused once the other side's is 14 days old"; no new T-numbers.
+
 ## File Structure
 
 **Created**
