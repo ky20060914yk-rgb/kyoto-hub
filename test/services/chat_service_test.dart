@@ -56,4 +56,25 @@ void main() {
     d = (await db.doc('talk_rooms/r1').get()).data()!;
     expect(d['lenderReadAt'], isNull);
   });
+
+  test('streamSince is live from a point on, oldest first, unbounded (no message can fall out of a window)', () async {
+    final db = FakeFirebaseFirestore();
+    await _seed(db, 'r1', 70);
+    final chat = ChatService(db);
+    final from = DateTime.utc(2027, 4, 1).add(const Duration(minutes: 40));
+    final got = await chat.streamSince('r1', from).first;
+    expect([got.length, got.first.text, got.last.text], [30, 'msg 40', 'msg 69']);
+    await db.collection('talk_rooms/r1/messages').doc('m999').set({
+      'senderId': 'u1', 'text': 'new', 'createdAt': Timestamp.fromDate(DateTime.utc(2027, 5, 1)), 'university_id': 'kyoto_u',
+    });
+    final again = await chat.streamSince('r1', from).first;
+    expect([again.length, again.first.text, again.last.text], [31, 'msg 40', 'new']);
+  });
+
+  test('the length limit counts characters (runes), like the input field: 1000 emoji ok, 1001 refused', () async {
+    final db = FakeFirebaseFirestore();
+    final chat = ChatService(db);
+    expect(await chat.send('r1', 'u1', '😀' * 1000), isTrue);
+    expect(await chat.send('r1', 'u1', '😀' * 1001), isFalse);
+  });
 }

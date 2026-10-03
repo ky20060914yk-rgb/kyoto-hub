@@ -65,19 +65,21 @@ class MarketException implements Exception {
   bool get isNotFound => code == 'not-found';
 
   /// The notice to show for this error.
-  String get notice => isLimit
-      ? '本日の上限に達しました。明日以降にもう一度お試しください。'
-      : isBlocked
-          ? 'この相手とはやりとりできません。'
-          : isListingClosed
-              ? 'この出品は受付を終了しています。'
-              : isNotFound
-                  ? '見つかりませんでした。削除された可能性があります。'
-                  : message.contains('no-exchange')
-                      ? '双方がメッセージを送った取引だけ評価できます。'
-                      : message.contains('too-early')
-                          ? '掲載期限の7日前から延長できます。'
-                          : '処理に失敗しました。メール認証の状態と通信環境を確認してください。';
+  String get notice {
+    if (isLimit) return '本日の上限に達しました。明日以降にもう一度お試しください。';
+    if (isBlocked) return 'この相手とはやりとりできません。';
+    if (isListingClosed) return 'この出品は受付を終了しています。';
+    if (isNotFound) return '見つかりませんでした。削除された可能性があります。';
+    if (message.contains('no-exchange')) return '双方がメッセージを送った取引だけ評価できます。';
+    if (message.contains('too-early')) return '掲載期限の7日前から延長できます。';
+    if (message.contains('rating-closed')) return '相手の評価がすでに公開されたため、この取引は評価できません。';
+    if (message.contains('own-listing')) return '自分の出品にはトークを開始したり報告したりできません。';
+    if (message.contains('legacy-room')) return '以前のしくみのトークルームのため、評価できません。';
+    if (message.contains('self')) return '自分自身を評価することはできません。';
+    if (message.contains('not-active')) return 'この出品は受付中ではないため、変更できません。';
+    if (message.contains('expired')) return 'この出品は掲載期限が切れています。';
+    return '処理に失敗しました。メール認証の状態と通信環境を確認してください。';
+  }
 
   @override
   String toString() => 'MarketException($code, $message)';
@@ -192,7 +194,7 @@ class MarketService {
 
   /// `listings/<uid>/<millis>_<safe name>` — the only shape storage.rules accept.
   static String photoPath(String uid, String fileName, int millis) =>
-      'listings/$uid/${millis}_${PostRepository.safeFileName(fileName)}';
+      'listings/$uid/${millis}_${PostRepository.safeFileName(fileName).replaceAll(RegExp(r'\.{2,}'), '.')}';
 
   /// The content type of an accepted photo, or null (pdf, gif, svg, … are refused).
   static String? photoContentType(String fileName) {

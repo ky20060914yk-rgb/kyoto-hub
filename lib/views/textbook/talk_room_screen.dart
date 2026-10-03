@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 import '../../models/talk_room.dart';
 import '../../services/app_store.dart';
@@ -23,7 +24,9 @@ class TalkRoomScreen extends StatefulWidget {
 
 class _TalkRoomScreenState extends State<TalkRoomScreen> {
   final _text = TextEditingController();
-  late final Stream<List<ChatMessage>> _latest = widget.store.chat.streamLatest(widget.roomId);
+  late Stream<List<ChatMessage>> _live = widget.store.chat.streamLatest(widget.roomId);
+  bool _switchedToSince = false;
+  DateTime? _markedFor; // the lastMessageAt the read marker was last written for
   List<ChatMessage> _older = const [];
   bool _loadingOlder = false;
   bool _noMoreOlder = false;
@@ -63,7 +66,10 @@ class _TalkRoomScreenState extends State<TalkRoomScreen> {
   }
 
   void _markReadIfNeeded(TalkRoom room) {
-    if (room.isUnreadFor(_me)) store.chat.markRead(room, _me).catchError((_) {});
+    // once per last message: a rebuild (typing, new pages) must not write the marker again
+    if (!room.isUnreadFor(_me) || _markedFor == room.lastMessageAt) return;
+    _markedFor = room.lastMessageAt;
+    store.chat.markRead(room, _me).catchError((_) {});
   }
 
   Future<void> _loadOlder(DateTime before) async {
@@ -74,6 +80,11 @@ class _TalkRoomScreenState extends State<TalkRoomScreen> {
       setState(() {
         _older = [...page, ..._older];
         _noMoreOlder = page.length < ChatService.pageSize;
+        if (!_switchedToSince) {
+          // From now on the live part is "everything since the oldest message shown", never a sliding window.
+          _switchedToSince = true;
+          _live = store.chat.streamSince(widget.roomId, before);
+        }
       });
     } catch (_) {
       _notice('過去のメッセージを読み込めませんでした。');
@@ -87,7 +98,11 @@ class _TalkRoomScreenState extends State<TalkRoomScreen> {
     if (text.trim().isEmpty || _sending) return;
     setState(() => _sending = true);
     try {
-      if (await store.chat.send(room.id, _me, text)) _text.clear();
+      if (await store.chat.send(room.id, _me, text)) {
+        _text.clear();
+      } else {
+        _notice('送信できませんでした。メッセージは1〜$kChatMaxMessage文字で入力してください。');
+      }
     } catch (_) {
       _notice('送信できませんでした。メール認証の状態と通信環境を確認してください。');
     } finally {
@@ -292,13 +307,13 @@ class _TalkRoomScreenState extends State<TalkRoomScreen> {
             ),
           Expanded(
             child: StreamBuilder<List<ChatMessage>>(
-              stream: _latest,
+              stream: _live,
               builder: (context, snap) {
                 final latest = snap.data ?? const <ChatMessage>[];
                 WidgetsBinding.instance.addPostFrameCallback((_) => _markReadIfNeeded(room));
                 final seen = <String>{};
                 final all = [..._older, ...latest].where((m) => seen.add(m.id)).toList();
-                final canLoadOlder = !_noMoreOlder && latest.length >= ChatService.pageSize && all.isNotEmpty;
+                final canLoadOlder = !_noMoreOlder && (_switchedToSince || latest.length >= ChatService.pageSize) && all.isNotEmpty;
                 return ListView(
                   padding: const EdgeInsets.all(16),
                   children: [
@@ -341,7 +356,7 @@ class _TalkRoomScreenState extends State<TalkRoomScreen> {
                         Expanded(
                           child: TextField(
                             controller: _text,
-                            maxLength: kChatMaxMessage,
+                            inputFormatters: [_RuneLimit(kChatMaxMessage)],
                             decoration: const InputDecoration(
                               hintText: '受け渡し場所・日時をメッセージ…',
                               counterText: '',
@@ -366,4 +381,14 @@ class _TalkRoomScreenState extends State<TalkRoomScreen> {
       ),
     );
   }
+}
+
+/// Limits the input to [max] characters counted as runes — the same measure `ChatService.send` applies.
+class _RuneLimit extends TextInputFormatter {
+  _RuneLimit(this.max);
+  final int max;
+
+  @override
+  TextEditingValue formatEditUpdate(TextEditingValue oldValue, TextEditingValue newValue) =>
+      newValue.text.runes.length <= max ? newValue : oldValue;
 }

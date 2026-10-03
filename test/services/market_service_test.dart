@@ -106,6 +106,9 @@ void main() {
 
   test('photo paths and types: own listings/ prefix, images only', () {
     expect(MarketService.photoPath('u1', 'my book.JPG', 7), 'listings/u1/7_my_book.JPG');
+    // `..` is rejected by the server (and could never match storage.rules): runs of dots collapse to one
+    expect(MarketService.photoPath('u1', 'a..b...jpg', 7), 'listings/u1/7_a.b.jpg');
+    expect(MarketService.photoPath('u1', '..', 7), isNot(contains('..')));
     expect(MarketService.photoContentType('a.JPG'), 'image/jpeg');
     expect(MarketService.photoContentType('a.webp'), 'image/webp');
     expect(MarketService.photoContentType('a.pdf'), isNull);
@@ -127,5 +130,15 @@ void main() {
     expect(MarketException('failed-precondition', 'listing-closed').notice, contains('受付を終了'));
     expect(MarketException('failed-precondition', 'no-exchange').notice, contains('双方'));
     expect(MarketException('failed-precondition', 'too-early').notice, contains('7日前'));
+    final specific = <String, String>{
+      'rating-closed': '公開', 'own-listing': '自分の出品', 'legacy-room': '以前', 'self': '自分', 'not-active': '受付', 'expired': '期限',
+    };
+    final seen = <String>{};
+    for (final e in specific.entries) {
+      final n = MarketException('failed-precondition', e.key).notice;
+      expect(n, contains(e.value), reason: e.key);
+      expect(n, isNot(contains('処理に失敗')), reason: e.key);
+      expect(seen.add(n), isTrue, reason: 'distinct notice for ${e.key}');
+    }
   });
 }

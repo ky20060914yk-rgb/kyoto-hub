@@ -27,6 +27,15 @@ class ChatService {
   Stream<List<ChatMessage>> streamLatest(String roomId, {int limit = pageSize}) =>
       _messages(roomId).orderBy('createdAt', descending: true).limit(limit).snapshots().map(_oldestFirst);
 
+  /// Every message from [from] on (inclusive), oldest first, live and unbounded. The screen switches to
+  /// this once older pages are loaded: a sliding "newest N" window would otherwise drop the messages between
+  /// the loaded history and the window as new ones arrive.
+  Stream<List<ChatMessage>> streamSince(String roomId, DateTime from) => _messages(roomId)
+      .where('createdAt', isGreaterThanOrEqualTo: Timestamp.fromDate(from))
+      .orderBy('createdAt')
+      .snapshots()
+      .map((q) => q.docs.map((d) => ChatMessage.fromMap(d.id, d.data())).toList());
+
   /// The [limit] messages before [before], oldest first (one page of history).
   Future<List<ChatMessage>> loadOlder(String roomId, DateTime before, {int limit = pageSize}) async => _oldestFirst(
         await _messages(roomId)
@@ -36,10 +45,10 @@ class ChatService {
             .get(),
       );
 
-  /// Sends [text] as [uid]; returns false (nothing written) when it is empty or too long.
+  /// Sends [text] as [uid]; returns false (nothing written) when it is empty or longer than [kChatMaxMessage] characters (runes).
   Future<bool> send(String roomId, String uid, String text) async {
     final t = text.trim();
-    if (t.isEmpty || t.length > kChatMaxMessage) return false;
+    if (t.isEmpty || t.runes.length > kChatMaxMessage) return false;
     await _messages(roomId).add({
       'senderId': uid,
       'text': t,
