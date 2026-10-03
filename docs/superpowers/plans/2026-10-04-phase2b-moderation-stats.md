@@ -36,7 +36,7 @@
 | M-4 | **No credit is ever clawed back** on hide, restore or remove; an upload credit not yet granted when a post is hidden is granted (once) if it is restored, through the normal `onPostCreated` path. | Spec §4.3 「獲得済みクレジットは没収しない」. | n/a (spec) |
 | M-5 | **No admin UI and no admin callable in 2B.** The operator = whoever holds the project's credentials and runs `tools/moderate.mjs` (`list` / `hide` / `restore` / `delete` / `close` / `strip-legacy-reports`; dry-run default, `--project` required, `--apply` requires `--operator <name>`, emulator-tested). Every action writes a `moderation_log` row. | Spec §10 allows console-level moderation at first. With no admin callable there is no admin identity a client could forge — admin = IAM, never client-writable data. | Add an admin callable gated by an Admin-only `config/moderators` doc later |
 | M-6 | **Takedown form:** a caller whose token is a verified `@st.kyoto-u.ac.jp` **or** `@kyoto-u.ac.jp` address (`universityVerifiedUid`) and who is not discredited (M-9) causes an **immediate hide** of each named post + a priority queue entry + an author notification. A signed-out, unverified or non-KU caller only creates a priority entry **without hiding**. Never hides the requester's own post, nor a post an operator already cleared (M-8). | Spec: 権利者・大学からの要請 = 優先キュー、即時削除. An anonymous form that hides posts would be a free censorship button for anyone on the internet; a verified university address is accountable and rate-limited. Note: staff cannot sign in to the app (signup is `@st` only), so in 2B the immediate path is used by students; an outside rights-holder's request lands in the priority queue and the operator acts. | Restrict immediate hide to `@kyoto-u.ac.jp` staff only (one regex), or add staff email-link verification |
-| M-7 | **Rate limits (per JST day):** reports **10** per reporter; takedowns **3** per signed-in requester; unverified + anonymous takedowns **20 in total** (one global counter). No per-IP limit. | Bounds queue flooding and notification churn. The callable's client IP is not reliable behind Google's front end, so a per-IP cap could silently become a global 3/day; the global cap is the honest hard bound. | Constants in `MODERATION`; App Check later |
+| M-7 | **Rate limits (per JST day):** reports **10** per reporter; takedowns **3** per signed-in requester; at most **3 POSTS hidden at once** per requester per day (`MODERATION.maxImmediateHidesPerDay`; a request naming more only queues the rest, still priority); unverified + anonymous takedowns **20 in total** (one global counter). All per-requester counters are keyed by mailbox (M-20). No per-IP limit. | Bounds queue flooding and notification churn. The callable's client IP is not reliable behind Google's front end, so a per-IP cap could silently become a global 3/day; the global cap is the honest hard bound. | Constants in `MODERATION`; App Check later |
 | M-8 | **An operator decision is final for automation:** `restore` sets `autoHide: false` on the queue entry. Later reports or takedowns on that post are still recorded but only flag it `needsReview`; they never hide it again. | Stops hide/restore ping-pong by a group of reporters and bounds notification spam to operator actions. | Reset `autoHide` on the next restore |
 | M-9 | **Discredit:** when an operator restores a post, every reporter whose report was counted for a report-hide gets `restoredReports + 1`, and the requester of a takedown-hide gets `restoredTakedowns + 1` (Admin-only `moderation_actors/{uid}`). From **3** restored report-hides a user's reports are recorded but not counted; from **2** restored takedown-hides their takedowns no longer hide at once. Both are silent (the call still succeeds). | Report-bombing and takedown abuse cost the abuser their influence without letting them probe whether they are flagged. | `MODERATION.discreditRestored*` |
 | M-10 | **Notifications:** Function-only `notifications/{mod_<postId>_<transition>}` with `type` ∈ `post_hidden` / `post_restored` / `post_removed`, shown in a new お知らせ screen behind a bell (with an unread badge) in the マイページ app bar — there is no bell UI today. The client may only flip its own `read` from false to true. No push, no email, no reason, never the reporter's identity. | Spec: 投稿者に通知. The transition counter makes each notice idempotent (a replayed hide writes the same id) and bounded (one per state change). | Add FCM later |
@@ -49,6 +49,10 @@
 | M-17 | Tools reuse the compiled Functions code: `backfill_course_stats.mjs` and `moderate.mjs` load `functions/lib/*.js` **and** `firebase-admin` from `functions/node_modules` via `createRequire`, so the CLI and the backfill cannot drift from the triggers and only one firebase-admin copy is in play. | One implementation of every invariant; the emulator tests of the tools exercise the shipped code. | `npm --prefix functions run build` before running a tool (in the Deploy steps) |
 | M-18 | The takedown screen is reachable **signed out** (a link on the login screen), from the report dialog (post id prefilled) and from お問い合わせ. | A professor who hears that their exam is posted has no app account. | Move it to a static hosting page |
 | M-19 | A hidden post's author sees it disappear and gets the notice; they cannot edit or delete it while hidden (it is not in `posts`); appeals go through お問い合わせ. | Keeps the hidden data intact for the operator. | n/a |
+
+| M-20 | **Moderation identity is the MAILBOX, not the uid** (consistent with welcome-once-per-email, P2-15). Report docs (`moderation_queue/{postId}/reports/{emailKey}`), daily report/takedown caps, the immediate-hide budget and the discredit counters (`moderation_actors/{emailKey}`) are all keyed by `emailKey(email)` = sha256 of the lowercased, trimmed verified token email (`common.ts`, shared with `welcomeKey`). The reporter's uid is stored on the doc for operator tooling only; it is never shown to authors or put in notifications. `+` aliases are NOT forbidden (KU mail is not a plus-alias concern). A queue entry remembers `hiddenByKey` so a restore discredits the requester's mailbox. | Delete-account + re-signup with the same address gives a new uid; keyed by uid it would be a fresh reporter, reset caps and erase discredit. | Key by uid again (`emailKey` -> `uid` in report.ts / takedown.ts) |
+| M-21 | **Hide + re-upload cannot re-earn the upload credit.** `onPostCreated`'s duplicate-past-exam check also looks in `hidden_posts` (same course + year + category, any timestamps). A restored original is judged against live posts only (its own ledger id keeps a paid upload from paying twice; an unpaid one may now count as a duplicate of a later upload). | Otherwise: upload, get hidden, re-upload, +3 again. | Drop the `hidden_posts` query |
+| M-22 | **Moderation state follows the post id.** The posts create rule refuses an id that has a `moderation_queue` doc (as it does for `hidden_posts`); `readQueue` takes author/title from the LIVE post; restore/remove/`handlePostGone` on a post that is in neither collection retire its queue entry (`status: 'removed'`, `needsReview: false`) so the list stops showing it; `handlePostGone` never deletes a Storage file another live post still lists. | A reused id must not inherit another post's moderation state. | n/a |
 
 Resolved 2A rulings: **P2-6** (no manual upload queue — the safety net is now M-2/M-6), **P2-7** (claim — M-16), **P2-11** (client-driven 3-report delete — replaced by M-1..M-3).
 
@@ -69,6 +73,8 @@ Resolved 2A rulings: **P2-6** (no manual upload queue — the safety net is now 
 | Hide deletes files | Move fires `onPostDeleted` | `handlePostGone` skips while either doc exists | `postDeleted.test` (T3) |
 | Hidden download | Call `downloadResource` on a hidden id | Post is not in `posts` → `not-found`, nothing charged | `moderation.test` (T3) |
 | Privacy | Read other users' emails / chats / reporters | `users` own-only, `talk_rooms` participants-only, reports Admin-only, legacy arrays stripped | rules tests (T7), `test_moderate_fixture` strip (T12) |
+
+**Amendments made in the final review (implemented; the code blocks below predate them):** M-20 (email-keyed identity: `processReport(db, {uid, email}, …)`, `reportRef`/`actorRef` take an `emailKey`), M-21 (hidden posts in the duplicate check), M-22 (state follows the id), the 3-hides-per-day takedown budget with `{requestId, hidden, queued}`, `talk_rooms` update pins `lenderId`/`borrowerId`/`university_id`, `strip-legacy-reports` writes an audit row and survives per-document failures, `course_stats` parity hardening (string-only enums, ISO-only `lastReviewAt`, unusable course keys skipped). Final counts: functions 146, rules 127, storage rules 6, flutter 107, `flutter analyze` 22 issues.
 
 ## File Structure
 
@@ -1376,9 +1382,9 @@ git commit -m "feat(functions): reportPost — Function-owned reports, 3 distinc
 
 **Interfaces:**
 - Consumes: `MODERATION`, `UNIVERSITY_ID`, `isDocId`, `jstDay` (common); `actorRef`, `hiddenRef`, `hideInTx`, `num`, `postRef`, `queueRef`, `readQueue`, `writeQueue` (moderation).
-- Produces: `TAKEDOWN_ROLES = ['instructor', 'university', 'publisher', 'other']`, `interface TakedownCaller { uid: string; verified: boolean; email: string }`, `interface TakedownForm { postIds: string[]; requesterName: string; role: TakedownRole; contactEmail: string; description: string }`, `interface TakedownResult { requestId: string; hidden: string[] }`, `parseTakedown(input) → TakedownForm` (throws `invalid-argument`), `processTakedown(db, caller: TakedownCaller | null, input, now?) → Promise<TakedownResult>`.
+- Produces: `TAKEDOWN_ROLES = ['instructor', 'university', 'publisher', 'other']`, `interface TakedownCaller { uid: string; verified: boolean; email: string }`, `interface TakedownForm { postIds: string[]; requesterName: string; role: TakedownRole; contactEmail: string; description: string }`, `interface TakedownResult { requestId: string; hidden: string[]; queued: string[] }` (`queued` = existing named posts that were only queued, e.g. beyond the 3-hides-per-day budget; unknown ids appear in neither), `parseTakedown(input) → TakedownForm` (throws `invalid-argument`), `processTakedown(db, caller: TakedownCaller | null, input, now?) → Promise<TakedownResult>`.
 
-Behaviour: the form is whitelisted and bounded (≤ 5 unique valid ids, name 1–100, role in the list, email ≤ 200 and well-formed, description 10–2000, all trimmed). Every call writes `takedown_requests/{auto}` (`status: 'open'`, `verified` from the caller — never from the payload). Signed-in callers: ≤ 3/JST day. Unverified + anonymous: ≤ 20/JST day in total (`moderation_meta/takedown_anon_<day>`). For each named post that exists (visible or hidden): queue entry `priority: 'takedown'`, `needsReview: true`, request id appended; and if the caller is verified, not discredited (`restoredTakedowns < 2`), the post is visible, `autoHide` is on and the caller is not its author → hidden (`by: 'takedown'`, `byUid: caller.uid`). Unknown ids stay on the request only.
+Behaviour: the form is whitelisted and bounded (≤ 5 unique valid ids, name 1–100, role in the list, email ≤ 200 and well-formed, description 10–2000, all trimmed). Every call writes `takedown_requests/{auto}` (`status: 'open'`, `verified` from the caller — never from the payload). Signed-in callers: ≤ 3/JST day. Unverified + anonymous: ≤ 20/JST day in total (`moderation_meta/takedown_anon_<day>`). For each named post that exists (visible or hidden): queue entry `priority: 'takedown'`, `needsReview: true`, request id appended; and if the caller is verified, not discredited (`restoredTakedowns < 2`), the post is visible, `autoHide` is on and the caller is not its author → hidden (`by: 'takedown'`, `byUid: caller.uid`). Unknown ids stay on the request only. **Implemented amendments (final review):** at most `maxImmediateHidesPerDay` (3) posts are hidden per requester per JST day across all requests, the rest are queued and reported in `queued`; the requester's counters are keyed by `emailKey` (M-20); the audit row is `by: takedown:<uid>` with the request id as note.
 
 - [ ] **Step 1: Write the failing tests `functions/test/takedown.test.mjs`**
 
@@ -2056,7 +2062,7 @@ git commit -m "feat(rules): Function-owned moderation and course_stats; own-only
   - `class AppNotification { final String id; final String type; final String postId; final String postTitle; final bool read; final DateTime createdAt; String get message; factory AppNotification.fromMap(String id, Map<String, dynamic> map) }` — total.
   - `enum ReportCategory { copyright, unrelated, inappropriate, other }` + `ReportCategoryX.value` / `.label`; `enum ReportOutcome { reported, hidden, duplicate, alreadyHidden }`; `enum TakedownRole { instructor, university, publisher, other }` + `TakedownRoleX.value` / `.label`
   - `class ModerationException implements Exception { final String code; final String message; bool get isLimit; bool get isOwnPost; bool get isNotFound }`
-  - `class TakedownResult { final String requestId; final List<String> hidden }`
+  - `class TakedownResult { final String requestId; final List<String> hidden; final List<String> queued }` (`queued` defaults to empty)
   - constants `kReportMaxDetail = 500`, `kTakedownMinDescription = 10`, `kTakedownMaxDescription = 2000`, `kTakedownMaxName = 100`, `kTakedownMaxEmail = 200`; `String? validateTakedown({required String name, required String email, required String description})`
   - `class ModerationService { ModerationService(FirebaseFirestore db, CallableInvoker call); factory ModerationService.live(FirebaseFirestore db); Future<ReportOutcome> reportPost(String postId, ReportCategory category, String detail); Future<TakedownResult> submitTakedown({required List<String> postIds, required String requesterName, required TakedownRole role, required String contactEmail, required String description}); Stream<List<AppNotification>> streamNotifications(String uid, {int limit = 30}); Future<void> markNotificationRead(String id) }`
   - `Stream<List<TalkRoom>> participantTalkRooms(FirebaseFirestore db, String uid)` (`talk_room_queries.dart`)
@@ -2356,7 +2362,7 @@ class ModerationException implements Exception {
 }
 
 class TakedownResult {
-  const TakedownResult({required this.requestId, required this.hidden});
+  const TakedownResult({required this.requestId, required this.hidden, this.queued = const []});
   final String requestId;
   final List<String> hidden; // post ids the server hid at once (verified requester only)
 }
@@ -4150,9 +4156,11 @@ git commit -m "feat(tools): moderate.mjs — list/hide/restore/delete/close/stri
 **Requirements:** the **Blaze plan**. The first functions deploy may ask about an **Artifact Registry cleanup policy** — accept (e.g. delete images older than 1 day).
 
 ```
-PRE. From the repo root, run every suite (Git Bash): bash tools/test_functions.sh ; bash tools/test_rules.sh ;
-     bash tools/test_storage_rules.sh ; bash tools/test_migrate_storage.sh ; bash tools/test_backfill_course_stats.sh ;
-     bash tools/test_moderate.sh ; flutter analyze (24 issues) ; flutter test
+PRE. From the repo root (PowerShell): npm --prefix functions ci; npm --prefix functions run build; flutter build web --release
+     (the web build happens NOW so the old-client window in step 3 is as short as possible), then run every suite (Git Bash):
+     bash tools/test_functions.sh (146) ; bash tools/test_rules.sh (127) ; bash tools/test_storage_rules.sh (6) ;
+     bash tools/test_migrate_storage.sh ; bash tools/test_backfill_course_stats.sh ; bash tools/test_moderate.sh ;
+     flutter analyze (22 issues) ; flutter test (107)
 
 0. (2A) Read-only audit before anything is deployed: in the Firebase console (Firestore -> requests) note docs
    with isFulfilled == true or fulfilledPostId set that no real fulfilment produced; clear the bogus ones
@@ -4180,11 +4188,8 @@ PRE. From the repo root, run every suite (Git Bash): bash tools/test_functions.s
    "iam.serviceAccounts.signBlob" denied. ONE line:
    gcloud iam service-accounts add-iam-policy-binding 932624635949-compute@developer.gserviceaccount.com --member="serviceAccount:932624635949-compute@developer.gserviceaccount.com" --role="roles/iam.serviceAccountTokenCreator" --project kyodai-sns
 
-5. Build what the tools and hosting need (repo root, PowerShell):
-   npm --prefix functions ci; npm --prefix functions run build; flutter build web --release
-   # backfill_course_stats.mjs and moderate.mjs load functions/lib/*.js (M-17).
-
-6. USER (PowerShell) — storage migration (2A), with credentials set (see above):
+5. USER (PowerShell) — storage migration (2A), with credentials set explicitly:
+   $env:GOOGLE_APPLICATION_CREDENTIALS="C:\path\key.json"
    Set-Location C:\path\to\kyoto-hub\tools
    npm install
    node migrate_storage.mjs --project kyodai-sns
@@ -4192,7 +4197,13 @@ PRE. From the repo root, run every suite (Git Bash): bash tools/test_functions.s
    # Dry run first (default), then the real run. Old root objects stay (no --delete-old yet).
    # DO NOT open migrated resources/... objects in the console Storage browser (it mints a new token).
 
-7. USER (PowerShell, same session, still in tools) — 2B data steps:
+6. Deploy hosting IMMEDIATELY after step 5 (the migration removed fileUrls, which breaks the OLD client; the old
+   client also cannot report, write stats or list everyone's talk rooms under the new rules). The web build was made
+   in PRE; if any source changed since, run flutter build web --release first.
+   firebase deploy --only hosting --project kyodai-sns
+
+7. USER (PowerShell, same session, still in tools) — 2B data steps, AFTER the hosting deploy:
+   $env:GOOGLE_APPLICATION_CREDENTIALS="C:\path\key.json"
    node backfill_course_stats.mjs --project kyodai-sns
    node backfill_course_stats.mjs --project kyodai-sns --apply
    # Review the dry run first. If it listed ORPHAN rows and you agree they are junk:
@@ -4200,13 +4211,13 @@ PRE. From the repo root, run every suite (Git Bash): bash tools/test_functions.s
    node moderate.mjs strip-legacy-reports --project kyodai-sns
    node moderate.mjs strip-legacy-reports --project kyodai-sns --apply --operator owner
    # Recounts every course with the trigger's code (erases client-forged aggregates) and removes the old
-   # posts.reports arrays (they exposed reporter uids). Both are idempotent.
+   # posts.reports arrays (they exposed reporter uids). Both are idempotent; strip-legacy-reports exits non-zero
+   # if any document failed (re-run it) and writes one audit row per --apply run.
 
-8. Deploy hosting IMMEDIATELY after step 7 (the migration removed fileUrls, which breaks the OLD client;
-   the old client also cannot report, write stats or list everyone's talk rooms under the new rules):
-   firebase deploy --only hosting --project kyodai-sns
+8. Tell testers to reload the app TWICE (the first load is served by the old service worker, the second runs the new build).
 
 9. After the smoke test and a day (USER, credentials set again; absolute path):
+   $env:GOOGLE_APPLICATION_CREDENTIALS="C:\path\key.json"
    Set-Location C:\path\to\kyoto-hub\tools
    node migrate_storage.mjs --project kyodai-sns --apply --delete-old
    # Removes the redundant public root objects. Delete the key file afterwards.
@@ -4214,15 +4225,15 @@ PRE. From the repo root, run every suite (Git Bash): bash tools/test_functions.s
 
 **Day-to-day moderation (USER, PowerShell, credentials set, in `tools`, after `npm --prefix ..\functions run build`):** `node moderate.mjs list --project kyodai-sns` shows the queue (takedown priority first) and open takedown requests. Inspect a post (dry run): `node moderate.mjs restore <postId> --project kyodai-sns`. Act: `node moderate.mjs restore <postId> --project kyodai-sns --apply --operator <you>` / `delete …` / `hide …` / `close <requestId> …`. Reply to a takedown requester by e-mail from the address in the listing.
 
-**Rollback:** redeploying the previous hosting build alone is not enough (rules are stricter). To roll back 2B fully, redeploy the previous `firestore.rules` from git (re-opens client `course_stats`/`reports` writes) and the previous hosting; the Functions can stay. Posts hidden meanwhile remain in `hidden_posts` — restore them with `moderate.mjs restore` before rolling back, or they stay invisible.
+**Rollback:** redeploying the previous hosting build alone is not enough (rules are stricter). To roll back 2B fully: rebuild hosting from the 2A commit (`git checkout bc72fb0`, `flutter build web --release`, `firebase deploy --only hosting --project kyodai-sns`, then return to your branch), and restore the 2A rules with `git checkout bc72fb0 -- firestore.rules` followed by `firebase deploy --only firestore:rules --project kyodai-sns`; the Functions can stay. **Rolling back the rules re-opens client writes to `posts.reports`, which publishes reporter uids to every KU reader again** (the legacy arrays were stripped; new ones would start filling) and re-opens `course_stats` client writes. Posts hidden meanwhile remain in `hidden_posts` — restore them with `moderate.mjs restore` before rolling back, or they stay invisible.
 
-## Manual E2E (production smoke test, after step 8; user + browser)
+## Manual E2E (production smoke test, after step 8 of the Deploy section; user + browser)
 
 Run the 2A E2E (credits, signed download, upload, reviews, requests, direct-URL check, invitation) first, then:
 
-1. **Report → hide:** with three different verified KU accounts, report the same test post (通報 → category → 送信). The first two see 「通報を受け付けました」; the third sees 「…非表示になりました」 and the post disappears for everyone (course feed and the author's マイページ). The same account reporting twice sees 「既にこの投稿を通報済みです」; the author's own flag shows 「自分の投稿は通報できません」.
+1. **Report → hide:** with three different verified KU accounts (three different MAILBOXES — one mailbox counts once even across accounts, M-20), report the same test post (通報 → category → 送信). The first two see 「通報を受け付けました」; the third sees 「…非表示になりました」 and the post disappears for everyone (course feed and the author's マイページ). The same account reporting twice sees 「既にこの投稿を通報済みです」; the author's own flag shows 「自分の投稿は通報できません」.
 2. **Author notice:** the author's マイページ bell shows a badge; お知らせ says the post was hidden and 獲得済みのクレジットはそのまま; the balance is unchanged; opening the screen clears the badge.
-3. **Operator:** `node moderate.mjs list --project kyodai-sns` lists the post (`hidden`, `reports=3`); the dry run `restore` prints WOULD RESTORE; `--apply --operator owner` brings it back for everyone and the author gets a 「再び表示」 notice. Three more reports on it now leave it visible (`review=yes` in `list`).
+3. **Operator:** `node moderate.mjs list --project kyodai-sns` lists the post (`hidden`, `reports=3`); the dry run `restore` prints WOULD RESTORE; `--apply --operator owner` brings it back for everyone and the author gets a 「再び表示」 notice. Three more reports from three mailboxes that have not reported this post yet now leave it visible (`review=yes` in `list`).
 4. **Takedown, signed out:** log out → 「担当教員・権利者の方へ」 on the login screen → submit with a test post id → 「削除依頼を受け付けました」 + 受付番号; the post stays visible; `list` shows the request as `UNVERIFIED` and the post as `TAKEDOWN`.
 5. **Takedown, verified:** signed in (a different account than the author), report dialog → 「担当教員・権利者の方はこちら」 (post id prefilled) → submit → 「対象の資料を非表示にしました」; the post disappears; the author is notified.
 6. **Delete:** `node moderate.mjs delete <postId> --project kyodai-sns --apply --operator owner` → the author gets 「削除されました」; in the Storage console the `resources/<uid>/…` file is gone (list the folder only — do not open files).
@@ -4255,7 +4266,7 @@ Run the 2A E2E (credits, signed download, upload, reviews, requests, direct-URL 
 - Admin-only collections — T7 `ADMIN_ONLY` loop + list test; catch-all test unchanged.
 - users / talk_rooms tightening — T7; participant merge — T8.
 
-**Dry-run of this plan before committing it:** every code block of Tasks 1–12 was applied to a scratch copy of `master-wf96b2` (not to the branch): `tsc` clean; `bash tools/test_functions.sh` 130/130; `bash tools/test_rules.sh` 125/125, and the same tests against the OLD rules fail exactly the 9 new ones; `bash tools/test_backfill_course_stats.sh` and `bash tools/test_moderate.sh` green; `flutter analyze` 22 issues (baseline 24 − 2, none new); `flutter test` 106/106; `flutter build web --debug` clean. Six mutations (`handlePostGone` ignoring `hidden_posts`, discredit `<` → `<=`, takedown hiding for unverified callers, rakutanScore `35` → `30`, restore not clearing `autoHide`, `postStatsSubjects` never skipping) each failed the intended tests.
+**Dry-run of this plan before committing it:** every code block of Tasks 1–12 was applied to a scratch copy of `master-wf96b2` (not to the branch): `tsc` clean; `bash tools/test_functions.sh` 130/130 (146 after the final-review fixes); `bash tools/test_rules.sh` 125/125 (127 after them), and the same tests against the OLD rules fail exactly the 9 new ones; `bash tools/test_backfill_course_stats.sh` and `bash tools/test_moderate.sh` green; `flutter analyze` 22 issues (baseline 24 − 2, none new); `flutter test` 106/106; `flutter build web --debug` clean. Six mutations (`handlePostGone` ignoring `hidden_posts`, discredit `<` → `<=`, takedown hiding for unverified callers, rakutanScore `35` → `30`, restore not clearing `autoHide`, `postStatsSubjects` never skipping) each failed the intended tests.
 
 **Placeholder scan:** none — every step has the full code or an exact edit target (Task 7's edits name each test to replace and give the replacement; Task 9/10 edits give the replacement code and the exact anchor).
 
@@ -4279,3 +4290,7 @@ Each is implemented as the ruling says and can be reversed cheaply (the "Cost if
 12. **M-15** `users` own-only and `talk_rooms` participants-only reads.
 13. **M-16** skip the `ku_verified` custom claim again.
 14. Reports on **reviews** (spec §4.2) are deferred — confirm that posts-only is enough for the Phase 2 launch.
+15. **M-20** moderation identity = mailbox (a re-signup with the same address cannot reset caps or discredit).
+16. **M-7 / Task 5** at most 3 posts hidden at once per requester per day; the result is `{requestId, hidden, queued}`.
+17. **M-21** hide + re-upload no longer re-earns the upload credit.
+18. **Anonymous takedown pool exhaustion:** the 20/day unverified pool can be used up by anyone and the form then answers `resource-exhausted` with no fallback route. Recommended (NOT implemented): show a contact e-mail in that error, or add App Check.
