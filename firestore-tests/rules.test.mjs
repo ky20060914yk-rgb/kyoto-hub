@@ -211,6 +211,11 @@ beforeEach(async () => {
     await setDoc(doc(db, 'course_stats/ck'), {
       courseKey: 'ck', university_id: 'kyoto_u', reviewCount: 1, ratingSum: 3,
     });
+    await setDoc(doc(db, 'notifications/n_u1'), {
+      uid: 'u1', type: 'post_hidden', postId: 'p', postTitle: 't', read: false, university_id: 'kyoto_u',
+    });
+    // A post hidden by moderation: its author (u2) cannot read it either.
+    await setDoc(doc(db, 'hidden_posts/hid_1'), { authorId: 'u2', university_id: 'kyoto_u', title: 'hidden' });
     await setDoc(doc(db, 'secret_admin_stuff/s_1'), { university_id: 'kyoto_u' });
   });
 });
@@ -308,7 +313,7 @@ const KU_READABLE = [
   ['requests', 'requests/req_u1'],
   ['textbook_requests', 'textbook_requests/tb_u1'],
   ['talk_rooms', 'talk_rooms/room_1'],
-  ['users', 'users/u1'],
+  ['users', 'users/u2'],
   ['meta', 'meta/catalog'],
 ];
 
@@ -351,9 +356,11 @@ test('user can write only their own profile', async () => {
   await assertFails(setDoc(doc(mine, 'users/u2'), { displayName: 'hax' }));
 });
 
-test('signed-in user can read another profile but anonymous cannot', async () => {
-  await assertSucceeds(getDoc(doc(asKu(), 'users/u2')));
+test('a user can read only their own profile (2B)', async () => {
+  await assertSucceeds(getDoc(doc(asKu(), 'users/u1')));
+  await assertFails(getDoc(doc(asKu(), 'users/u2')));
   await assertFails(getDoc(doc(asAnon(), 'users/u1')));
+  await assertFails(getDocs(query(collection(asKu(), 'users'), where('university_id', '==', 'kyoto_u'))));
 });
 
 test('nobody can delete a profile, not even their own', async () => {
@@ -429,79 +436,33 @@ test('author can update and delete their own post', async () => {
   await assertSucceeds(deleteDoc(doc(db, 'posts/seed_u1')));
 });
 
-test('non-author may only touch the reports field of a post', async () => {
-  const db = asKu2();
-  await assertSucceeds(updateDoc(doc(db, 'posts/seed_u1'), { reports: ['u2'] }));
-  await assertFails(updateDoc(doc(db, 'posts/seed_u1'), { title: 'vandalised' }));
-  await assertFails(updateDoc(doc(db, 'posts/seed_u1'), { reports: ['u2'], title: 'vandalised' }));
-  await assertFails(deleteDoc(doc(db, 'posts/seed_u1')));
+// --- posts: moderation is Function-owned (Plan 2B) ---------------------------
+
+test('no client may write reports any more — not a reporter, not the author (2B)', async () => {
+  await assertFails(updateDoc(doc(asKu2(), 'posts/seed_u1'), { reports: ['u2'] }));
+  await assertFails(updateDoc(doc(asKu2(), 'posts/flagged_u1'), { reports: ['ra', 'u2'] }));
+  await assertFails(updateDoc(doc(asKu(), 'posts/flagged_u1'), { reports: [] }));
+  await assertFails(updateDoc(doc(asKu(), 'posts/reported_u1'), { reports: [] }));
+  await assertSucceeds(updateDoc(doc(asKu(), 'posts/flagged_u1'), { description: 'x' }));
 });
 
-// --- posts: the reports flag is append-only, one per account (I7) ------------
-//
-// The carve-out that lets a non-author write `reports` used to accept any value
-// for the field, so a single verified account could write three reports in one
-// update and then satisfy the >= 3 auto-delete rule by itself.
-
-test('a non-author may append exactly one report — their own uid (I7)', async () => {
-  await assertSucceeds(updateDoc(doc(asKu2(), 'posts/flagged_u1'), { reports: ['ra', 'u2'] }));
+test('a non-author can never edit or delete a post, whatever its stored reports say (2B)', async () => {
+  await assertFails(updateDoc(doc(asKu2(), 'posts/seed_u1'), { title: 'vandalised' }));
+  await assertFails(deleteDoc(doc(asKu2(), 'posts/seed_u1')));
+  await assertFails(deleteDoc(doc(asKu2(), 'posts/reported_u1'))); // 3 legacy reports: no longer a licence
+  const outsider = env.authenticatedContext('u3', OUTSIDER).firestore();
+  await assertFails(deleteDoc(doc(outsider, 'posts/reported_u1')));
 });
 
-test('a non-author cannot write several reports at once (I7)', async () => {
-  await assertFails(updateDoc(doc(asKu2(), 'posts/seed_u1'), { reports: ['a', 'b', 'c'] }));
-  await assertFails(updateDoc(doc(asKu2(), 'posts/flagged_u1'), { reports: ['ra', 'u2', 'x'] }));
-});
-
-test('a non-author cannot append a report that is not their own uid (I7)', async () => {
-  await assertFails(updateDoc(doc(asKu2(), 'posts/seed_u1'), { reports: ['someone_else'] }));
-  await assertFails(updateDoc(doc(asKu2(), 'posts/flagged_u1'), { reports: ['ra', 'rb'] }));
-});
-
-test('a non-author cannot drop or replace existing reports (I7)', async () => {
-  const db = asKu2();
-  // Shrinking the array.
-  await assertFails(updateDoc(doc(db, 'posts/flagged_u1'), { reports: [] }));
-  // Same size, prior report swapped out for the caller's own uid.
-  await assertFails(updateDoc(doc(db, 'posts/flagged_u1'), { reports: ['u2'] }));
-});
-
-test('the same account cannot report a post twice (I7)', async () => {
-  const db = asKu2();
-  await assertSucceeds(updateDoc(doc(db, 'posts/seed_u1'), { reports: ['u2'] }));
-  // u2 is already in `reports`, so it may not add a further entry — this is what
-  // keeps the auto-delete threshold at three *distinct* accounts.
-  await assertFails(updateDoc(doc(db, 'posts/seed_u1'), { reports: ['u2', 'x'] }));
-});
-
-test('an author cannot clear the reports on their own post (I7)', async () => {
-  const db = asKu();
-  await assertFails(updateDoc(doc(db, 'posts/flagged_u1'), { reports: [] }));
-  await assertFails(updateDoc(doc(db, 'posts/reported_u1'), { reports: [] }));
-  // ...but an ordinary edit that leaves `reports` alone still works.
-  await assertSucceeds(updateDoc(doc(db, 'posts/flagged_u1'), { description: 'x' }));
+test('a post cannot be created under the id of a hidden post (2B, M-1)', async () => {
+  await assertFails(setDoc(doc(asKu(), 'posts/hid_1'), validPost({ id: 'hid_1' })));
+  await assertSucceeds(setDoc(doc(asKu(), 'posts/fresh_1'), validPost({ id: 'fresh_1' })));
 });
 
 test('an author cannot rewrite a post out of its stream or reassign it (M5)', async () => {
   const db = asKu();
   await assertFails(updateDoc(doc(db, 'posts/seed_u1'), { authorId: 'u2' }));
   await assertFails(updateDoc(doc(db, 'posts/seed_u1'), { university_id: 'osaka_u' }));
-});
-
-test('only a verified KU user may flag a post (I4)', async () => {
-  const unverified = env.authenticatedContext('u2', KU_UNVERIFIED).firestore();
-  await assertFails(updateDoc(doc(unverified, 'posts/seed_u1'), { reports: ['u2'] }));
-  const outsider = env.authenticatedContext('u3', OUTSIDER).firestore();
-  await assertFails(updateDoc(doc(outsider, 'posts/seed_u1'), { reports: ['u3'] }));
-});
-
-test('a post with 3+ reports can be auto-deleted by a verified KU non-author (I2)', async () => {
-  await assertSucceeds(deleteDoc(doc(asKu2(), 'posts/reported_u1')));
-});
-
-test('a non-author cannot delete a post below the report threshold (I2)', async () => {
-  await assertFails(deleteDoc(doc(asKu2(), 'posts/seed_u1')));
-  const outsider = env.authenticatedContext('u3', OUTSIDER).firestore();
-  await assertFails(deleteDoc(doc(outsider, 'posts/reported_u1')));
 });
 
 // --- posts: download counters are server-only (Plan 2A) ----------------------
@@ -680,6 +641,22 @@ test('an unrelated field may still be updated while the log is preserved (M6)', 
 
 test('talk rooms cannot be deleted', async () => {
   await assertFails(deleteDoc(doc(asKu(), 'talk_rooms/room_1')));
+});
+
+// --- talk_rooms: participants only (Plan 2B, M-15) --------------------------
+
+test('talk_rooms: only the two participants can read a room (2B)', async () => {
+  await assertSucceeds(getDoc(doc(asKu(), 'talk_rooms/room_1')));
+  await assertSucceeds(getDoc(doc(asKu2(), 'talk_rooms/room_1')));
+  const stranger = env.authenticatedContext('u7', { email: 'g@st.kyoto-u.ac.jp', email_verified: true }).firestore();
+  await assertFails(getDoc(doc(stranger, 'talk_rooms/room_1')));
+});
+
+test('talk_rooms: the participant queries are allowed; the university-wide stream is not (2B)', async () => {
+  await assertSucceeds(getDocs(query(collection(asKu(), 'talk_rooms'), where('lenderId', '==', 'u1'))));
+  await assertSucceeds(getDocs(query(collection(asKu2(), 'talk_rooms'), where('borrowerId', '==', 'u2'))));
+  await assertFails(getDocs(query(collection(asKu(), 'talk_rooms'), where('lenderId', '==', 'u2'))));
+  await assertFails(getDocs(query(collection(asKu(), 'talk_rooms'), where('university_id', '==', 'kyoto_u'))));
 });
 
 // --- transactions ------------------------------------------------------------
@@ -913,79 +890,25 @@ test('author deletes their own review; a non-author cannot', async () => {
   await assertSucceeds(deleteDoc(doc(asKu(), 'reviews/ck_u1')));
 });
 
-// --- course_stats ------------------------------------------------------------
+// --- course_stats: Function-maintained aggregate (Plan 2B, M-11) ------------
 
-test('course_stats: KU-domain reads, KU-verified writes, outsider denied both', async () => {
+test('course_stats: KU-domain reads; no client write of any kind (2B)', async () => {
+  await assertSucceeds(getDoc(doc(asKu(), 'course_stats/ck')));
+  await assertSucceeds(getDoc(doc(asKuUnverified(), 'course_stats/ck')));
+  await assertFails(getDoc(doc(asOutsider(), 'course_stats/ck')));
   const ku = asKu();
-  await assertSucceeds(getDoc(doc(ku, 'course_stats/ck')));
-  await assertSucceeds(setDoc(doc(ku, 'course_stats/ck'), {
+  await assertFails(setDoc(doc(ku, 'course_stats/ck'), {
     courseKey: 'ck', university_id: 'kyoto_u', reviewCount: 2, ratingSum: 7,
   }, { merge: true }));
-  await assertSucceeds(getDoc(doc(asKuUnverified(), 'course_stats/ck')));
-  await assertFails(setDoc(doc(asKuUnverified(), 'course_stats/ck'), { reviewCount: 9 }, { merge: true }));
-  const out = asOutsider();
-  await assertFails(getDoc(doc(out, 'course_stats/ck')));
-  await assertFails(setDoc(doc(out, 'course_stats/ck'), { reviewCount: 999 }, { merge: true }));
-});
-
-// I4: the write is trust-based on *values*, but not on *shape*. A crafted
-// aggregate must not be able to hand a reader a negative or non-numeric counter
-// (Task 7's ranking divides by `reviewCount`), nor move the doc to another
-// university, nor disappear — an aggregate has no owner entitled to delete it.
-test('course_stats writes are shape-guarded and deletion is forbidden', async () => {
-  const ku = asKu();
-  await assertFails(setDoc(doc(ku, 'course_stats/ck'), { reviewCount: -1 }, { merge: true }));
-  await assertFails(setDoc(doc(ku, 'course_stats/ck'), { ratingSum: -5 }, { merge: true }));
-  await assertFails(setDoc(doc(ku, 'course_stats/ck'), { reviewCount: 'many' }, { merge: true }));
-  await assertFails(setDoc(doc(ku, 'course_stats/ck'), { ratingSum: 3.5 }, { merge: true }));
-  await assertFails(setDoc(doc(ku, 'course_stats/ck'), { university_id: 'osaka_u' }, { merge: true }));
-  // Counter-only creates are allowed (for bumpPostCount on fresh docs), but
-  // negative/non-int counters still fail.
-  await assertSucceeds(setDoc(doc(ku, 'course_stats/fresh'), {
-    courseKey: 'fresh', university_id: 'kyoto_u',
-  }));
-  await assertSucceeds(setDoc(doc(ku, 'course_stats/fresh'), {
-    courseKey: 'fresh', university_id: 'kyoto_u', reviewCount: 0, ratingSum: 0,
-  }));
-  // Nobody deletes an aggregate — not even a verified KU account.
+  await assertFails(setDoc(doc(ku, 'course_stats/fresh'), {
+    courseKey: 'fresh', university_id: 'kyoto_u', pastExamPostCount: 1,
+  }, { merge: true }));
+  await assertFails(updateDoc(doc(ku, 'course_stats/ck'), { score: 100 }));
   await assertFails(deleteDoc(doc(ku, 'course_stats/ck')));
-  await assertFails(deleteDoc(doc(asKu2(), 'course_stats/ck')));
 });
 
-// Counter-only writes (e.g., bumpPostCount) must succeed when omitting reviewCount/ratingSum,
-// so long as they include university_id and the write is a merge update.
-test('course_stats: counter-only merge writes succeed without reviewCount/ratingSum', async () => {
-  const ku = asKu();
-  // First, create the doc with full shape (as the review path would).
-  await assertSucceeds(setDoc(doc(ku, 'course_stats/ck_counter'), {
-    courseKey: 'ck_counter', university_id: 'kyoto_u', reviewCount: 0, ratingSum: 0,
-  }));
-  // Then, bumpPostCount writes only counter fields with merge: true.
-  await assertSucceeds(setDoc(doc(ku, 'course_stats/ck_counter'), {
-    courseKey: 'ck_counter', university_id: 'kyoto_u', pastExamPostCount: 1,
-  }, { merge: true }));
-  // Another counter field update, same pattern.
-  await assertSucceeds(setDoc(doc(ku, 'course_stats/ck_counter'), {
-    resourcePostCount: 3,
-  }, { merge: true }));
-});
-
-// Counter-only CREATE (no prior doc) must succeed: when bumpPostCount fires on
-// a course that nobody has reviewed yet, course_stats/{courseKey} does not exist,
-// so the merge write is a create. It must pass with only counter fields.
-test('course_stats: a counter-only CREATE (no prior doc) succeeds', async () => {
-  const ku = asKu();
-  await assertSucceeds(setDoc(doc(ku, 'course_stats/ck_fresh_counter'),
-    { courseKey: 'ck_fresh_counter', university_id: 'kyoto_u', pastExamPostCount: 1 },
-    { merge: true }));
-});
-
-// Counter-only CREATE with an invalid reviewCount must fail: shape guards still apply.
-test('course_stats: a counter-only CREATE with invalid reviewCount fails', async () => {
-  const ku = asKu();
-  await assertFails(setDoc(doc(ku, 'course_stats/ck_fresh_invalid'),
-    { courseKey: 'ck_fresh_invalid', university_id: 'kyoto_u', pastExamPostCount: 1, reviewCount: -1 },
-    { merge: true }));
+test('course_stats: the ranking pool query still runs (2B)', async () => {
+  await assertSucceeds(getDocs(query(collection(asKu(), 'course_stats'), where('reviewCount', '>=', 1))));
 });
 
 // --- queries -----------------------------------------------------------------
@@ -1007,7 +930,7 @@ test('transactions: a user may listen only to their own ledger', async () => {
   )));
 });
 
-for (const name of ['posts', 'requests', 'textbook_requests', 'talk_rooms', 'courses']) {
+for (const name of ['posts', 'requests', 'textbook_requests', 'courses']) {
   test(`${name}: the university-scoped stream query is allowed`, async () => {
     await assertSucceeds(getDocs(query(
       collection(asKu(), name),
@@ -1016,11 +939,8 @@ for (const name of ['posts', 'requests', 'textbook_requests', 'talk_rooms', 'cou
   });
 }
 
-test('users: the invitation-code lookup query is allowed', async () => {
-  await assertSucceeds(getDocs(query(
-    collection(asKu(), 'users'),
-    where('invitationCode', '==', 'KUXXXX'),
-  )));
+test('users: no list query over other users’ profiles, e.g. the old invitation-code lookup (2B)', async () => {
+  await assertFails(getDocs(query(collection(asKu(), 'users'), where('invitationCode', '==', 'KUXXXX'))));
 });
 
 // --- credits: Function-only writes, own-only reads (Plan 2A) -------------------
@@ -1077,6 +997,51 @@ test('users: pendingReferralCode is a short plain string on the caller’s own d
   await assertFails(updateDoc(doc(db, 'users/u1'), { pendingReferralCode: ['ABC234'] }));
   await assertFails(updateDoc(doc(db, 'users/u2'), { pendingReferralCode: 'ABC234' }));
   await assertFails(setDoc(doc(db, 'users/u2'), { displayName: 'hax', pendingReferralCode: 'ABC234' }));
+});
+
+// --- notifications (Plan 2B, M-10) -------------------------------------------
+
+test('notifications: own read and own query only; marking read is the only client write (2B)', async () => {
+  const me = asKu();
+  await assertSucceeds(getDoc(doc(me, 'notifications/n_u1')));
+  await assertFails(getDoc(doc(asKu2(), 'notifications/n_u1')));
+  await assertSucceeds(getDocs(query(collection(me, 'notifications'), where('uid', '==', 'u1'))));
+  await assertFails(getDocs(query(collection(me, 'notifications'), where('uid', '==', 'u2'))));
+  await assertSucceeds(updateDoc(doc(me, 'notifications/n_u1'), { read: true }));
+  await assertFails(updateDoc(doc(me, 'notifications/n_u1'), { read: false })); // no un-reading
+});
+
+test('notifications: no forging, rewording, foreign mark-read or deleting (2B)', async () => {
+  const me = asKu();
+  await assertFails(setDoc(doc(me, 'notifications/forged'), { uid: 'u1', type: 'post_restored', read: false }));
+  await assertFails(setDoc(doc(asKu2(), 'notifications/spam'), { uid: 'u1', type: 'post_hidden', read: false }));
+  await assertFails(updateDoc(doc(me, 'notifications/n_u1'), { postTitle: 'changed' }));
+  await assertFails(updateDoc(doc(me, 'notifications/n_u1'), { read: true, type: 'post_restored' }));
+  await assertFails(updateDoc(doc(asKu2(), 'notifications/n_u1'), { read: true }));
+  await assertFails(deleteDoc(doc(me, 'notifications/n_u1')));
+});
+
+// --- moderation collections: Admin-only (Plan 2B) ----------------------------
+
+const ADMIN_ONLY = [
+  'hidden_posts/hid_1', 'moderation_queue/p1', 'moderation_queue/p1/reports/u1',
+  'moderation_actors/u1', 'moderation_meta/takedown_anon_2027-01-20', 'takedown_requests/t1', 'moderation_log/l1',
+];
+for (const path of ADMIN_ONLY) {
+  test(`${path}: Admin-only — no client may get, create, update or delete (2B)`, async () => {
+    for (const db of [asKu(), asKu2()]) {
+      await assertFails(getDoc(doc(db, path)));
+      await assertFails(setDoc(doc(db, path), { uid: 'u1', university_id: 'kyoto_u' }));
+      await assertFails(deleteDoc(doc(db, path)));
+    }
+  });
+}
+
+test('moderation collections cannot be listed by any client (2B)', async () => {
+  for (const name of ['hidden_posts', 'moderation_queue', 'moderation_actors', 'moderation_meta', 'takedown_requests', 'moderation_log']) {
+    await assertFails(getDocs(collection(asKu(), name)));
+  }
+  await assertFails(getDocs(collection(asKu(), 'moderation_queue/p1/reports')));
 });
 
 // --- catch-all ---------------------------------------------------------------

@@ -68,11 +68,11 @@ service cloud.firestore {
       allow write: if false;
     }
 
-    // Per-user documents. The `owns` disjunct is kept alongside `kuDomain()` so
-    // that getUserProfile(uid) still works on the sign-in path, before the ID
-    // token carrying the email claim has necessarily been refreshed.
+    // Per-user documents (Plan 2B, M-15): readable by their owner only. The
+    // app never reads another user's profile — display names are denormalised
+    // onto posts, reviews, requests and talk rooms — and this doc holds the email.
     match /users/{uid} {
-      allow read: if owns(uid) || kuDomain();
+      allow read: if owns(uid);
       // pendingReferralCode (P2-2) is only a hint the server validates later;
       // keep it a short plain string. Other users' docs are never writable.
       allow create, update: if owns(uid)
@@ -87,39 +87,23 @@ service cloud.firestore {
       allow read, write: if owns(uid);
     }
 
-    // User-generated content: readable by signed-in users, created by verified
-    // KU users as themselves, edited/removed by the author.
+    // User-generated content: readable by any KU address, created by verified KU
+    // users as themselves, edited/removed by the author only.
     //
-    // Two narrow carve-outs let non-authors write:
-    //   * `reports` alone, so a post can be flagged — verified KU only (I4), so
-    //     an outsider Firebase account cannot mass-flag into the auto-delete
-    //     below. The flag is append-only, exactly one entry per write, and the
-    //     appended entry must be the caller's own uid (I7). Without that, a
-    //     single account could write `reports: ['x','y','z']` in one update and
-    //     then satisfy the >= 3 auto-delete below by itself; the append-only
-    //     shape restores the intended cost of three distinct accounts and
-    //     mirrors `app_store.reportPost()`, which appends the caller's uid and
-    //     refuses to report twice. The "not already in `reports`" clause is
-    //     what makes it one report per account: without it an account already
-    //     in the array would still satisfy `hasAny([uid])` while appending
-    //     someone else's uid, and could walk the array to 3 on its own;
-    //   * (Plan 2A) the download counters are Function-only: no client may write
-    //     `downloadCount`, and the author may not touch `filePaths` either;
-    //   * delete once `reports` reaches 3, which is the app's auto-moderation
-    //     (I2) — the client removes the post it just pushed over the threshold.
-    // The author branch pins `authorId` and `university_id` (M5) so an author
-    // cannot reassign authorship or move the post out of the university-scoped
-    // streams, and forbids it from touching `reports` at all (I7) — otherwise
-    // an author could clear the flags on their own post and dodge the
-    // auto-moderation threshold. Reports are only ever cleared by removing the
-    // whole document through the moderation delete path below.
+    // Plan 2B: moderation is Function-owned. Reports are Admin-only docs written
+    // by the `reportPost` callable (moderation_queue/{postId}/reports/{uid}), so
+    // no client may write `reports` and there is no ">= 3 reports" delete any
+    // more. A hidden post is MOVED to the Admin-only `hidden_posts/{id}`; create
+    // refuses that id so nobody can squat it and block its restore. The author
+    // branch pins `authorId` and `university_id` (M5) and keeps `reports`,
+    // `downloadCount` (Function-only, 2A) and `filePaths` out of reach.
     match /posts/{id} {
       allow read: if kuDomain();
       // Plan 2A: files live in the private bucket under resources/<uid>/. The
       // first path is checked here (rules cannot loop); the onPostCreated
       // trigger validates every path and deletes the post if any is bad.
-      // `downloadCount` and `reports` cannot be pre-seeded.
       allow create: if kuVerified()
+        && !exists(/databases/$(database)/documents/hidden_posts/$(id))
         && request.resource.data.authorId == request.auth.uid
         && request.resource.data.university_id == 'kyoto_u'
         && request.resource.data.get('downloadCount', 0) == 0
@@ -130,21 +114,12 @@ service cloud.firestore {
         && request.resource.data.filePaths[0] is string
         && request.resource.data.filePaths[0].matches('resources/' + request.auth.uid + '/.+');
       allow update: if signedIn()
-        && ((resource.data.authorId == request.auth.uid
-             && request.resource.data.authorId == resource.data.authorId
-             && request.resource.data.university_id == resource.data.university_id
-             && !request.resource.data.diff(resource.data).affectedKeys()
-                  .hasAny(['reports', 'downloadCount', 'filePaths']))
-            || (kuVerified()
-                && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['reports'])
-                && request.resource.data.reports.size()
-                     == resource.data.get('reports', []).size() + 1
-                && request.resource.data.reports.hasAll(resource.data.get('reports', []))
-                && request.resource.data.reports.hasAny([request.auth.uid])
-                && !resource.data.get('reports', []).hasAny([request.auth.uid])));
-      allow delete: if signedIn()
-        && (resource.data.authorId == request.auth.uid
-            || (kuVerified() && resource.data.get('reports', []).size() >= 3));
+        && resource.data.authorId == request.auth.uid
+        && request.resource.data.authorId == resource.data.authorId
+        && request.resource.data.university_id == resource.data.university_id
+        && !request.resource.data.diff(resource.data).affectedKeys()
+             .hasAny(['reports', 'downloadCount', 'filePaths']);
+      allow delete: if signedIn() && resource.data.authorId == request.auth.uid;
     }
 
     // Plan 2A: fulfilment is done by the onPostCreated trigger (Admin SDK), so
@@ -178,7 +153,11 @@ service cloud.firestore {
     // could replace `messages` wholesale and erase the other party's side of the
     // conversation — the same treatment `posts.reports` gets above.
     match /talk_rooms/{id} {
-      allow read: if kuDomain();
+      // Plan 2B (M-15): only the two parties may read a room; the client
+      // listens with `where('lenderId'|'borrowerId', '==', <own uid>)`.
+      allow read: if kuDomain()
+        && (resource.data.lenderId == request.auth.uid
+            || resource.data.borrowerId == request.auth.uid);
       allow create: if kuVerified()
         && (request.resource.data.lenderId == request.auth.uid
             || request.resource.data.borrowerId == request.auth.uid);
@@ -267,32 +246,14 @@ service cloud.firestore {
       allow delete: if signedIn() && resource.data.authorId == request.auth.uid;
     }
 
-    // Per-course roll-up maintained client-side in the same transaction as a
-    // review write (Phase 1 has no Cloud Functions). Trust-based: any verified KU
-    // account may create or update any course's aggregate, so the counters are
-    // only as honest as the client that wrote them — Phase 2 replaces this with a
-    // Function-authored aggregate. What the rule *does* enforce is a shape floor:
-    // the doc stays on `kyoto_u` and its two scalar counters stay non-negative
-    // ints, so a crafted write cannot poison a reader with a negative or
-    // non-numeric count. Deletion is forbidden outright — unlike a review, an
-    // aggregate has no owner who could legitimately remove it, and dropping it
-    // would silently zero a course's history. (This is *not* the `transactions`
-    // tier: `transactions` forbids update as well as delete; here update is the
-    // whole point of the collection.)
-    // Both create and update allow counter-only writes (e.g., bumpPostCount with
-    // merge: true) that omit review fields, using .get() defaults for absent fields.
-    // The document id is `Review.slug(courseKey)` (C1), not the raw courseKey —
-    // the wildcard is unused in the body, so no rule change follows from that,
-    // but the name should not claim otherwise.
+    // Per-course roll-up (Plan 2B, M-11). Maintained ONLY by the onReviewWritten
+    // / onPostWritten Cloud Functions, which recount the course from `reviews`,
+    // `posts` and `courses` (Admin SDK bypasses rules). The Phase-1 client-side
+    // aggregate let any verified account forge any course's counters and score;
+    // now no client writes at all. The doc id is `Review.slug(courseKey)` (C1).
     match /course_stats/{statsId} {
       allow read: if kuDomain();
-      allow create, update: if kuVerified()
-        && request.resource.data.university_id == 'kyoto_u'
-        && request.resource.data.get('reviewCount', 0) is int
-        && request.resource.data.get('reviewCount', 0) >= 0
-        && request.resource.data.get('ratingSum', 0) is int
-        && request.resource.data.get('ratingSum', 0) >= 0;
-      allow delete: if false;
+      allow write: if false;
     }
 
     // Credits (Plan 2A). Written ONLY by Cloud Functions (Admin SDK bypasses
@@ -316,6 +277,43 @@ service cloud.firestore {
     // One welcome/referral grant per email (P2-15): written by claimWelcome via
     // the Admin SDK only; the key is a hash of the address.
     match /welcome_claims/{key} {
+      allow read, write: if false;
+    }
+
+    // Moderation notices for a post's author (Plan 2B, M-10). Written only by
+    // Cloud Functions. The owner may read their own rows (the query must carry
+    // `where('uid', '==', <own uid>)`) and may only mark one read.
+    match /notifications/{id} {
+      allow read: if signedIn() && resource.data.uid == request.auth.uid;
+      allow update: if signedIn()
+        && resource.data.uid == request.auth.uid
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['read'])
+        && request.resource.data.read == true;
+      allow create, delete: if false;
+    }
+
+    // Moderation state (Plan 2B): Admin-only. Explicit denies (also the
+    // catch-all's answer) so none of these can be read, listed or written by a
+    // client — reporters, requesters and hidden posts stay private.
+    match /hidden_posts/{id} {
+      allow read, write: if false;
+    }
+    match /moderation_queue/{postId} {
+      allow read, write: if false;
+      match /reports/{reporterUid} {
+        allow read, write: if false;
+      }
+    }
+    match /moderation_actors/{uid} {
+      allow read, write: if false;
+    }
+    match /moderation_meta/{id} {
+      allow read, write: if false;
+    }
+    match /takedown_requests/{id} {
+      allow read, write: if false;
+    }
+    match /moderation_log/{id} {
       allow read, write: if false;
     }
 
