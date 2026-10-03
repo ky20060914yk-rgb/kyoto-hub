@@ -5,7 +5,7 @@ import {
 } from '@firebase/rules-unit-testing';
 import {
   setDoc, getDoc, updateDoc, deleteDoc, doc,
-  getDocs, query, where, collection,
+  getDocs, query, where, collection, orderBy, limit, serverTimestamp, Timestamp,
 } from 'firebase/firestore';
 
 let env;
@@ -219,6 +219,23 @@ beforeEach(async () => {
     // A removed post keeps its moderation state: its id must stay unusable too.
     await setDoc(doc(db, 'moderation_queue/q_removed'), { postId: 'q_removed', status: 'removed', university_id: 'kyoto_u' });
     await setDoc(doc(db, 'secret_admin_stuff/s_1'), { university_id: 'kyoto_u' });
+    // Plan 3: a market room (u1 = owner/lender, u2 = requester/borrower) with
+    // one message, a room u2 blocked, a live listing by u1 and a hidden one.
+    await setDoc(doc(db, 'talk_rooms/room_1/messages/m1'), {
+      senderId: 'u1', text: 'hello', createdAt: Timestamp.fromMillis(1), university_id: 'kyoto_u',
+    });
+    await setDoc(doc(db, 'talk_rooms/room_closed'), {
+      lenderId: 'u1', borrowerId: 'u2', university_id: 'kyoto_u', closedBy: 'u2',
+    });
+    await setDoc(doc(db, 'textbook_listings/l_1'), {
+      id: 'l_1', ownerId: 'u1', type: 'sell', title: '線形代数入門', status: 'active', price: 1500,
+      expiresAt: Timestamp.fromMillis(Date.now() + 86400000), university_id: 'kyoto_u',
+    });
+    await setDoc(doc(db, 'textbook_listings/l_hidden'), {
+      id: 'l_hidden', ownerId: 'u1', type: 'sell', title: '通報で非表示', status: 'hidden',
+      expiresAt: Timestamp.fromMillis(Date.now() + 86400000), university_id: 'kyoto_u',
+    });
+    await setDoc(doc(db, 'market_profiles/u1'), { ratingCount: 1, ratingSum: 5, recentComments: [], university_id: 'kyoto_u' });
   });
 });
 
@@ -553,109 +570,103 @@ test('unverified user cannot create a request', async () => {
   }));
 });
 
-// --- textbook_requests -------------------------------------------------------
+// --- textbook_requests: retired (Plan 3, T-1) --------------------------------
 
-test('textbook request must be created by its own requester', async () => {
-  const mine = asKu();
-  await assertSucceeds(setDoc(doc(mine, 'textbook_requests/tb_new'), {
+test('textbook_requests: no client may create, update or delete one any more (3)', async () => {
+  await assertFails(setDoc(doc(asKu(), 'textbook_requests/tb_new'), {
     requesterId: 'u1', university_id: 'kyoto_u', status: 'open',
   }));
-  await assertFails(setDoc(doc(mine, 'textbook_requests/tb_bad'), {
-    requesterId: 'u2', university_id: 'kyoto_u',
-  }));
-});
-
-test('another verified KU user can flip a textbook request status, outsiders cannot', async () => {
-  await assertSucceeds(updateDoc(doc(asKu2(), 'textbook_requests/tb_u1'), { status: 'matched' }));
-  const outsider = env.authenticatedContext('u3', OUTSIDER).firestore();
-  await assertFails(updateDoc(doc(outsider, 'textbook_requests/tb_u1'), { status: 'matched' }));
-});
-
-// `app_store.respondToTextbookRequest()` re-sets the whole TextbookRequest map
-// with status/responderId/responderName/talkRoomId filled in (I4).
-test('a responder may land the full-document textbook response write (I4)', async () => {
-  await assertSucceeds(setDoc(doc(asKu2(), 'textbook_requests/tb_full'), fullTextbookRequest({
+  await assertFails(updateDoc(doc(asKu2(), 'textbook_requests/tb_u1'), { status: 'matched' }));
+  await assertFails(updateDoc(doc(asKu(), 'textbook_requests/tb_u1'), { status: 'completed' })); // not even the requester
+  await assertFails(setDoc(doc(asKu2(), 'textbook_requests/tb_full'), fullTextbookRequest({
     status: 'matched', responderId: 'u2', responderName: '貸主', talkRoomId: 'room_9',
   })));
-});
-
-test('an outsider cannot land the full-document textbook response write (I4)', async () => {
-  await assertFails(setDoc(doc(asOutsider(), 'textbook_requests/tb_full'), fullTextbookRequest({
-    status: 'matched', responderId: 'u3', talkRoomId: 'room_9',
-  })));
-});
-
-test('an unverified KU user cannot land the textbook response write (I4)', async () => {
-  await assertFails(setDoc(doc(asKuUnverified(), 'textbook_requests/tb_full'),
-    fullTextbookRequest({ status: 'matched', responderId: 'u2' })));
-});
-
-test('textbook requests cannot be deleted', async () => {
   await assertFails(deleteDoc(doc(asKu(), 'textbook_requests/tb_u1')));
 });
 
-// --- talk_rooms --------------------------------------------------------------
+// --- talk_rooms: Function-created, summary Function-owned (Plan 3) ----------
 
-test('talk room can only be created by a participant', async () => {
-  await assertSucceeds(setDoc(doc(asKu(), 'talk_rooms/room_new'), {
-    lenderId: 'u1', borrowerId: 'u2', university_id: 'kyoto_u', messages: [],
+const stranger = () => env.authenticatedContext('u7', { email: 'g@st.kyoto-u.ac.jp', email_verified: true }).firestore();
+
+test('talk_rooms: no client creates a room — not even a would-be participant (3, T-14)', async () => {
+  await assertFails(setDoc(doc(asKu(), 'talk_rooms/room_new'), {
+    lenderId: 'u1', borrowerId: 'u2', university_id: 'kyoto_u',
   }));
-  await assertFails(setDoc(doc(asKu(), 'talk_rooms/room_bad'), {
-    lenderId: 'u2', borrowerId: 'u3', university_id: 'kyoto_u', messages: [],
-  }));
-});
-
-test('only participants can post messages into a talk room', async () => {
-  await assertSucceeds(updateDoc(doc(asKu(), 'talk_rooms/room_1'), { messages: [{ text: 'hi' }] }));
-  // The log is append-only, so u2 must carry u1's message forward (M6).
-  await assertSucceeds(updateDoc(doc(asKu2(), 'talk_rooms/room_1'), {
-    messages: [{ text: 'hi' }, { text: 'yo' }],
-  }));
-  await assertFails(updateDoc(doc(asOutsider(), 'talk_rooms/room_1'), { messages: [{ text: 'spy' }] }));
-});
-
-// --- talk_rooms: the message log is append-only (M6) --------------------------
-//
-// Either participant could previously replace `messages` wholesale and delete
-// the other party's side of the conversation.
-
-test('a participant may append to the message log (M6)', async () => {
-  await assertSucceeds(updateDoc(doc(asKu(), 'talk_rooms/room_chat'), {
-    messages: [
-      { id: 'm1', text: 'hello' }, { id: 'm2', text: 'reply' }, { id: 'm3', text: 'and more' },
-    ],
+  await assertFails(setDoc(doc(asKu2(), 'talk_rooms/l_l_1_u2'), {
+    lenderId: 'u1', borrowerId: 'u2', listingId: 'l_1', university_id: 'kyoto_u',
   }));
 });
 
-test('a participant cannot clear or shorten the message log (M6)', async () => {
-  const db = asKu2();
-  await assertFails(updateDoc(doc(db, 'talk_rooms/room_chat'), { messages: [] }));
-  await assertFails(updateDoc(doc(db, 'talk_rooms/room_chat'), {
-    messages: [{ id: 'm1', text: 'hello' }],
-  }));
-});
-
-test('a participant cannot rewrite an existing message (M6)', async () => {
+test('talk_rooms: the legacy messages array is frozen and the summary is Function-owned (3, T-18)', async () => {
   await assertFails(updateDoc(doc(asKu(), 'talk_rooms/room_chat'), {
-    messages: [{ id: 'm1', text: 'tampered' }, { id: 'm2', text: 'reply' }],
+    messages: [{ id: 'm1', text: 'hello' }, { id: 'm2', text: 'reply' }, { id: 'm3', text: 'more' }],
   }));
+  for (const patch of [
+    { warningNotice: 'x' }, { lastMessageText: '振込先は…' }, { lastSenderId: 'u2' }, { lenderSent: true },
+    { borrowerSent: true }, { closedBy: null }, { lenderId: 'u3' }, { borrowerId: 'u1' }, { university_id: 'other_u' },
+  ]) {
+    await assertFails(updateDoc(doc(asKu(), 'talk_rooms/room_1'), patch), JSON.stringify(patch));
+  }
 });
 
-test('an unrelated field may still be updated while the log is preserved (M6)', async () => {
-  await assertSucceeds(updateDoc(doc(asKu(), 'talk_rooms/room_chat'), { warningNotice: 'x' }));
+test('talk_rooms: each party may set ONLY their own read marker, and only to the server time (3)', async () => {
+  await assertSucceeds(updateDoc(doc(asKu(), 'talk_rooms/room_1'), { lenderReadAt: serverTimestamp() }));
+  await assertSucceeds(updateDoc(doc(asKu2(), 'talk_rooms/room_1'), { borrowerReadAt: serverTimestamp() }));
+  await assertFails(updateDoc(doc(asKu(), 'talk_rooms/room_1'), { borrowerReadAt: serverTimestamp() }));
+  await assertFails(updateDoc(doc(asKu2(), 'talk_rooms/room_1'), { lenderReadAt: serverTimestamp() }));
+  await assertFails(updateDoc(doc(asKu(), 'talk_rooms/room_1'), { lenderReadAt: Timestamp.fromMillis(4102444800000) }));
+  await assertFails(updateDoc(doc(asKu(), 'talk_rooms/room_1'), { lenderReadAt: serverTimestamp(), lenderSent: true }));
+  await assertFails(updateDoc(doc(stranger(), 'talk_rooms/room_1'), { lenderReadAt: serverTimestamp() }));
 });
 
 test('talk rooms cannot be deleted', async () => {
   await assertFails(deleteDoc(doc(asKu(), 'talk_rooms/room_1')));
 });
 
-test('talk_rooms: a participant cannot re-point lenderId/borrowerId, add a third uid, or change university_id', async () => {
-  await assertFails(updateDoc(doc(asKu2(), 'talk_rooms/room_1'), { lenderId: 'u3' }));
-  await assertFails(updateDoc(doc(asKu(), 'talk_rooms/room_1'), { borrowerId: 'u3' }));
-  await assertFails(updateDoc(doc(asKu(), 'talk_rooms/room_1'), { borrowerId: 'u1' }));
-  await assertFails(updateDoc(doc(asKu2(), 'talk_rooms/room_1'), { university_id: 'other_u' }));
-  await assertFails(updateDoc(doc(asKu2(), 'talk_rooms/room_1'), { thirdId: 'u3', lenderId: 'u3' }));
-  await assertSucceeds(updateDoc(doc(asKu2(), 'talk_rooms/room_1'), { lenderId: 'u1' })); // unchanged value is fine
+// --- talk_rooms/{id}/messages (Plan 3, spec §4.5.5) --------------------------
+
+const goodMsg = (over = {}) => ({ senderId: 'u1', text: 'こんにちは', createdAt: serverTimestamp(), university_id: 'kyoto_u', ...over });
+
+test('messages: only the two parties can read them, page by page; nobody else (3)', async () => {
+  const page = (db) => getDocs(query(collection(db, 'talk_rooms/room_1/messages'), orderBy('createdAt', 'desc'), limit(30)));
+  await assertSucceeds(page(asKu()));
+  await assertSucceeds(page(asKu2()));
+  await assertFails(page(stranger()));
+  await assertFails(page(asOutsider()));
+  await assertSucceeds(getDoc(doc(asKu2(), 'talk_rooms/room_1/messages/m1')));
+  await assertFails(getDoc(doc(stranger(), 'talk_rooms/room_1/messages/m1')));
+});
+
+test('messages: a verified party posts as themselves, stamped with the server time (3)', async () => {
+  await assertSucceeds(setDoc(doc(asKu(), 'talk_rooms/room_1/messages/a1'), goodMsg()));
+  await assertSucceeds(setDoc(doc(asKu2(), 'talk_rooms/room_1/messages/a2'), goodMsg({ senderId: 'u2' })));
+  await assertSucceeds(setDoc(doc(asKu(), 'talk_rooms/room_1/messages/a3'), goodMsg({ text: 'x'.repeat(1000) }))); // boundary
+  const bads = [
+    goodMsg({ senderId: 'u2' }), goodMsg({ text: '' }), goodMsg({ text: 'x'.repeat(1001) }), goodMsg({ text: 42 }),
+    goodMsg({ createdAt: Timestamp.fromMillis(1) }), goodMsg({ university_id: 'other_u' }),
+    goodMsg({ senderName: '運営' }), goodMsg({ lastMessageText: 'x' }),
+  ];
+  for (const [i, m] of bads.entries()) {
+    await assertFails(setDoc(doc(asKu(), `talk_rooms/room_1/messages/b${i}`), m), JSON.stringify(m));
+  }
+});
+
+test('messages: strangers, unverified parties and outsiders cannot post (3)', async () => {
+  await assertFails(setDoc(doc(stranger(), 'talk_rooms/room_1/messages/s1'), goodMsg({ senderId: 'u7' })));
+  await assertFails(setDoc(doc(asKuUnverified(), 'talk_rooms/room_1/messages/s2'), goodMsg({ senderId: 'u2' })));
+  await assertFails(setDoc(doc(asOutsider(), 'talk_rooms/room_1/messages/s3'), goodMsg({ senderId: 'u3' })));
+  await assertFails(setDoc(doc(asKu(), 'talk_rooms/no_such_room/messages/s4'), goodMsg()));
+});
+
+test('messages: immutable — no edit, no delete, not even by the sender (3)', async () => {
+  await assertFails(updateDoc(doc(asKu(), 'talk_rooms/room_1/messages/m1'), { text: 'rewritten' }));
+  await assertFails(deleteDoc(doc(asKu(), 'talk_rooms/room_1/messages/m1')));
+  await assertFails(deleteDoc(doc(asKu2(), 'talk_rooms/room_1/messages/m1')));
+});
+
+test('messages: a closed (blocked) room accepts nothing from either side (3, T-17)', async () => {
+  await assertFails(setDoc(doc(asKu(), 'talk_rooms/room_closed/messages/c1'), goodMsg()));
+  await assertFails(setDoc(doc(asKu2(), 'talk_rooms/room_closed/messages/c2'), goodMsg({ senderId: 'u2' })));
 });
 
 // --- talk_rooms: participants only (Plan 2B, M-15) --------------------------
@@ -1057,6 +1068,65 @@ test('moderation collections cannot be listed by any client (2B)', async () => {
     await assertFails(getDocs(collection(asKu(), name)));
   }
   await assertFails(getDocs(collection(asKu(), 'moderation_queue/p1/reports')));
+});
+
+// --- textbook market (Plan 3) -------------------------------------------------
+
+test('textbook_listings: any KU address reads and runs the list queries; no client writes, not even the owner (3)', async () => {
+  await assertSucceeds(getDoc(doc(asKuUnverified(), 'textbook_listings/l_1')));
+  await assertFails(getDoc(doc(asOutsider(), 'textbook_listings/l_1')));
+  const now = Timestamp.now();
+  await assertSucceeds(getDocs(query(collection(asKu(), 'textbook_listings'),
+    where('status', '==', 'active'), where('expiresAt', '>', now), orderBy('expiresAt', 'desc'), limit(50))));
+  await assertSucceeds(getDocs(query(collection(asKu(), 'textbook_listings'), where('ownerId', '==', 'u1'))));
+  const owner = asKu();
+  await assertFails(setDoc(doc(owner, 'textbook_listings/l_new'), {
+    id: 'l_new', ownerId: 'u1', type: 'give', title: 't', status: 'active', university_id: 'kyoto_u',
+  }));
+  await assertFails(updateDoc(doc(owner, 'textbook_listings/l_1'), { price: 1 }));
+  await assertFails(updateDoc(doc(owner, 'textbook_listings/l_1'), { status: 'active', expiresAt: Timestamp.fromMillis(4102444800000) }));
+  await assertFails(updateDoc(doc(asKu2(), 'textbook_listings/l_1'), { ownerId: 'u2' }));
+  await assertFails(deleteDoc(doc(owner, 'textbook_listings/l_1')));
+});
+
+test('textbook_listings: a listing hidden by moderation is readable by its owner only; an unfiltered list is refused (3, T-19)', async () => {
+  await assertSucceeds(getDoc(doc(asKu(), 'textbook_listings/l_hidden')));
+  await assertFails(getDoc(doc(asKu2(), 'textbook_listings/l_hidden')));
+  await assertSucceeds(getDocs(query(collection(asKu(), 'textbook_listings'), where('ownerId', '==', 'u1'))));
+  await assertFails(getDocs(query(collection(asKu2(), 'textbook_listings'), where('ownerId', '==', 'u1'))));
+  await assertFails(getDocs(query(collection(asKu2(), 'textbook_listings'), where('status', '==', 'hidden'))));
+  await assertFails(getDocs(collection(asKu2(), 'textbook_listings')));
+});
+
+test('market_profiles: KU-readable rating summaries that no client can forge (3, T-10)', async () => {
+  await assertSucceeds(getDoc(doc(asKu2(), 'market_profiles/u1')));
+  await assertFails(getDoc(doc(asOutsider(), 'market_profiles/u1')));
+  await assertFails(setDoc(doc(asKu(), 'market_profiles/u1'), { ratingCount: 99, ratingSum: 495 }));
+  await assertFails(updateDoc(doc(asKu(), 'market_profiles/u1'), { ratingSum: 5000 }));
+  await assertFails(setDoc(doc(asKu2(), 'market_profiles/u2'), { ratingCount: 1, ratingSum: 5 }));
+});
+
+const MARKET_ADMIN_ONLY = [
+  'market_identities/u1', 'market_actors/k1', 'market_blocks/u1_u2', 'market_inbox/u1', 'market_ratings/room_1_lender',
+  'market_reputation/k1', 'market_queue/l_1', 'market_queue/l_1/reports/k1', 'market_cases/room_1_borrower',
+];
+for (const path of MARKET_ADMIN_ONLY) {
+  test(`${path}: Admin-only — no client may get, create or delete (3)`, async () => {
+    for (const db of [asKu(), asKu2()]) {
+      await assertFails(getDoc(doc(db, path)));
+      await assertFails(setDoc(doc(db, path), { uid: 'u1', stars: 5, university_id: 'kyoto_u' }));
+      await assertFails(deleteDoc(doc(db, path)));
+    }
+  });
+}
+
+test('market collections cannot be listed by any client (3)', async () => {
+  for (const name of ['market_identities', 'market_actors', 'market_blocks', 'market_inbox', 'market_ratings',
+    'market_reputation', 'market_queue', 'market_cases']) {
+    await assertFails(getDocs(collection(asKu(), name)));
+  }
+  await assertFails(getDocs(collection(asKu(), 'market_queue/l_1/reports')));
+  await assertFails(getDocs(query(collection(asKu(), 'market_ratings'), where('rateeUid', '==', 'u1'))));
 });
 
 // --- catch-all ---------------------------------------------------------------

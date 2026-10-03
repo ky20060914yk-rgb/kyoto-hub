@@ -67,3 +67,32 @@ test('NOBODY can read, overwrite or delete through the client SDK — not even t
   await assertFails(uploadBytes(ref(st('u1', KU), 'resources/u1/seeded.pdf'), bytes, pdf)); // overwrite
   await assertFails(deleteObject(ref(st('u1', KU), 'resources/u1/seeded.pdf')));
 });
+
+// --- listing photos (Plan 3, T-5) ---------------------------------------------
+
+const jpeg = { contentType: 'image/jpeg' };
+
+test('listing photos: a verified owner creates small images under their own listings/ prefix only', async () => {
+  const s = st('u1', KU);
+  await assertSucceeds(uploadBytes(ref(s, 'listings/u1/1_a.jpg'), bytes, jpeg));
+  await assertSucceeds(uploadBytes(ref(s, 'listings/u1/2_a.webp'), new Uint8Array(2 * 1024 * 1024), { contentType: 'image/webp' })); // boundary
+  await assertFails(uploadBytes(ref(s, 'listings/u1/big.jpg'), new Uint8Array(2 * 1024 * 1024 + 1), jpeg));
+  await assertFails(uploadBytes(ref(s, 'listings/u2/1_a.jpg'), bytes, jpeg));
+  await assertFails(uploadBytes(ref(s, 'listings/u1/sub/a.jpg'), bytes, jpeg));
+  await assertFails(uploadBytes(ref(s, 'listings/u1/a.pdf'), bytes, pdf));
+  await assertFails(uploadBytes(ref(s, 'listings/u1/a.svg'), bytes, { contentType: 'image/svg+xml' }));
+  await assertFails(uploadBytes(ref(st('u2', KU_UNVERIFIED), 'listings/u2/a.jpg'), bytes, jpeg));
+  await assertFails(uploadBytes(ref(st('u3', OUTSIDER), 'listings/u3/a.jpg'), bytes, jpeg));
+});
+
+test('listing photos: any KU address may read; outsiders and anonymous may not; nobody overwrites or deletes', async () => {
+  await env.withSecurityRulesDisabled(async (ctx) => {
+    await uploadBytes(ref(ctx.storage(), 'listings/u1/seeded.jpg'), bytes, jpeg);
+  });
+  await assertSucceeds(getBytes(ref(st('u2', KU_UNVERIFIED), 'listings/u1/seeded.jpg')));
+  await assertSucceeds(getBytes(ref(st('u1', KU), 'listings/u1/seeded.jpg')));
+  await assertFails(getBytes(ref(st('u3', OUTSIDER), 'listings/u1/seeded.jpg')));
+  await assertFails(getBytes(ref(env.unauthenticatedContext().storage(), 'listings/u1/seeded.jpg')));
+  await assertFails(uploadBytes(ref(st('u1', KU), 'listings/u1/seeded.jpg'), bytes, jpeg));
+  await assertFails(deleteObject(ref(st('u1', KU), 'listings/u1/seeded.jpg')));
+});

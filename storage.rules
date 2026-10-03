@@ -10,6 +10,13 @@ service firebase.storage {
         && request.auth.token.email_verified == true;
     }
 
+    // A Kyoto University address, verified or not (firestore.rules kuDomain()).
+    function kuDomain() {
+      return request.auth != null
+        && request.auth.token.email is string
+        && request.auth.token.email.lower().matches('^[^@]+@st[.]kyoto-u[.]ac[.]jp$');
+    }
+
     // Plan 2A: the bucket is PRIVATE. A verified KU user may only CREATE an
     // object under their own `resources/<uid>/` prefix. Nobody can read through
     // the client SDK — downloads are 10-minute signed URLs issued by the
@@ -25,6 +32,21 @@ service firebase.storage {
         && request.resource.size <= 20 * 1024 * 1024
         && (request.resource.contentType == 'application/pdf'
             || request.resource.contentType.matches('image/(png|jpeg|webp)'));
+      allow update, delete: if false;
+    }
+
+    // Plan 3 (T-5): textbook listing photos. Readable by any KU address (the
+    // app asks for a download URL at display time — never stored in Firestore);
+    // a verified owner may CREATE small images under their own prefix, never
+    // overwrite or delete (operator removal cleans up via onListingDeleted).
+    // SVG and every non-image type are refused (script-capable / not a photo).
+    match /listings/{uid}/{file} {
+      allow read: if kuDomain();
+      allow create: if resource == null
+        && kuVerified()
+        && request.auth.uid == uid
+        && request.resource.size <= 2 * 1024 * 1024
+        && request.resource.contentType.matches('image/(png|jpeg|webp)');
       allow update, delete: if false;
     }
 

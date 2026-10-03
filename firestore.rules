@@ -142,37 +142,57 @@ service cloud.firestore {
       allow delete: if signedIn() && resource.data.authorId == request.auth.uid;
     }
 
+    // Plan 3 (T-1): the 参考書リクエスト board is retired — the textbook market
+    // (`textbook_listings`, 買いたい) replaces it. Old documents stay readable as
+    // history; no client may write one any more.
     match /textbook_requests/{id} {
       allow read: if kuDomain();
-      allow create: if kuVerified() && request.resource.data.requesterId == request.auth.uid;
-      allow update: if kuVerified();   // responder flips status; tightened in Phase 3
-      allow delete: if false;
+      allow write: if false;
     }
 
-    // A talk room is a two-party chat. Either participant may update it, but the
-    // message log is append-only (M6): without the `hasAll` clause a participant
-    // could replace `messages` wholesale and erase the other party's side of the
-    // conversation — the same treatment `posts.reports` gets above.
+    // A talk room is a two-party chat, created ONLY by the `openListingChat`
+    // Cloud Function (Plan 3, T-14). Messages live in the `messages`
+    // subcollection (spec §4.5.5); the old `messages` array is frozen. The room
+    // summary (last message, who has spoken, closedBy) is Function-owned (T-18),
+    // so the only field a participant may write is their OWN read marker, and
+    // only to the server time.
+    function roomParty(room) {
+      return signedIn() && (room.lenderId == request.auth.uid || room.borrowerId == request.auth.uid);
+    }
+    function readMarker(room) {
+      return room.lenderId == request.auth.uid ? 'lenderReadAt' : 'borrowerReadAt';
+    }
     match /talk_rooms/{id} {
       // Plan 2B (M-15): only the two parties may read a room; the client
       // listens with `where('lenderId'|'borrowerId', '==', <own uid>)`.
       allow read: if kuDomain()
         && (resource.data.lenderId == request.auth.uid
             || resource.data.borrowerId == request.auth.uid);
-      allow create: if kuVerified()
-        && (request.resource.data.lenderId == request.auth.uid
-            || request.resource.data.borrowerId == request.auth.uid);
-      allow update: if signedIn()
-        && (resource.data.lenderId == request.auth.uid
-            || resource.data.borrowerId == request.auth.uid)
-        // The parties and tenant are fixed at create: a participant cannot
-        // re-point lenderId/borrowerId (hand the room to a third uid).
-        && request.resource.data.lenderId == resource.data.lenderId
-        && request.resource.data.borrowerId == resource.data.borrowerId
-        && request.resource.data.get('university_id', null) == resource.data.get('university_id', null)
-        && request.resource.data.get('messages', [])
-             .hasAll(resource.data.get('messages', []));
-      allow delete: if false;
+      allow create, delete: if false;
+      allow update: if roomParty(resource.data)
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly([readMarker(resource.data)])
+        && request.resource.data[readMarker(resource.data)] == request.time;
+
+      // One document per message: no 1 MiB array, no lost-update race. Only the
+      // two parties read; a verified party posts as themselves, stamped with the
+      // server time, while the room is not closed (blocked, T-17). The name
+      // shown is taken from the room (Function-sanitized), never from here.
+      // Immutable: no edit, no delete.
+      match /messages/{msgId} {
+        allow read: if kuDomain()
+          && roomParty(get(/databases/$(database)/documents/talk_rooms/$(id)).data);
+        allow create: if kuVerified()
+          && roomParty(get(/databases/$(database)/documents/talk_rooms/$(id)).data)
+          && get(/databases/$(database)/documents/talk_rooms/$(id)).data.get('closedBy', null) == null
+          && request.resource.data.keys().hasOnly(['senderId', 'text', 'createdAt', 'university_id'])
+          && request.resource.data.senderId == request.auth.uid
+          && request.resource.data.text is string
+          && request.resource.data.text.size() >= 1
+          && request.resource.data.text.size() <= 1000
+          && request.resource.data.createdAt == request.time
+          && request.resource.data.university_id == 'kyoto_u';
+        allow update, delete: if false;
+      }
     }
 
     match /transactions/{id} {
@@ -320,6 +340,56 @@ service cloud.firestore {
       allow read, write: if false;
     }
     match /moderation_log/{id} {
+      allow read, write: if false;
+    }
+
+    // Textbook market (Plan 3). Listings and the public rating summaries are
+    // written ONLY by Cloud Functions (createListing / updateListing / the
+    // moderation tools; refreshReputation): server ids, owner = caller, daily
+    // caps and validation cannot be bypassed. Any KU address may read them,
+    // except that a listing hidden by moderation (T-19) is readable by its owner
+    // only — so the list query must say `where('status', '==', 'active')` (or
+    // `where('ownerId', '==', <own uid>)`). Closed and expired listings are
+    // left out by that query (T-8).
+    match /textbook_listings/{id} {
+      allow read: if kuDomain()
+        && (resource.data.status != 'hidden' || resource.data.ownerId == request.auth.uid);
+      allow write: if false;
+    }
+    match /market_profiles/{uid} {
+      allow read: if kuDomain();
+      allow write: if false;
+    }
+
+    // Market state (Plan 3): Admin-only. Identities (uid -> mailbox key), daily
+    // counters, blocks, match-notice caps, individual ratings (blind until
+    // revealed, T-11), the per-mailbox reputation, the listing report queue and
+    // the room cases (harassment / 受け渡し不履行).
+    match /market_identities/{uid} {
+      allow read, write: if false;
+    }
+    match /market_actors/{key} {
+      allow read, write: if false;
+    }
+    match /market_blocks/{id} {
+      allow read, write: if false;
+    }
+    match /market_inbox/{uid} {
+      allow read, write: if false;
+    }
+    match /market_ratings/{id} {
+      allow read, write: if false;
+    }
+    match /market_reputation/{key} {
+      allow read, write: if false;
+    }
+    match /market_queue/{listingId} {
+      allow read, write: if false;
+      match /reports/{reporterKey} {
+        allow read, write: if false;
+      }
+    }
+    match /market_cases/{id} {
       allow read, write: if false;
     }
 
