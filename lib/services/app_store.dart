@@ -17,6 +17,8 @@ import 'firestore_service.dart';
 import 'review_service.dart';
 import 'ranking_service.dart';
 import 'credit_service.dart';
+import 'moderation_service.dart';
+import '../models/app_notification.dart';
 import '../utils/download_helper.dart';
 import 'package:firebase_storage/firebase_storage.dart' as fb_storage;
 
@@ -60,6 +62,38 @@ class AppStore extends ChangeNotifier {
   StreamSubscription<int>? _balanceSub;
   StreamSubscription<List<CreditLedgerEntry>>? _ledgerSub;
 
+  /// Report / takedown callables and the caller's own moderation notices (Plan 2B).
+  final ModerationService moderation;
+  List<AppNotification> notifications = [];
+  int get unreadNotificationCount => notifications.where((n) => !n.read).length;
+  StreamSubscription<List<AppNotification>>? _notifSub;
+  StreamSubscription<List<TalkRoom>>? _roomsSub;
+
+  /// Per-user streams the Plan 2B rules only allow once the uid is known: the
+  /// caller's own notices and the talk rooms they take part in.
+  void _watchUserStreams(String uid) {
+    _notifSub?.cancel();
+    _roomsSub?.cancel();
+    _notifSub = moderation.streamNotifications(uid).listen((n) {
+      notifications = n;
+      notifyListeners();
+    }, onError: (_) {});
+    _roomsSub = _firestore.streamTalkRoomsFor(uid).listen((rooms) {
+      talkRooms = rooms;
+      notifyListeners();
+    }, onError: (_) {});
+  }
+
+  /// Marks every unread notice read (the only client write the rules allow on
+  /// `notifications`). Best-effort.
+  Future<void> markNotificationsRead() async {
+    for (final n in notifications.where((n) => !n.read).toList()) {
+      try {
+        await moderation.markNotificationRead(n.id);
+      } catch (_) {/* retried next time the screen opens */}
+    }
+  }
+
   void _watchCredits(String uid) {
     _balanceSub?.cancel();
     _codeSub?.cancel();
@@ -95,7 +129,7 @@ class AppStore extends ChangeNotifier {
     }
   }
 
-  AppStore(this.courses, this.reviews, this.ranking, this.credits) {
+  AppStore(this.courses, this.reviews, this.ranking, this.credits, this.moderation) {
     // _initSampleData(); // Commented out for production release
     _initFirebaseSync();
   }
@@ -145,6 +179,7 @@ class AppStore extends ChangeNotifier {
           if (profile != null) {
             currentUser = profile;
             _watchCredits(fbUser.uid);
+            _watchUserStreams(fbUser.uid);
             if (fbUser.emailVerified) _claimWelcome();
 
             final timetable = await _firestore.getUserTimetable(fbUser.uid);
@@ -172,13 +207,6 @@ class AppStore extends ChangeNotifier {
       _firestore.streamTextbookRequests().listen((remoteTextbooks) {
         if (remoteTextbooks.isNotEmpty) {
           textbookRequests = remoteTextbooks;
-          notifyListeners();
-        }
-      }, onError: (_) {});
-
-      _firestore.streamTalkRooms().listen((remoteRooms) {
-        if (remoteRooms.isNotEmpty) {
-          talkRooms = remoteRooms;
           notifyListeners();
         }
       }, onError: (_) {});
@@ -278,6 +306,7 @@ class AppStore extends ChangeNotifier {
       await _firestore.saveUserProfile(profile);
       currentUser = profile;
       _watchCredits(uid); // authStateChanges may fire before the profile exists
+      _watchUserStreams(uid);
 
       showOnboardingFlow = true;
       notifyListeners();
@@ -326,6 +355,10 @@ class AppStore extends ChangeNotifier {
     _balanceSub?.cancel();
     _codeSub?.cancel();
     _ledgerSub?.cancel();
+    _notifSub?.cancel();
+    _roomsSub?.cancel();
+    notifications = [];
+    talkRooms = [];
     creditBalance = 0;
     invitationCode = null;
     ledger = [];
@@ -445,28 +478,6 @@ class AppStore extends ChangeNotifier {
       ..sort((a, b) => b.createdAt.compareTo(a.createdAt));
   }
 
-  /// Task 8: keep `course_stats`' post counters in step for the ranking.
-  ///
-  /// Deliberately **synchronous and fire-and-forget**. Resolving the courseKey
-  /// needs `courses.byId`, which calls `warmUp()` (rethrows on a failed catalog
-  /// load) and then a live `.get()` on a cache miss — so it can throw. If that
-  /// `await` sat in a caller's critical path it would abort the rest of the
-  /// mutation (point clawback, `notifyListeners()`) after the post had already
-  /// been deleted from Firestore. A missed bump only skews a future ranking.
-  void _bumpPostCountFor(Post post, int delta) {
-    () async {
-      final course = await courses.byId(post.subjectId).catchError((_) => null);
-      final ck = course?.courseKey ?? '';
-      if (ck.isEmpty) return;
-      await reviews.bumpPostCount(
-        ck,
-        isPastExam: post.category == PostCategory.pastExam,
-        delta: delta,
-      );
-    }()
-        .catchError((_) {});
-  }
-
   Future<bool> addPost({
     required String subjectId,
     required PostCategory category,
@@ -508,7 +519,6 @@ class AppStore extends ChangeNotifier {
     // Credits are granted by the `onPostCreated` trigger once it has validated
     // the files; the balance arrives through the `credits` stream. If the post
     // is rejected there the trigger deletes it and the posts stream drops it.
-    _bumpPostCountFor(newPost, 1);
     lastNoticeMessage = '資料をアップロードしました！確認後、クレジットが付与されます。';
     notifyListeners();
     return true;
@@ -577,50 +587,40 @@ class AppStore extends ChangeNotifier {
   Future<void> deletePost(String postId) async {
     final idx = posts.indexWhere((p) => p.id == postId);
     if (idx == -1) return;
-    final post = posts[idx];
-
     posts.removeAt(idx);
     await _firestore.deletePost(postId).catchError((_) {});
-
-    _bumpPostCountFor(post, -1);
 
     notifyListeners();
   }
 
-  Future<void> reportPost(String postId) async {
+  /// Plan 2B: reports go through the `reportPost` callable (one per account per
+  /// post, Function-owned); the server hides the post at 3 distinct reporters.
+  Future<void> reportPost(String postId, {required ReportCategory category, String detail = ''}) async {
     if (currentUser == null) return;
-    final idx = posts.indexWhere((p) => p.id == postId);
-    if (idx == -1) return;
-
-    final post = posts[idx];
-    if (post.reports.contains(currentUser!.uid)) {
-      lastNoticeMessage = '既にこの投稿を通報済みです。';
-      notifyListeners();
-      return;
-    }
-
-    final updatedReports = List<String>.from(post.reports)..add(currentUser!.uid);
-    final updatedPost = post.copyWith(reports: updatedReports);
-
-    if (updatedReports.length >= 3) {
-      // Auto-delete / hide the post!
-      posts.removeAt(idx);
-      // Persist this third report FIRST: the auto-moderation delete rule checks
-      // the stored `reports` size, so deleting before the report lands would be
-      // denied (the server would still see only two reports).
-      await _firestore.updatePostReports(postId, updatedReports).catchError((_) {});
-      await _firestore.deletePost(postId).catchError((_) {});
-
-      // Same counter bookkeeping as AppStore.deletePost: this branch removes
-      // the post without going through it, so the decrement has to be issued
-      // here too or the ranking counter drifts upward forever.
-      _bumpPostCountFor(post, -1);
-
-      lastNoticeMessage = '通報が3件に達したため、投稿は自動削除されました。';
-    } else {
-      posts[idx] = updatedPost;
-      await _firestore.updatePostReports(postId, updatedReports).catchError((_) {});
-      lastNoticeMessage = '投稿を通報しました。ご協力ありがとうございます。';
+    try {
+      final outcome = await moderation.reportPost(postId, category, detail);
+      switch (outcome) {
+        case ReportOutcome.hidden:
+          posts.removeWhere((p) => p.id == postId);
+          lastNoticeMessage = '通報が一定数に達したため、この投稿は非表示になりました。運営が内容を確認します。';
+        case ReportOutcome.alreadyHidden:
+          posts.removeWhere((p) => p.id == postId);
+          lastNoticeMessage = 'この投稿はすでに非表示になっています。';
+        case ReportOutcome.duplicate:
+          lastNoticeMessage = '既にこの投稿を通報済みです。';
+        case ReportOutcome.reported:
+          lastNoticeMessage = '通報を受け付けました。ご協力ありがとうございます。';
+      }
+    } on ModerationException catch (e) {
+      lastNoticeMessage = e.isLimit
+          ? '本日の通報の上限に達しました。明日以降にもう一度お試しください。'
+          : e.isOwnPost
+              ? '自分の投稿は通報できません。削除はマイページから行えます。'
+              : e.isNotFound
+                  ? 'この投稿は削除されたか、見つかりませんでした。'
+                  : '通報の送信に失敗しました。メール認証の状態と通信環境を確認してください。';
+    } catch (_) {
+      lastNoticeMessage = '通報の送信に失敗しました。メール認証の状態と通信環境を確認してください。';
     }
     notifyListeners();
   }
@@ -804,9 +804,7 @@ class AppStore extends ChangeNotifier {
     inquiries.add(inq);
     _firestore.submitInquiry(inq).catchError((_) {});
 
-    lastNoticeMessage = category == 'report'
-        ? '通報を受け付けました。運営にて確認いたします。'
-        : 'お問い合わせを送信しました。運営からの連絡をお待ちください。';
+    lastNoticeMessage = 'お問い合わせを送信しました。運営からの連絡をお待ちください。';
     notifyListeners();
   }
 

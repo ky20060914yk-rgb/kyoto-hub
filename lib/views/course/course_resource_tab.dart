@@ -4,6 +4,7 @@ import '../../models/request.dart';
 import '../../models/post.dart';
 import '../../models/subject.dart';
 import '../../services/app_store.dart';
+import '../../services/moderation_service.dart';
 import '../../utils/file_picker_helper.dart';
 
 const _brand = Color(0xFF0F4C81);
@@ -159,14 +160,7 @@ class _CourseResourceTabState extends State<CourseResourceTab> {
           ElevatedButton(
             onPressed: () async {
               if (reasonController.text.trim().isNotEmpty) {
-                widget.store.submitInquiry(
-                  category: 'report',
-                  content: reasonController.text.trim(),
-                  contactInfo: contactController.text.trim(),
-                  targetPostId: postId,
-                );
-
-                await widget.store.reportPost(postId);
+                await widget.store.reportPost(postId, category: ReportCategory.copyright, detail: reasonController.text.trim());
 
                 if (mounted) {
                   Navigator.pop(context);

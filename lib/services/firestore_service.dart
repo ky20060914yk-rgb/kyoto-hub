@@ -4,6 +4,7 @@ import '../models/post.dart';
 import '../models/request.dart';
 import '../models/textbook_request.dart';
 import '../models/talk_room.dart';
+import 'talk_room_queries.dart';
 import '../models/inquiry.dart';
 
 class FirestoreService {
@@ -109,25 +110,12 @@ class FirestoreService {
     await _db.collection('talk_rooms').doc(room.id).set(data);
   }
 
-  Stream<List<TalkRoom>> streamTalkRooms() {
-    return _db
-        .collection('talk_rooms')
-        .where('university_id', isEqualTo: universityId)
-        .snapshots()
-        .map((snapshot) => snapshot.docs.map((d) => TalkRoom.fromMap(d.data())).toList());
-  }
+  /// Plan 2B (M-15): only the rooms the caller takes part in (rules: participants only).
+  Stream<List<TalkRoom>> streamTalkRoomsFor(String uid) => participantTalkRooms(_db, uid);
 
   Future<void> addChatMessage(String roomId, ChatMessage message) async {
     await _db.collection('talk_rooms').doc(roomId).update({
       'messages': FieldValue.arrayUnion([message.toMap()]),
-    });
-  }
-
-  // --- 7. POST REPORTS ---
-
-  Future<void> updatePostReports(String postId, List<String> reports) async {
-    await _db.collection('posts').doc(postId).update({
-      'reports': reports,
     });
   }
 

@@ -12,9 +12,9 @@ import 'review.dart';
 ///
 /// **Merge safety (ruling P2):** [toMap] deliberately OMITS `pastExamPostCount`
 /// and `resourcePostCount`. Those are maintained on the same doc by
-/// `bumpPostCount` via `FieldValue.increment`, so if a review write emitted
+/// the `onPostWritten` Function via `FieldValue.increment`, so if a review write emitted
 /// them it would clobber a concurrent increment. [fromMap] still READS them
-/// (they live in the doc from `bumpPostCount`) and [applyReview] never touches
+/// (they live in the doc from the `onPostWritten` Function) and [applyReview] never touches
 /// them (Task 8 owns them).
 class CourseStats {
   final String courseKey;
@@ -33,7 +33,7 @@ class CourseStats {
   /// [rakutanScore] rounded to an int, snapshotted at the last [applyReview].
   /// Stored so a Firestore ranking query can `orderBy('score', descending: true)`
   /// (a getter cannot be indexed). `50` is the neutral value at 0 reviews,
-  /// matching [rakutanScore]. Left untouched by `bumpPostCount` — the score does
+  /// matching [rakutanScore]. Left untouched by the `onPostWritten` Function — the score does
   /// not depend on the post counts.
   final int score;
 
@@ -158,7 +158,7 @@ class CourseStats {
   }
 
   /// P2: post-count fields are intentionally omitted so a review write
-  /// (`set(merge: true)`) cannot clobber a concurrent `bumpPostCount`
+  /// (`set(merge: true)`) cannot clobber a concurrent the `onPostWritten` Function
   /// `FieldValue.increment`.
   Map<String, dynamic> toMap() {
     return {
@@ -197,7 +197,7 @@ class CourseStats {
       gradingCounts: _intMap(map['gradingCounts']),
       pastExamCounts: _intMap(map['pastExamCounts']),
       bringInCounts: _intMap(map['bringInCounts']),
-      // P2: written by bumpPostCount, not by the review path — but always read.
+      // P2: written by the onPostWritten Function, not by the review path — but always read.
       // Clamped at >= 0: every post that predates the counters never issued a
       // `+1`, so deleting one lands an `increment(-1)` on a doc that is at 0
       // and the UI would render 「過去問 -1件」. A negative stored value is

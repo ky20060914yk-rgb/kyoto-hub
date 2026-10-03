@@ -1,10 +1,10 @@
+import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:fake_cloud_firestore/fake_cloud_firestore.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:kyoto_exam_hub/models/review.dart';
 import 'package:kyoto_exam_hub/services/review_service.dart';
 
-Review _review(String courseKey, String uid,
-    {int rating = 4, Rakutan rakutan = Rakutan.raku}) {
+Review _review(String courseKey, String uid, {int rating = 4, Rakutan rakutan = Rakutan.raku}) {
   final now = DateTime(2024, 4, 1);
   return Review(
     id: Review.docId(courseKey, uid),
@@ -25,38 +25,39 @@ Review _review(String courseKey, String uid,
   );
 }
 
+// Plan 2B (M-11): course_stats is written only by the onReviewWritten Function.
+Future<int> _statsDocs(FakeFirebaseFirestore db) async => (await db.collection('course_stats').get()).docs.length;
+
 void main() {
-  test('submitReview writes the review and initialises course_stats', () async {
+  test('submitReview writes the review and NEVER writes course_stats', () async {
     final db = FakeFirebaseFirestore();
     final svc = ReviewService(db);
     await svc.submitReview(_review('ck', 'u1', rating: 5));
     expect((await db.doc('reviews/ck_u1').get()).exists, isTrue);
-    final stats = await svc.getStats('ck');
-    expect(stats.reviewCount, 1);
-    expect(stats.ratingSum, 5);
-    expect(stats.rakutanCounts['raku'], 1);
+    expect(await _statsDocs(db), 0);
   });
 
-  test('editing a review re-aggregates without double counting', () async {
+  test('editing a review overwrites the one document in place', () async {
     final db = FakeFirebaseFirestore();
     final svc = ReviewService(db);
     await svc.submitReview(_review('ck', 'u1', rating: 2, rakutan: Rakutan.muzu));
     await svc.submitReview(_review('ck', 'u1', rating: 5, rakutan: Rakutan.raku));
-    final stats = await svc.getStats('ck');
-    expect(stats.reviewCount, 1);
-    expect(stats.ratingSum, 5);
-    expect(stats.rakutanCounts['muzu'], 0);
-    expect(stats.rakutanCounts['raku'], 1);
+    final stored = Review.fromMap((await db.doc('reviews/ck_u1').get()).data()!);
+    expect(stored.rating, 5);
+    expect(stored.rakutan, Rakutan.raku);
+    expect((await db.collection('reviews').where('courseKey', isEqualTo: 'ck').get()).docs.length, 1);
+    expect(await _statsDocs(db), 0);
   });
 
-  test('deleteReview decrements course_stats', () async {
+  test('deleteReview removes only the caller’s review and writes no aggregate', () async {
     final db = FakeFirebaseFirestore();
     final svc = ReviewService(db);
     await svc.submitReview(_review('ck', 'u1'));
     await svc.submitReview(_review('ck', 'u2'));
     await svc.deleteReview(_review('ck', 'u2'));
-    expect((await svc.getStats('ck')).reviewCount, 1);
     expect((await db.doc('reviews/ck_u2').get()).exists, isFalse);
+    expect((await db.doc('reviews/ck_u1').get()).exists, isTrue);
+    expect(await _statsDocs(db), 0);
   });
 
   test('markHelpful appends uid once', () async {
@@ -69,43 +70,28 @@ void main() {
     expect(r!.helpfulBy, ['u2']);
   });
 
-  // MINOR — the real hazard is not the end state (arrayUnion alone dedupes) but
-  // the redundant `tx.update`: in production that write trips the reviews-update
-  // rule's `!diff().affectedKeys().hasAny(['helpfulBy'])` clause and fails with
-  // PERMISSION_DENIED. The early-return in `markHelpful` is what prevents it.
-  // fake_cloud_firestore can't spy on the transaction, so assert the doc is
-  // byte-identical (updateTime unchanged) across the redundant second call.
-  test('markHelpful second call performs no write (early-return guard)',
-      () async {
+  // The redundant `tx.update` would trip the reviews-update rule's helpfulBy
+  // clause in production; the early return in markHelpful prevents it.
+  test('markHelpful second call performs no write (early-return guard)', () async {
     final db = FakeFirebaseFirestore();
     final svc = ReviewService(db);
     await svc.submitReview(_review('ck', 'u1'));
     await svc.markHelpful(reviewId: 'ck_u1', uid: 'u2');
-
     final before = await db.doc('reviews/ck_u1').get();
     await svc.markHelpful(reviewId: 'ck_u1', uid: 'u2');
     final after = await db.doc('reviews/ck_u1').get();
-
     expect(after.data(), equals(before.data()));
     expect((await svc.getMyReview('ck', 'u1'))!.helpfulBy, ['u2']);
   });
 
-  // IMPORTANT — on an edit, submitReview must NOT write the caller's `helpfulBy`
-  // or `createdAt` over the stored (server-owned) values. The deployed rules
-  // hard-deny any author update whose diff touches `helpfulBy`, so a write that
-  // echoes a stale caller copy fails with PERMISSION_DENIED in production.
-  test('submitReview edit preserves server-owned helpfulBy and createdAt',
-      () async {
+  // On an edit the stored helpfulBy / createdAt must win over the caller's copy:
+  // the rules deny any author update whose diff touches helpfulBy.
+  test('submitReview edit preserves server-owned helpfulBy and createdAt', () async {
     final db = FakeFirebaseFirestore();
     final svc = ReviewService(db);
-
     final original = _review('ck', 'u1', rating: 4);
     await svc.submitReview(original);
-    // Another user marks it helpful — this is the server-owned state.
     await svc.markHelpful(reviewId: 'ck_u1', uid: 'helper');
-
-    // The author edits their review; their in-memory copy carries a bogus
-    // helpfulBy and a different createdAt.
     final edit = original.copyWith(
       rating: 2,
       helpfulBy: const ['someone', 'else'],
@@ -113,14 +99,13 @@ void main() {
       updatedAt: DateTime(2024, 6, 1),
     );
     await svc.submitReview(edit);
-
     final stored = Review.fromMap((await db.doc('reviews/ck_u1').get()).data()!);
-    expect(stored.rating, 2); // the edit landed
-    expect(stored.helpfulBy, ['helper']); // caller's value did NOT overwrite
-    expect(stored.createdAt, original.createdAt); // original createdAt kept
+    expect(stored.rating, 2);
+    expect(stored.helpfulBy, ['helper']);
+    expect(stored.createdAt, original.createdAt);
   });
 
-  test('streamReviewsForCourse returns only that course, newest first', () async {
+  test('streamReviewsForCourse returns only that course', () async {
     final db = FakeFirebaseFirestore();
     final svc = ReviewService(db);
     await svc.submitReview(_review('ck', 'u1'));
@@ -141,95 +126,68 @@ void main() {
     expect(list.every((r) => r.authorId == 'u1'), isTrue);
   });
 
-  test('bumpPostCount updates the right counter', () async {
+  test('getStats / streamStats read the Function-written aggregate; extra server fields are ignored', () async {
     final db = FakeFirebaseFirestore();
     final svc = ReviewService(db);
-    await svc.bumpPostCount('ck', isPastExam: true, delta: 1);
-    await svc.bumpPostCount('ck', isPastExam: false, delta: 1);
+    expect((await svc.getStats('ck')).reviewCount, 0); // missing doc -> empty
+    await db.collection('course_stats').doc('ck').set({
+      'courseKey': 'ck', 'university_id': 'kyoto_u', 'reviewCount': 2, 'ratingSum': 8,
+      'pastExamPostCount': 1, 'score': 55, 'aggregatedAt': Timestamp.fromDate(DateTime.utc(2027)),
+    });
     final s = await svc.getStats('ck');
+    expect(s.reviewCount, 2);
+    expect(s.ratingSum, 8);
     expect(s.pastExamPostCount, 1);
-    expect(s.resourcePostCount, 1);
+    expect(s.score, 55);
+    expect((await svc.streamStats('ck').first).reviewCount, 2);
   });
 
-  // C1 — a courseKey with a '/' in it. 17 courses in the deployed catalog carry
-  // one, and '/' is a path separator in a Firestore document id: before the slug
-  // both `_stats.doc(courseKey)` and `_reviews.doc('<key>_<uid>')` built
-  // 3-segment paths, which throws client-side (an ErrorWidget on the default
-  // レビュー tab) and is uncovered by every rules match block.
+  // C1 — a courseKey with '/' (17 catalog courses carry one) must never produce
+  // a '/' in a document id.
   group('C1 — courseKey containing /', () {
     const slashKey = 'a/b|c/d';
 
-    test('submitReview writes well-formed (slash-free) document ids', () async {
+    test('submitReview writes a well-formed (slash-free) review id and no aggregate', () async {
       final db = FakeFirebaseFirestore();
       final svc = ReviewService(db);
       await svc.submitReview(_review(slashKey, 'u1', rating: 5));
-
-      // The ids the write actually used — neither may contain a '/'.
       expect((await db.doc('reviews/a%2Fb|c%2Fd_u1').get()).exists, isTrue);
-      expect((await db.doc('course_stats/a%2Fb|c%2Fd').get()).exists, isTrue);
-
-      // The raw courseKey stays on the document as the queryable field.
       final stored = Review.fromMap((await db.doc('reviews/a%2Fb|c%2Fd_u1').get()).data()!);
       expect(stored.courseKey, slashKey);
       expect(stored.courseSlug, 'a%2Fb|c%2Fd');
-      // The create rule pins the doc id to `courseSlug + '_' + uid`.
       expect(stored.id, '${stored.courseSlug}_u1');
+      expect(await _statsDocs(db), 0);
     });
 
-    test('getStats reads back the aggregate for a slash courseKey', () async {
+    test('getStats reads the aggregate for a slash courseKey from its slugged id', () async {
       final db = FakeFirebaseFirestore();
       final svc = ReviewService(db);
-      await svc.submitReview(_review(slashKey, 'u1', rating: 5));
+      await db.collection('course_stats').doc('a%2Fb|c%2Fd').set({'courseKey': slashKey, 'reviewCount': 1, 'ratingSum': 5});
       final stats = await svc.getStats(slashKey);
       expect(stats.reviewCount, 1);
       expect(stats.ratingSum, 5);
-      expect(stats.rakutanCounts['raku'], 1);
     });
 
     test('the whole review lifecycle survives a slash courseKey', () async {
       final db = FakeFirebaseFirestore();
       final svc = ReviewService(db);
       await svc.submitReview(_review(slashKey, 'u1', rating: 5));
-
-      // Field-filtered queries keep the RAW key (they are not paths).
       expect((await svc.streamReviewsForCourse(slashKey).first).length, 1);
       expect((await svc.getMyReview(slashKey, 'u1'))!.rating, 5);
-      expect(await svc.streamStats(slashKey).first, isNotNull);
-
-      await svc.bumpPostCount(slashKey, isPastExam: true, delta: 1);
-      expect((await svc.getStats(slashKey)).pastExamPostCount, 1);
-
       await svc.markHelpful(reviewId: Review.docId(slashKey, 'u1'), uid: 'u2');
       expect((await svc.getMyReview(slashKey, 'u1'))!.helpfulBy, ['u2']);
-
       await svc.deleteReview(_review(slashKey, 'u1'));
-      expect((await svc.getStats(slashKey)).reviewCount, 0);
-      // (The P2 merge — that the review path leaves `pastExamPostCount` alone —
-      // is NOT asserted here: fake_cloud_firestore ignores `SetOptions(merge)`
-      // on a `tx.set` inside a transaction, so it reads 0 in the fake for a
-      // plain courseKey too. Nothing slug-specific; see the P2 note on
-      // CourseStats.toMap for the real-Firestore contract.)
+      expect(await svc.getMyReview(slashKey, 'u1'), isNull);
     });
   });
 
-  // Controller ruling P5 — streamMyReview: Tasks 6/7 watch this instead of
-  // re-fetching a Future on every rebuild.
   test('streamMyReview emits null when there is none, then the review', () async {
     final db = FakeFirebaseFirestore();
     final svc = ReviewService(db);
-
-    // No review yet.
     expect(await svc.streamMyReview('ck', 'u1').first, isNull);
-
-    // An open subscription sees the review appear after submitReview.
-    // (A fresh `.first` taken right after a fake_cloud_firestore transaction
-    // can still report the pre-write snapshot; a live listener — the real
-    // Tasks 6/7 usage — does not.)
     final done = expectLater(
       svc.streamMyReview('ck', 'u1'),
-      emitsThrough(predicate<Review?>(
-          (r) => r != null && r.rating == 3 && r.courseKey == 'ck',
-          'the submitted review')),
+      emitsThrough(predicate<Review?>((r) => r != null && r.rating == 3 && r.courseKey == 'ck', 'the submitted review')),
     );
     await svc.submitReview(_review('ck', 'u1', rating: 3));
     await done;

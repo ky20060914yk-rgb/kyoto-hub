@@ -3,14 +3,12 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import '../models/course_stats.dart';
 import '../models/review.dart';
 
-/// Firestore data layer for the review layer (Plan A).
+/// Firestore data layer for the review layer.
 ///
-/// Phase 1 has no Cloud Functions, so `course_stats/{courseKey}` is maintained
-/// client-side: [submitReview] / [deleteReview] read the stats doc and any
-/// existing review inside a transaction, recompute via [CourseStats.applyReview],
-/// then write both docs. The post counters on the same doc are owned by
-/// [bumpPostCount] via `FieldValue.increment` and are never emitted by the
-/// review path (see [CourseStats.toMap] — ruling P2).
+/// Plan 2B (M-11): `course_stats/{slug(courseKey)}` is maintained by the
+/// `onReviewWritten` / `onPostWritten` Cloud Functions (a full recount per
+/// course) and the rules deny every client write to it. This service writes
+/// ONLY reviews; it still reads the aggregate through [getStats] / [streamStats].
 ///
 /// **C1 — document ids are slugged.** A courseKey may contain '/' (17 courses
 /// in the deployed catalog do), which is a path separator in a Firestore
@@ -89,59 +87,24 @@ class ReviewService {
     });
   }
 
-  /// Create or edit the caller's review AND re-aggregate `course_stats`
-  /// atomically.
+  /// Create or edit the caller's review. On an edit, `helpfulBy` and
+  /// `createdAt` are server-owned: the rules hard-deny any author update whose
+  /// diff touches `helpfulBy`, so the write carries the stored values.
   Future<void> submitReview(Review review) async {
     await _fs.runTransaction((tx) async {
-      final statsRef = _stats.doc(Review.slug(review.courseKey));
       final reviewRef = _reviews.doc(review.id);
-      final statsSnap = await tx.get(statsRef);
       final prevSnap = await tx.get(reviewRef);
-      final statsData = statsSnap.data();
-      var stats = statsSnap.exists && statsData != null
-          ? CourseStats.fromMap(statsData)
-          : CourseStats.empty(review.courseKey);
       final prevData = prevSnap.data();
-      final previous = prevSnap.exists && prevData != null
-          ? Review.fromMap(prevData)
-          : null;
-      stats = stats.applyReview(review, delta: 1, previous: previous);
-      // On an edit, `helpfulBy` and `createdAt` are server-owned: the deployed
-      // rules hard-deny any author update whose diff touches `helpfulBy`, so the
-      // write must carry the exact stored values rather than the caller's copy.
+      final previous = prevSnap.exists && prevData != null ? Review.fromMap(prevData) : null;
       final toWrite = previous != null
-          ? review.copyWith(
-              helpfulBy: previous.helpfulBy,
-              createdAt: previous.createdAt,
-            )
+          ? review.copyWith(helpfulBy: previous.helpfulBy, createdAt: previous.createdAt)
           : review;
       tx.set(reviewRef, toWrite.toMap());
-      tx.set(statsRef, stats.toMap(), SetOptions(merge: true));
     });
   }
 
-  /// Remove the caller's review AND decrement `course_stats` atomically.
-  Future<void> deleteReview(Review review) async {
-    await _fs.runTransaction((tx) async {
-      final statsRef = _stats.doc(Review.slug(review.courseKey));
-      final reviewRef = _reviews.doc(review.id);
-      final statsSnap = await tx.get(statsRef);
-      final prevSnap = await tx.get(reviewRef);
-      final statsData = statsSnap.data();
-      var stats = statsSnap.exists && statsData != null
-          ? CourseStats.fromMap(statsData)
-          : CourseStats.empty(review.courseKey);
-      // Aggregate against the stored review when present so a stale caller-side
-      // copy can't skew the counts.
-      final prevData = prevSnap.data();
-      final target = prevSnap.exists && prevData != null
-          ? Review.fromMap(prevData)
-          : review;
-      stats = stats.applyReview(target, delta: -1);
-      tx.delete(reviewRef);
-      tx.set(statsRef, stats.toMap(), SetOptions(merge: true));
-    });
-  }
+  /// Remove the caller's review. The aggregate follows via `onReviewWritten`.
+  Future<void> deleteReview(Review review) => _reviews.doc(review.id).delete();
 
   /// Append [uid] to a review's `helpfulBy` exactly once. Idempotent
   /// client-side; the rules also require a single-uid append of the caller.
@@ -160,23 +123,5 @@ class ReviewService {
         'helpfulBy': FieldValue.arrayUnion([uid]),
       });
     });
-  }
-
-  /// Bump a post counter on `course_stats` (called from AppStore.addPost /
-  /// deletePost). `FieldValue.increment` + `merge: true` so it never clobbers
-  /// the review-aggregate fields on the same doc.
-  Future<void> bumpPostCount(
-    String courseKey, {
-    required bool isPastExam,
-    required int delta,
-  }) async {
-    await _stats.doc(Review.slug(courseKey)).set({
-      'courseKey': courseKey,
-      'university_id': 'kyoto_u',
-      if (isPastExam)
-        'pastExamPostCount': FieldValue.increment(delta)
-      else
-        'resourcePostCount': FieldValue.increment(delta),
-    }, SetOptions(merge: true));
   }
 }

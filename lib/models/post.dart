@@ -55,7 +55,6 @@ class Post {
   final int downloadCount;
   final DateTime createdAt;
   final String? requestId;
-  final List<String> reports;
 
   Post({
     required this.id,
@@ -73,7 +72,6 @@ class Post {
     this.downloadCount = 0,
     required this.createdAt,
     this.requestId,
-    this.reports = const [],
   });
 
   Map<String, dynamic> toMap() {
@@ -93,7 +91,6 @@ class Post {
       'downloadCount': downloadCount,
       'createdAt': createdAt.toIso8601String(),
       'requestId': requestId,
-      'reports': reports,
     };
   }
 
@@ -114,13 +111,11 @@ class Post {
       downloadCount: map['downloadCount'] ?? 0,
       createdAt: map['createdAt'] != null ? DateTime.parse(map['createdAt']) : DateTime.now(),
       requestId: map['requestId'],
-      reports: List<String>.from(map['reports'] ?? []),
     );
   }
 
   Post copyWith({
     int? downloadCount,
-    List<String>? reports,
   }) {
     return Post(
       id: id,
@@ -138,7 +133,6 @@ class Post {
       downloadCount: downloadCount ?? this.downloadCount,
       createdAt: createdAt,
       requestId: requestId,
-      reports: reports ?? this.reports,
     );
   }
 }

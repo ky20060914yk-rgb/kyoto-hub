@@ -26,4 +26,15 @@ void main() {
     expect(p.filePaths, isEmpty); // un-migrated: the UI treats this as "not downloadable"
     expect(p.downloadCount, 4);
   });
+
+  test('Post no longer carries reports (Plan 2B: reports are Function-owned docs)', () {
+    final m = Post(
+      id: 'p1', subjectId: 'c_1', subjectName: 'n', authorId: 'u1', authorName: 'me',
+      category: PostCategory.other, title: 't', description: '',
+      filePaths: ['resources/u1/1_a.pdf'], fileNames: ['a.pdf'], createdAt: DateTime.utc(2026, 10, 3),
+    ).toMap();
+    expect(m.containsKey('reports'), isFalse);
+    final legacy = Post.fromMap({'id': 'old', 'title': 't', 'reports': ['ra', 'rb'], 'createdAt': '2026-09-01T00:00:00.000'});
+    expect(legacy.id, 'old');
+  });
 }
