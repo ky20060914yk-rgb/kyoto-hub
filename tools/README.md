@@ -66,3 +66,13 @@ any time to repair drift. Dry run by default; `--apply` writes;
 Build first: `npm --prefix functions run build`. Emulator test:
 `bash test_backfill_course_stats.sh`. (Replaces the removed
 `backfill_post_counts.mjs`.)
+
+## moderation CLI (Plan 2B)
+
+There is no admin UI. `moderate.mjs` lists the moderation queue and open
+takedown requests and hides / restores / deletes posts and closes requests,
+through the same compiled code the Functions use (`functions/lib/moderation.js`).
+Every mutating command is a dry run unless `--apply --operator <name>` is given;
+the operator name goes into `moderation_log`. `strip-legacy-reports` removes the
+pre-2B `posts.reports` arrays (they exposed reporter uids). Build first:
+`npm --prefix functions run build`. Emulator test: `bash test_moderate.sh`.
