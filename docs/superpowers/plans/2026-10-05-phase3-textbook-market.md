@@ -85,6 +85,8 @@ Resolved 2B rulings carried forward: **M-15** (participant-only rooms — unchan
 
 ## Amendments made in review (authoritative over the code blocks below)
 
+**Final review, fix round 1 (committed after Tasks 1-15):** `processBlockRoom` closes every `talk_room` between the two users (both orderings, bounded, idempotent) and `firestore.rules` refuses a message when `market_blocks/{lender}_{borrower}` or the reverse exists; the chat screen switches its live stream to `createdAt >= oldest shown` after the first older page (`ChatService.streamSince`), so no message disappears; the chat length limit is counted in runes everywhere and a refused send shows a notice; the read marker is written once per last message; `MarketException.notice` has specific texts for `rating-closed`, `own-listing`, `legacy-room`, `self`, `not-active`, `expired`; `storage.rules` allows `get` (not `list`) on `listings/**`; `migrate_chats.mjs` skips legacy entries from non-participants (`foreign-senders`); the client photo name collapses `..`. Final counts: functions 220, rules 137, storage rules 9, `flutter test` 172, `flutter analyze` 21.
+
 Round 1 fixes, implemented in `functions/` with tests (the code blocks in Tasks 1-7 below are the ORIGINAL text; where they differ, this note and the committed code win):
 
 - **I-1** `rateDeal` verifies inside its transaction that `roomId === roomIdFor(listingId, borrowerId)` and that the listing exists with `ownerId === lenderId` (an operator-removed listing falls back to the `market_queue/{listingId}` tombstone's `ownerId`); anything else is `legacy-room`. `roomIdFor` moved to `marketCore.ts` (re-exported from `chat.ts`). `handleMessageCreated(db, roomId, msg, now?)` ignores a stored `lastMessageAt` more than 60 s in the future.
@@ -7765,19 +7767,23 @@ git commit -m "feat(tools): moderate.mjs market-list, listing-hide/restore/remov
 ```
 PRE. From the repo root (PowerShell): npm --prefix functions ci; npm --prefix functions run build; flutter build web --release
      (the web build happens NOW so the old-client window in steps 3-6 is as short as possible), then run every suite (Git Bash):
-     bash tools/test_functions.sh (191) ; bash tools/test_rules.sh (136) ; bash tools/test_storage_rules.sh (8) ;
+     bash tools/test_functions.sh ; bash tools/test_rules.sh ; bash tools/test_storage_rules.sh ;
      bash tools/test_migrate_storage.sh ; bash tools/test_backfill_course_stats.sh ; bash tools/test_moderate.sh ;
-     bash tools/test_migrate_chats.sh ; flutter analyze (21 issues) ; flutter test (167)
+     bash tools/test_migrate_chats.sh ; flutter analyze ; flutter test
+     # expected: functions 220, rules 137, storage rules 9, flutter test 172, flutter analyze 21 issues,
+     # the other four tool suites exit 0.
 
 0. (2A) Read-only audit before anything is deployed: in the Firebase console (Firestore -> requests) note docs
    with isFulfilled == true or fulfilledPostId set that no real fulfilment produced; clear the bogus ones
    (isFulfilled false, fulfilledPostId null) after step 3.
 
-1. Indexes first (2A credits_ledger + 2B notifications + 3 textbook_listings x2):
+1. Indexes first (2A credits_ledger + 2B notifications + 3 textbook_listings x3):
    firebase deploy --only firestore:indexes --project kyodai-sns
-   # WAIT until the four NEW composite indexes (credits_ledger, notifications, textbook_listings x2) read
+   # WAIT until the FIVE NEW composite indexes (credits_ledger, notifications, and textbook_listings x3:
+   # status+expiresAt, courseId+status+expiresAt, and the 買いたい match index type+status+expiresAt) read
    # "Enabled" in the console: the マイページ ledger, the お知らせ list and the 教科書 list / course filter fail
-   # FAILED_PRECONDITION until then.
+   # FAILED_PRECONDITION until then, and until the match index is Enabled the 買いたい match notices of every
+   # new offer are LOST (the onListingCreated query fails and is not retried).
 
 2. USER (PowerShell), signed URLs without a key file (2A):
    gcloud services enable iamcredentials.googleapis.com --project kyodai-sns
@@ -7812,11 +7818,19 @@ PRE. From the repo root (PowerShell): npm --prefix functions ci; npm --prefix fu
 5b. (3) USER (PowerShell, same session, still in tools) — chat migration, BEFORE the hosting deploy:
    node migrate_chats.mjs --project kyodai-sns
    node migrate_chats.mjs --project kyodai-sns --apply
-   # Dry run first: one "WOULD MIGRATE talk_rooms/<id>: N message(s)" line per legacy room and a totals line.
-   # --apply moves each room's messages array into talk_rooms/<id>/messages and deletes the array; it exits 1
-   # if any room failed — re-run the same command (idempotent: migrated rooms are skipped). The
-   # onTalkMessageCreated trigger fires once per migrated message; that is expected (it agrees with the summary
-   # the tool writes). An old client still open shows empty chats from now on — step 6 follows immediately.
+   # Dry run first: one "WOULD MIGRATE talk_rooms/<id>: N message(s)" line per legacy room with an array and one
+   # "WOULD RESET talk_rooms/<id>" line per array-less room that existed before the deploy (its summary, rating
+   # flags and listing link are untrusted and get cleared), then a totals line (foreign-senders = legacy entries
+   # from someone who is not one of the room's two parties; they are not migrated).
+   # --apply moves each room's messages array into talk_rooms/<id>/messages, deletes the array and resets every
+   # pre-deploy room; it exits 1 if any room failed — re-run the same command (idempotent: handled rooms are
+   # recorded under admin_migrations/chats and skipped). The onTalkMessageCreated trigger fires once per migrated
+   # message and sets lenderSent/borrowerSent again; that is harmless because the migration clears listingId, so
+   # the room stays a legacy-room that rateDeal refuses. An old client still open shows empty chats from now on —
+   # step 6 follows immediately.
+   # WARNING: run the FIRST --apply BEFORE the hosting deploy (step 6). "Pre-deploy" is measured from the moment
+   # of the first --apply (admin_migrations/chats.startedAt): a room that openListingChat created before the first
+   # --apply would be reset like a legacy room. Later re-runs never touch rooms created after the first --apply.
 
 6. Deploy hosting IMMEDIATELY after step 5b (the 2A migration removed fileUrls and the chat migration removed the
    message arrays, which breaks the OLD client; the old client also cannot report, write stats, list everyone's
@@ -7845,7 +7859,7 @@ PRE. From the repo root (PowerShell): npm --prefix functions ci; npm --prefix fu
    # Removes the redundant public root objects. Delete the key file afterwards.
 ```
 
-**Day-to-day moderation (USER, PowerShell, credentials set, in `tools`, after `npm --prefix ..\functions run build`):** posts as in 2B (`node moderate.mjs list --project kyodai-sns`, `restore` / `delete` / `hide` / `close`). Market (Plan 3): `node moderate.mjs market-list --project kyodai-sns` shows reported / hidden listings and open chat cases (harassment and fraud first). Inspect (dry run): `node moderate.mjs listing-restore <listingId> --project kyodai-sns`. Act: `node moderate.mjs listing-restore <listingId> --project kyodai-sns --apply --operator <you>` / `listing-hide …` / `listing-remove …`. For a case, read the room's messages in the Firebase console (`talk_rooms/<roomId>/messages`), act if needed — to stop a bad actor, disable the account in Firebase console → Authentication (2B M-16) — then `node moderate.mjs case-close <caseId> --project kyodai-sns --apply --operator <you> --note "<what you did>"`. To lift a block on request, delete `market_blocks/<blockerUid>_<blockedUid>` in the console.
+**Day-to-day moderation (USER, PowerShell, credentials set, in `tools`, after `npm --prefix ..\functions run build`):** posts as in 2B (`node moderate.mjs list --project kyodai-sns`, `restore` / `delete` / `hide` / `close`). Market (Plan 3): `node moderate.mjs market-list --project kyodai-sns` shows reported / hidden listings and open chat cases (harassment and fraud first). Inspect (dry run): `node moderate.mjs listing-restore <listingId> --project kyodai-sns`. Act: `node moderate.mjs listing-restore <listingId> --project kyodai-sns --apply --operator <you>` / `listing-hide …` / `listing-remove …`. For a case, read the room's messages in the Firebase console (`talk_rooms/<roomId>/messages`), act if needed — to stop a bad actor, disable the account in Firebase console → Authentication (2B M-16) — then `node moderate.mjs case-close <caseId> --project kyodai-sns --apply --operator <you> --note "<what you did>"`. To lift a block on request, in the Firebase console delete BOTH `market_blocks/<blockerUid>_<blockedUid>` and `market_blocks/mb_<blockerKey>_<blockedKey>` (the mailbox copy; the key is the `emailKey` of the address, see `market_identities/<uid>.key`), AND reopen each room of the pair: clear `closedBy` (and `closedAt`) on every `talk_rooms` document between the two users, or delete those rooms — `openListingChat` returns the same closed room for a listing the pair already talked about, so a deleted block alone does not restore the chat. A block now closes every room of the pair (both lender/borrower orderings), and the message rule refuses on the uid-keyed block doc as well.
 
 **Rollback.** *Phase 3 only* (keep 2A + 2B): the commit that **added this plan file** contains no code change, so its tree is exactly the 2B code. In Git Bash: `git log --diff-filter=A --format=%h -- docs/superpowers/plans/2026-10-05-phase3-textbook-market.md` prints it (call it `<P>`); then `git checkout <P>`, `flutter build web --release`, `firebase deploy --only hosting --project kyodai-sns`, `firebase deploy --only firestore:rules,storage --project kyodai-sns` (the rules files of `<P>` are the 2B ones), and return with `git checkout master-wf96b2`. Consequences: migrated rooms have no array, so the 2B client shows their history empty (the messages are still in the subcollection; nothing is lost; re-deploying Phase 3 shows them again); the 2B rules let participants write room arrays and let any verified user flip any `textbook_requests` doc again; listings and ratings stay in Firestore, invisible to the 2B client. The market Functions can stay deployed (no client calls them) or be removed in one line: `firebase functions:delete createListing updateListing openListingChat blockRoom rateDeal reportMarket onListingCreated onListingDeleted onTalkMessageCreated --region asia-east1 --project kyodai-sns`. *2B or 2A as well:* follow the 2B plan's rollback (hosting and rules from `bc72fb0`) after this one; its warnings (reporter uids, `course_stats` client writes, posts left in `hidden_posts`) apply unchanged.
 
@@ -7930,3 +7944,7 @@ Each is implemented as the ruling says and can be reversed cheaply (the "Cost if
 16. **T-23** AppStore stays a façade over repositories (no view API change); a further auth/session split is left for later.
 17. **Accepted residual:** no per-message rate limit in chat (a flood is ended by blocking; rules cannot count). Recommended later if abused: a per-room counter in `onTalkMessageCreated` that closes a room after N messages per minute.
 18. **T-24** legacy chat times without an offset are read as JST; migrated history is marked read; legacy rooms cannot be rated.
+19. **Block covers all rooms (implemented in the final review):** `blockRoom` closes every room between the two users and the message rule refuses on the uid-keyed block doc, so one block ends the whole relationship, not one listing's chat.
+20. **Listing photos (review item 7, left as is):** photos stay readable by `get` to any KU address after a listing is closed (only an operator removal deletes them); uploads are not bounded in count per user and photos that are never attached to a listing (orphans) are never cleaned up. Reversal: a cleanup tool / a per-user upload cap.
+21. **Legacy-room mailbox block fallback (review item 9, left as is):** for a room whose other party has no `market_identities` record the block falls back to the `uid:<uid>` key, so a re-signup of such a legacy user is not covered by the mailbox block.
+22. **Chats stay open after an operator hides a listing:** hiding or removing a listing does not close its existing rooms (the two parties may still finish the handoff); an operator uses `case-close` / account disabling for abuse.
