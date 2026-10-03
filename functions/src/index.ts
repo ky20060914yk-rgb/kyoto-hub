@@ -2,13 +2,16 @@ import { initializeApp } from 'firebase-admin/app';
 import { getFirestore } from 'firebase-admin/firestore';
 import { getStorage } from 'firebase-admin/storage';
 import { HttpsError, onCall } from 'firebase-functions/v2/https';
-import { onDocumentCreated, onDocumentDeleted } from 'firebase-functions/v2/firestore';
-import { REGION, requireKuVerified, attachmentDisposition } from './common.js';
+import { onDocumentCreated, onDocumentDeleted, onDocumentWritten } from 'firebase-functions/v2/firestore';
+import { REGION, requireKuVerified, attachmentDisposition, universityVerifiedUid } from './common.js';
 import { claimWelcome } from './welcome.js';
 import { processDownload } from './download.js';
 import { handlePostCreated } from './postCreated.js';
 import { handleReviewCreated } from './reviewCreated.js';
-import { handlePostDeleted } from './postDeleted.js';
+import { handlePostGone } from './postDeleted.js';
+import { processReport } from './report.js';
+import { processTakedown, type TakedownCaller } from './takedown.js';
+import { handlePostWritten, handleReviewWritten } from './courseStats.js';
 
 initializeApp();
 const db = getFirestore();
@@ -58,7 +61,36 @@ export const onReviewCreated = onDocumentCreated({ ...opts, document: 'reviews/{
   });
 });
 
+// Hide/restore MOVE posts between `posts` and `hidden_posts` (Plan 2B, M-1):
+// files are removed only when the post exists in neither collection.
 export const onPostDeleted = onDocumentDeleted({ ...opts, document: 'posts/{postId}' }, async (event) => {
   const data = event.data?.data();
-  if (data) await handlePostDeleted(storageDeps, data);
+  if (data) await handlePostGone(db, storageDeps, event.params.postId, data);
+});
+
+export const onHiddenPostDeleted = onDocumentDeleted({ ...opts, document: 'hidden_posts/{postId}' }, async (event) => {
+  const data = event.data?.data();
+  if (data) await handlePostGone(db, storageDeps, event.params.postId, data);
+});
+
+export const reportPost = onCall(opts, async (req) =>
+  processReport(db, requireKuVerified(req.auth), (req.data ?? {}) as Record<string, unknown>));
+
+// The ONE callable that accepts a signed-out caller (a rights-holder has no app
+// account). Classified, never trusted: only a verified KU token may hide (M-6).
+export const submitTakedown = onCall(opts, async (req) => {
+  const auth = req.auth ?? null;
+  const caller: TakedownCaller | null = auth
+    ? { uid: auth.uid, verified: universityVerifiedUid(auth) !== null, email: String(auth.token.email ?? '') }
+    : null;
+  return processTakedown(db, caller, (req.data ?? {}) as Record<string, unknown>);
+});
+
+// course_stats is Function-maintained (M-11): every relevant write recounts its course.
+export const onReviewWritten = onDocumentWritten({ ...opts, document: 'reviews/{reviewId}' }, async (event) => {
+  await handleReviewWritten(db, event.data?.before?.data(), event.data?.after?.data());
+});
+
+export const onPostWritten = onDocumentWritten({ ...opts, document: 'posts/{postId}' }, async (event) => {
+  await handlePostWritten(db, event.data?.before?.data(), event.data?.after?.data());
 });
