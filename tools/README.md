@@ -95,3 +95,14 @@ created after it. Run it before the hosting deploy. Dry run by default;
 `--apply` writes; `--project` is required; idempotent and safe to re-run after a
 crash. Legacy times without an offset are read as JST. Credentials: Application
 Default Credentials only. Emulator test: `bash test_migrate_chats.sh`.
+
+## moderation CLI: textbook market (Plan 3)
+
+`moderate.mjs` also handles the textbook market: `market-list` shows
+reported / hidden listings and open chat cases (harassment, 受け渡し不履行 =
+`no_show`, fraud — high priority first); `listing-hide` / `listing-restore` /
+`listing-remove <listingId>` and `case-close <caseId>` follow the same
+dry-run / `--apply --operator` rules (`functions/lib/marketModeration.js`).
+Removing an already removed listing and closing an already closed case are
+no-ops (safe to repeat after a crash). Build first:
+`npm --prefix functions run build`.

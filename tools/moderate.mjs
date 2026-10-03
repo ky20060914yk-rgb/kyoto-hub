@@ -26,15 +26,26 @@
 //   node moderate.mjs close   <requestId> --project <id> [--apply --operator <name>] [--note <text>]
 //   node moderate.mjs strip-legacy-reports --project <id> [--apply --operator <name>]
 //
+// Textbook market (Plan 3, T-19/T-20) — same safety rules:
+//   node moderate.mjs market-list --project <id>
+//   node moderate.mjs listing-hide    <listingId> --project <id> [--apply --operator <name>] [--note <text>]
+//   node moderate.mjs listing-restore <listingId> --project <id> [--apply --operator <name>] [--note <text>]
+//   node moderate.mjs listing-remove  <listingId> --project <id> [--apply --operator <name>] [--note <text>]
+//   node moderate.mjs case-close      <caseId>    --project <id> [--apply --operator <name>] [--note <text>]
+//   A case is a participant's report about a chat (harassment / no_show / fraud);
+//   read the room's messages in the console, then act (e.g. disable the account
+//   in Firebase Authentication) and close the case.
+//
 //   restore on a hidden post = move it back + notify the author; on a visible
 //   queued post = acknowledge (it stays up and is never auto-hidden again).
 
 import { createRequire } from 'node:module';
 import { pathToFileURL } from 'node:url';
 
-const TARGETED = new Set(['hide', 'restore', 'delete', 'close']);
-const COMMANDS = new Set([...TARGETED, 'list', 'strip-legacy-reports']);
-const USAGE = `usage: node moderate.mjs <list|hide|restore|delete|close|strip-legacy-reports> [id] --project <id> [--apply --operator <name>] [--note <text>]
+const MARKET_TARGETED = new Set(['listing-hide', 'listing-restore', 'listing-remove', 'case-close']);
+const TARGETED = new Set(['hide', 'restore', 'delete', 'close', ...MARKET_TARGETED]);
+const COMMANDS = new Set([...TARGETED, 'list', 'strip-legacy-reports', 'market-list']);
+const USAGE = `usage: node moderate.mjs <list|hide|restore|delete|close|strip-legacy-reports|market-list|listing-hide|listing-restore|listing-remove|case-close> [id] --project <id> [--apply --operator <name>] [--note <text>]
   every mutating command is a DRY RUN unless --apply (with --operator) is given.
   first: npm --prefix functions run build   (this tool runs the compiled moderation code)`;
 
@@ -53,14 +64,14 @@ export function parseArgs(argv) {
   }
   if (!opts.project || opts.project.startsWith('--')) return { error: 'missing --project' };
   if (TARGETED.has(command) && !opts.target) return { error: `${command} needs an id` };
-  if (command === 'list' && opts.apply) return { error: 'list is read-only' };
+  if ((command === 'list' || command === 'market-list') && opts.apply) return { error: `${command} is read-only` };
   if (opts.apply && (!opts.operator || opts.operator.startsWith('--'))) return { error: '--apply requires --operator <name>' };
   return { opts };
 }
 
-/** Control characters out, length bounded: queue text is attacker-supplied. */
+/** Control, bidi-override and invisible characters out, length bounded: queue text is attacker-supplied. */
 export function safeText(v, max = 120) {
-  const s = String(v ?? '').replace(/[\u0000-\u001f\u007f-\u009f]/g, '?');
+  const s = String(v ?? '').replace(/[\u0000-\u001f\u007f-\u009f\u200b-\u200f\u2028-\u202e\u2060-\u206f\u3164\u115f\u1160\u2800\ufeff]/g, '?');
   return s.length > max ? `${s.slice(0, max)}…` : s;
 }
 
@@ -95,7 +106,30 @@ export async function stripLegacyReports(db, FieldValue, opts, strip = (ref) => 
   return { candidates, stripped, failed };
 }
 
+async function describeMarket(db, cmd, id) {
+  if (cmd === 'case-close') {
+    const c = await db.collection('market_cases').doc(id).get();
+    if (!c.exists) return `NOT FOUND (${safeText(id, 60)})`;
+    return c.get('status') === 'closed' ? 'NOTHING TO DO (already closed)' : `WOULD CLOSE case ${safeText(id, 60)} (${safeText(c.get('category'), 20)})`;
+  }
+  const l = await db.collection('textbook_listings').doc(id).get();
+  if (!l.exists) {
+    const q = await db.collection('market_queue').doc(id).get();
+    if (cmd === 'listing-remove' && q.exists && q.get('status') === 'removed') return `NOTHING TO DO (${safeText(id, 60)} is already removed)`;
+    return `NOT FOUND (${safeText(id, 60)})`;
+  }
+  const label = `${safeText(id, 60)} "${safeText(l.get('title'))}" by ${safeText(l.get('ownerId'), 40)} (${safeText(l.get('status'), 10)})`;
+  switch (cmd) {
+    case 'listing-hide': return l.get('status') === 'hidden' ? `NOTHING TO DO (${safeText(id, 60)} is already hidden)` : `WOULD HIDE listing ${label} (owner notified)`;
+    case 'listing-restore': return l.get('status') === 'hidden'
+      ? `WOULD RESTORE listing ${label} (owner notified, its reporters discredited)`
+      : `WOULD ACKNOWLEDGE listing ${label} (stays as is, auto-hide off)`;
+    default: return `WOULD DELETE listing ${label} (photos removed by the trigger)`;
+  }
+}
+
 async function describe(db, cmd, id) {
+  if (MARKET_TARGETED.has(cmd)) return describeMarket(db, cmd, id);
   if (cmd === 'close') {
     const r = await db.collection('takedown_requests').doc(id).get();
     if (!r.exists) return `NOT FOUND (${safeText(id, 60)})`;
@@ -126,10 +160,12 @@ async function main() {
   }
   const fnRequire = createRequire(new URL('../functions/package.json', import.meta.url));
   let mod;
+  let market;
   try {
     mod = fnRequire('./lib/moderation.js');
+    market = fnRequire('./lib/marketModeration.js');
   } catch {
-    console.error('functions/lib/moderation.js not found: run `npm --prefix functions run build` first');
+    console.error('functions/lib/moderation.js / marketModeration.js not found: run `npm --prefix functions run build` first');
     process.exit(2);
   }
   const { initializeApp, applicationDefault } = fnRequire('firebase-admin/app');
@@ -158,6 +194,22 @@ async function main() {
     return;
   }
 
+  if (opts.command === 'market-list') {
+    const { listings, cases } = await market.listMarketQueue(db, 200);
+    console.log(`LISTINGS (${listings.length})`);
+    for (const q of listings) {
+      console.log(`  ${safeText(q.status, 8).padEnd(8)} ${safeText(q.listingId, 60)} reports=${q.reportCount} counted=${q.countedReports}`
+        + ` hiddenBy=${safeText(q.hiddenBy ?? '-', 10)} review=${q.needsReview ? 'yes' : 'no'} owner=${safeText(q.ownerId, 40)} "${safeText(q.title)}"`);
+    }
+    console.log(`OPEN CASES (${cases.length})`);
+    for (const c of cases) {
+      console.log(`  ${c.priority === 'high' ? 'HIGH  ' : 'normal'} ${safeText(c.id, 80)} ${safeText(c.category, 20)}`
+        + ` reporter=${safeText(c.reporterUid, 40)} reported=${safeText(c.reportedUid, 40)} room=${safeText(c.roomId, 80)}`);
+      console.log(`    ${safeText(c.detail, 300)}`);
+    }
+    return;
+  }
+
   if (opts.command === 'strip-legacy-reports') {
     const out = await stripLegacyReports(db, FieldValue, opts);
     console.log(`totals: candidates=${out.candidates} stripped=${out.stripped} failed=${out.failed}`);
@@ -171,7 +223,11 @@ async function main() {
     console.log('done (dry run: nothing written)');
     return;
   }
-  const fn = { hide: mod.hidePost, restore: mod.restorePost, delete: mod.removePost, close: mod.closeTakedown }[opts.command];
+  const fn = {
+    hide: mod.hidePost, restore: mod.restorePost, delete: mod.removePost, close: mod.closeTakedown,
+    'listing-hide': market.hideListing, 'listing-restore': market.restoreListing,
+    'listing-remove': market.removeListing, 'case-close': market.closeCase,
+  }[opts.command];
   console.log(await describe(db, opts.command, opts.target));
   const out = await fn(db, opts.target, { operator: opts.operator, note: opts.note ?? '' });
   console.log(`${opts.command.toUpperCase()} ${safeText(opts.target, 60)}: ${JSON.stringify(out)}`);

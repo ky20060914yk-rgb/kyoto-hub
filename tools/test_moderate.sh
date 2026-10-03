@@ -42,3 +42,31 @@ firebase emulators:exec --only firestore --project demo-mod "\
   && $T reports-stripped \
   && $T strip-audited \
   && $T strip-failures"
+
+# Plan 3: the market commands (listings + chat cases), same dry-run / --operator rules.
+node test_moderate_market_fixture.mjs
+if node moderate.mjs listing-restore L1 --project demo-mod --apply >/dev/null 2>&1; then echo "expected usage failure (no --operator)"; exit 1; fi
+if node moderate.mjs market-list >/dev/null 2>&1; then echo "expected usage failure (no --project)"; exit 1; fi
+MT="node test_moderate_market_fixture.mjs"
+firebase emulators:exec --only firestore --project demo-mod "\
+  $MT seed \
+  && $MT listcheck \
+  && $M listing-restore L1 --project demo-mod \
+  && $M listing-hide L2 --project demo-mod \
+  && $M listing-remove L2 --project demo-mod \
+  && $M case-close R1_borrower --project demo-mod \
+  && $MT dry-clean \
+  && $M listing-hide L2 --project demo-mod --apply --operator tester \
+  && $MT hidden \
+  && $M listing-restore L1 --project demo-mod --apply --operator tester \
+  && $MT restored \
+  && $M listing-remove L2 --project demo-mod --apply --operator tester \
+  && $MT removed \
+  && $M listing-remove L2 --project demo-mod --apply --operator tester \
+  && $MT remove-once \
+  && ! $M listing-remove nope --project demo-mod --apply --operator tester \
+  && $M case-close R1_borrower --project demo-mod --apply --operator tester \
+  && $MT closed \
+  && $M case-close R1_borrower --project demo-mod --apply --operator tester \
+  && $MT closed-once \
+  && ! $M case-close nope --project demo-mod --apply --operator tester"
