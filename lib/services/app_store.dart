@@ -14,6 +14,10 @@ import '../models/credit_ledger_entry.dart';
 import '../models/inquiry.dart';
 import '../models/review.dart';
 import '../repositories/course_repository.dart';
+import '../repositories/inquiry_repository.dart';
+import '../repositories/post_repository.dart';
+import '../repositories/request_repository.dart';
+import '../repositories/user_repository.dart';
 import 'firestore_service.dart';
 import 'review_service.dart';
 import 'ranking_service.dart';
@@ -36,6 +40,13 @@ class AppStore extends ChangeNotifier {
   /// Plan 3 (Task 9): injectable so tests run AppStore on `fake_cloud_firestore`.
   final FirebaseFirestore _db;
   late final FirestoreService _firestore = FirestoreService(_db);
+
+  /// Feature repositories (Plan 3, Task 10): AppStore keeps the session state
+  /// and the UI-facing notices; data access lives in these.
+  late final UserRepository _userRepo = UserRepository(_db);
+  late final PostRepository _postRepo = PostRepository(_db);
+  late final RequestRepository _requestRepo = RequestRepository(_db);
+  late final InquiryRepository _inquiryRepo = InquiryRepository(_db);
 
   /// Resolved on use, not at construction: a test (no Firebase app) can build an
   /// AppStore; `_initFirebaseSync` then fails inside its own try/catch.
@@ -155,7 +166,7 @@ class AppStore extends ChangeNotifier {
             final userCredential = await _firebaseAuth.signInWithEmailLink(email: email, emailLink: href);
             final uid = userCredential.user!.uid;
 
-            var profile = await _firestore.getUserProfile(uid);
+            var profile = await _userRepo.getUserProfile(uid);
             if (profile == null) {
               final randomNum = Random().nextInt(9000) + 1000;
               profile = UserProfile(
@@ -165,7 +176,7 @@ class AppStore extends ChangeNotifier {
                 displayName: '京大生_$randomNum',
                 createdAt: DateTime.now(),
               );
-              await _firestore.saveUserProfile(profile);
+              await _userRepo.saveUserProfile(profile);
 
             }
 
@@ -182,14 +193,14 @@ class AppStore extends ChangeNotifier {
 
       _firebaseAuth.authStateChanges().listen((fbUser) async {
         if (fbUser != null && fbUser.email != null) {
-          final profile = await _firestore.getUserProfile(fbUser.uid);
+          final profile = await _userRepo.getUserProfile(fbUser.uid);
           if (profile != null) {
             currentUser = profile;
             _watchCredits(fbUser.uid);
             _watchUserStreams(fbUser.uid);
             if (fbUser.emailVerified) _claimWelcome();
 
-            final timetable = await _firestore.getUserTimetable(fbUser.uid);
+            final timetable = await _userRepo.getUserTimetable(fbUser.uid);
             userTimetable = timetable;
 
             notifyListeners();
@@ -197,14 +208,14 @@ class AppStore extends ChangeNotifier {
         }
       }, onError: (_) {});
 
-      _firestore.streamPosts().listen((remotePosts) {
+      _postRepo.streamPosts().listen((remotePosts) {
         if (remotePosts.isNotEmpty) {
           posts = remotePosts;
           notifyListeners();
         }
       }, onError: (_) {});
 
-      _firestore.streamMaterialRequests().listen((remoteRequests) {
+      _requestRepo.streamMaterialRequests().listen((remoteRequests) {
         if (remoteRequests.isNotEmpty) {
           requests = remoteRequests;
           notifyListeners();
@@ -310,7 +321,7 @@ class AppStore extends ChangeNotifier {
         pendingReferralCode: _cleanReferral(referralCode),
       );
 
-      await _firestore.saveUserProfile(profile);
+      await _userRepo.saveUserProfile(profile);
       currentUser = profile;
       _watchCredits(uid); // authStateChanges may fire before the profile exists
       _watchUserStreams(uid);
@@ -340,7 +351,7 @@ class AppStore extends ChangeNotifier {
       );
       final uid = userCredential.user!.uid;
 
-      final profile = await _firestore.getUserProfile(uid);
+      final profile = await _userRepo.getUserProfile(uid);
       if (profile != null) {
         currentUser = profile;
         notifyListeners();
@@ -389,7 +400,7 @@ class AppStore extends ChangeNotifier {
     if (isEmailVerified && currentUser != null && (!currentUser!.isVerified || _welcomePending)) {
       if (!currentUser!.isVerified) {
         currentUser = currentUser!.copyWith(isVerified: true);
-        await _firestore.saveUserProfile(currentUser!);
+        await _userRepo.saveUserProfile(currentUser!);
       }
       final granted = await _claimWelcome();
       lastNoticeMessage = granted == null
@@ -422,7 +433,7 @@ class AppStore extends ChangeNotifier {
 
     try {
       currentUser = currentUser!.copyWith(displayName: newName.trim());
-      await _firestore.saveUserProfile(currentUser!);
+      await _userRepo.saveUserProfile(currentUser!);
       lastNoticeMessage = 'ユーザー名を更新しました！';
       notifyListeners();
       return true;
@@ -441,7 +452,7 @@ class AppStore extends ChangeNotifier {
     userTimetable[key] = subjectId;
 
     if (currentUser != null) {
-      _firestore.saveUserTimetable(currentUser!.uid, userTimetable).catchError((_) {});
+      _userRepo.saveUserTimetable(currentUser!.uid, userTimetable).catchError((_) {});
     }
 
     notifyListeners();
@@ -452,7 +463,7 @@ class AppStore extends ChangeNotifier {
     userTimetable.remove(key);
 
     if (currentUser != null) {
-      _firestore.saveUserTimetable(currentUser!.uid, userTimetable).catchError((_) {});
+      _userRepo.saveUserTimetable(currentUser!.uid, userTimetable).catchError((_) {});
     }
 
     notifyListeners();
@@ -516,7 +527,7 @@ class AppStore extends ChangeNotifier {
     // Await the write: rules can deny it (bad path, unverified, ...) and the UI
     // must not claim success. Only then add it locally and bump the counter.
     try {
-      await _firestore.createPost(newPost);
+      await _postRepo.createPost(newPost);
     } catch (_) {
       lastNoticeMessage = '投稿に失敗しました。ファイルの形式・サイズやメール認証の状態を確認して、もう一度お試しください。';
       notifyListeners();
@@ -568,17 +579,8 @@ class AppStore extends ChangeNotifier {
       return null;
     }
     try {
-      var safe = fileName.replaceAll(RegExp(r'[^\w.\-぀-ヿ一-鿿]'), '_');
-      if (safe.length > 100) safe = safe.substring(safe.length - 100); // keep the extension
-      final path = 'resources/$uid/${DateTime.now().millisecondsSinceEpoch}_$safe';
-      final lower = fileName.toLowerCase();
-      final contentType = lower.endsWith('.pdf')
-          ? 'application/pdf'
-          : lower.endsWith('.png')
-              ? 'image/png'
-              : lower.endsWith('.webp')
-                  ? 'image/webp'
-                  : 'image/jpeg';
+      final path = PostRepository.resourcePath(uid, fileName, DateTime.now().millisecondsSinceEpoch);
+      final contentType = PostRepository.contentTypeFor(fileName);
       await fb_storage.FirebaseStorage.instance
           .ref()
           .child(path)
@@ -595,7 +597,7 @@ class AppStore extends ChangeNotifier {
     final idx = posts.indexWhere((p) => p.id == postId);
     if (idx == -1) return;
     posts.removeAt(idx);
-    await _firestore.deletePost(postId).catchError((_) {});
+    await _postRepo.deletePost(postId).catchError((_) {});
 
     notifyListeners();
   }
@@ -660,7 +662,7 @@ class AppStore extends ChangeNotifier {
     );
 
     try {
-      await _firestore.createMaterialRequest(req);
+      await _requestRepo.createMaterialRequest(req);
     } catch (_) {
       lastNoticeMessage = 'リクエストの投稿に失敗しました。時間をおいて再度お試しください。';
       notifyListeners();
@@ -809,7 +811,7 @@ class AppStore extends ChangeNotifier {
     );
 
     inquiries.add(inq);
-    _firestore.submitInquiry(inq).catchError((_) {});
+    _inquiryRepo.submitInquiry(inq).catchError((_) {});
 
     lastNoticeMessage = 'お問い合わせを送信しました。運営からの連絡をお待ちください。';
     notifyListeners();
