@@ -104,6 +104,7 @@ service cloud.firestore {
       // trigger validates every path and deletes the post if any is bad.
       allow create: if kuVerified()
         && !exists(/databases/$(database)/documents/hidden_posts/$(id))
+        && !exists(/databases/$(database)/documents/moderation_queue/$(id))
         && request.resource.data.authorId == request.auth.uid
         && request.resource.data.university_id == 'kyoto_u'
         && request.resource.data.get('downloadCount', 0) == 0

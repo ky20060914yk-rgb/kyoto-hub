@@ -216,6 +216,8 @@ beforeEach(async () => {
     });
     // A post hidden by moderation: its author (u2) cannot read it either.
     await setDoc(doc(db, 'hidden_posts/hid_1'), { authorId: 'u2', university_id: 'kyoto_u', title: 'hidden' });
+    // A removed post keeps its moderation state: its id must stay unusable too.
+    await setDoc(doc(db, 'moderation_queue/q_removed'), { postId: 'q_removed', status: 'removed', university_id: 'kyoto_u' });
     await setDoc(doc(db, 'secret_admin_stuff/s_1'), { university_id: 'kyoto_u' });
   });
 });
@@ -452,6 +454,10 @@ test('a non-author can never edit or delete a post, whatever its stored reports 
   await assertFails(deleteDoc(doc(asKu2(), 'posts/reported_u1'))); // 3 legacy reports: no longer a licence
   const outsider = env.authenticatedContext('u3', OUTSIDER).firestore();
   await assertFails(deleteDoc(doc(outsider, 'posts/reported_u1')));
+});
+
+test('a post cannot be created under an id that has a moderation_queue doc (state follows the id)', async () => {
+  await assertFails(setDoc(doc(asKu(), 'posts/q_removed'), validPost({ id: 'q_removed' })));
 });
 
 test('a post cannot be created under the id of a hidden post (2B, M-1)', async () => {
