@@ -3,6 +3,7 @@ import '../services/app_store.dart';
 import 'search/search_screen.dart';
 import 'home/home_screen.dart';
 import 'mypage/my_page_screen.dart';
+import 'market/market_screen.dart';
 
 class NavigationRootScreen extends StatefulWidget {
   final AppStore store;
@@ -41,6 +42,7 @@ class _NavigationRootScreenState extends State<NavigationRootScreen> {
     final screens = [
       SearchScreen(store: widget.store),
       HomeScreen(store: widget.store),
+      MarketScreen(store: widget.store), // Plan 3: the textbook market is its own tab (spec §4.1)
       MyPageScreen(store: widget.store),
     ];
 
@@ -141,18 +143,27 @@ class _NavigationRootScreenState extends State<NavigationRootScreen> {
           unselectedItemColor: const Color(0xFF94A3B8),
           selectedLabelStyle: const TextStyle(fontWeight: FontWeight.bold, fontSize: 11),
           unselectedLabelStyle: const TextStyle(fontSize: 11),
-          items: const [
-            BottomNavigationBarItem(
+          items: [
+            const BottomNavigationBarItem(
               icon: Icon(Icons.search_outlined),
               activeIcon: Icon(Icons.search_rounded),
               label: 'さがす',
             ),
-            BottomNavigationBarItem(
+            const BottomNavigationBarItem(
               icon: Icon(Icons.calendar_today_outlined),
               activeIcon: Icon(Icons.calendar_today_rounded),
               label: '時間割',
             ),
             BottomNavigationBarItem(
+              icon: Badge(
+                isLabelVisible: widget.store.unreadRoomCount > 0,
+                label: Text('${widget.store.unreadRoomCount}'),
+                child: const Icon(Icons.menu_book_outlined),
+              ),
+              activeIcon: const Icon(Icons.menu_book_rounded),
+              label: '教科書',
+            ),
+            const BottomNavigationBarItem(
               icon: Icon(Icons.person_outline),
               activeIcon: Icon(Icons.person_rounded),
               label: 'マイページ',

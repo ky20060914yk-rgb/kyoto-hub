@@ -147,7 +147,7 @@ class _ContactScreenState extends State<ContactScreen> {
                 maxLines: 5,
                 decoration: InputDecoration(
                   hintText: _selectedCategory == 'point_refund'
-                      ? 'ダウンロードした資料に虚偽があった場合や、参考書取引が不成立だった状況を具体的にご入力ください。運営が手動で返却対応いたします。'
+                      ? 'ダウンロードした資料に虚偽があった場合や、教科書の受け渡しトラブルの状況を具体的にご入力ください（トーク画面の「報告」からも運営に伝えられます）。運営が手動で返却対応いたします。'
                       : 'お問い合わせ内容を詳細にご入力ください...',
                   fillColor: Colors.white,
                   filled: true,

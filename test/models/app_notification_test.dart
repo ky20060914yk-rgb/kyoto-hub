@@ -37,4 +37,14 @@ void main() {
     expect(n.createdAt, DateTime.fromMillisecondsSinceEpoch(0));
     expect(n.message, contains('あなたの投稿'));
   });
+
+  test('Plan 3: market notices have their own copy and carry the listing id', () {
+    AppNotification n(String t) => AppNotification.fromMap('x', {'type': t, 'postTitle': '線形代数入門', 'listingId': 'L1'});
+    expect(n('listing_match').message, contains('「線形代数入門」が出品されました'));
+    expect(n('listing_hidden').message, contains('非表示'));
+    expect(n('listing_restored').message, contains('再び表示'));
+    expect(n('listing_removed').message, contains('削除'));
+    expect(n('listing_match').listingId, 'L1');
+    expect(AppNotification.fromMap('x', {'listingId': 7}).listingId, '');
+  });
 }

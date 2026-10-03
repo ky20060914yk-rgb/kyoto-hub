@@ -18,7 +18,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
   final List<Map<String, dynamic>> _slides = [
     {
       'title': '京都大学生専用コミュニティ',
-      'subtitle': '京大生同士で過去問・テスト対策資料の共有や参考書の貸し借りがスムーズに行えます。',
+      'subtitle': '京大生同士で授業レビュー・過去問の共有や教科書の譲り合いができます。',
       'icon': Icons.school_outlined,
       'color': const Color(0xFF0F4C81),
       'highlight': 'kyoto-u.ac.jp 認証済みユーザー限定',
@@ -38,8 +38,8 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
       'highlight': '投稿すれば、また資料がもらえる！',
     },
     {
-      'title': '参考書の貸し借りもサポート',
-      'subtitle': '不要になった参考書や探している本をリクエスト掲示板でマッチング！安全な個別トークルームが開設されます。',
+      'title': '教科書を譲る・売る・探す',
+      'subtitle': '「教科書」タブで、使わなくなった教科書を譲ったり売ったり、欲しい本を「買いたい」で探せます。アプリはお金を扱いません（代金は受け渡し時に直接）。',
       'icon': Icons.menu_book_rounded,
       'color': const Color(0xFF2563EB),
       'highlight': 'キャンパス内での受け渡しを円滑に！',
