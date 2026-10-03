@@ -6,7 +6,7 @@
 // The emulator modes refuse to run unless FIRESTORE_EMULATOR_HOST is set.
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { parseArgs, safeText } from './moderate.mjs';
+import { parseArgs, safeText, stripLegacyReports } from './moderate.mjs';
 
 const mode = process.argv[2];
 
@@ -135,6 +135,27 @@ const checks = {
   'reports-kept': async () => {
     assert.deepEqual((await get('posts/pk')).get('reports'), ['x', 'y']);
     assert.deepEqual((await get('posts/ph')).get('reports'), ['old1']);
+    // a dry run leaves no audit row
+    assert.equal((await db.collection('moderation_log').where('action', '==', 'strip_legacy_reports').get()).size, 0);
+  },
+  'strip-audited': async () => {
+    const rows = (await db.collection('moderation_log').where('action', '==', 'strip_legacy_reports').get()).docs.map((d) => d.data());
+    assert.equal(rows.length, 1);
+    assert.deepEqual([rows[0].by, rows[0].university_id], ['operator:tester', 'kyoto_u']);
+    assert.match(rows[0].note, /stripped=2 failed=0/);
+  },
+  'strip-failures': async () => {
+    const { FieldValue } = await import('firebase-admin/firestore');
+    for (const id of ['sf1', 'sf2']) await db.doc(`posts/${id}`).set({ title: id, reports: ['a'], university_id: 'kyoto_u' });
+    const out = await stripLegacyReports(db, FieldValue, { apply: true, operator: 'tester' }, async (ref) => {
+      if (ref.id === 'sf1') throw new Error('boom');
+      await ref.update({ reports: FieldValue.delete() });
+    });
+    assert.deepEqual([out.candidates, out.stripped, out.failed], [2, 1, 1]);
+    assert.deepEqual((await get('posts/sf1')).get('reports'), ['a']); // failure did not stop the run
+    assert.equal((await get('posts/sf2')).get('reports'), undefined);
+    const rows = (await db.collection('moderation_log').where('action', '==', 'strip_legacy_reports').get()).docs.map((d) => d.data());
+    assert.ok(rows.some((r) => /stripped=1 failed=1/.test(r.note)));
   },
   'reports-stripped': async () => {
     assert.equal((await get('posts/pk')).get('reports'), undefined);

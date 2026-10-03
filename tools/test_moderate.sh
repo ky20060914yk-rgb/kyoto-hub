@@ -39,4 +39,6 @@ firebase emulators:exec --only firestore --project demo-mod "\
   && $M strip-legacy-reports --project demo-mod \
   && $T reports-kept \
   && $M strip-legacy-reports --project demo-mod --apply --operator tester \
-  && $T reports-stripped"
+  && $T reports-stripped \
+  && $T strip-audited \
+  && $T strip-failures"

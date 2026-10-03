@@ -64,6 +64,37 @@ export function safeText(v, max = 120) {
   return s.length > max ? `${s.slice(0, max)}…` : s;
 }
 
+/**
+ * Remove the legacy `reports` arrays (they publish who reported whom, M-3).
+ * One failing document never stops the run (it is counted); with --apply one
+ * `moderation_log` row records the operator and the totals. `strip` is
+ * injectable so the failure path can be tested.
+ */
+export async function stripLegacyReports(db, FieldValue, opts, strip = (ref) => ref.update({ reports: FieldValue.delete() })) {
+  let candidates = 0; let stripped = 0; let failed = 0;
+  for (const c of ['posts', 'hidden_posts']) {
+    for (const d of (await db.collection(c).get()).docs) {
+      if (d.get('reports') === undefined) continue;
+      candidates++;
+      const len = Array.isArray(d.get('reports')) ? d.get('reports').length : '?';
+      console.log(`${opts.apply ? 'STRIP' : 'WOULD STRIP'} ${c}/${safeText(d.id, 60)} reports (${len} entries)`);
+      if (!opts.apply) continue;
+      try { await strip(d.ref); stripped++; } catch (e) {
+        failed++;
+        console.error(`  FAILED ${c}/${safeText(d.id, 60)}: ${safeText(e?.message, 200)}`);
+      }
+    }
+  }
+  if (opts.apply) {
+    await db.collection('moderation_log').add({
+      action: 'strip_legacy_reports', target: 'posts+hidden_posts', by: `operator:${opts.operator}`,
+      note: `candidates=${candidates} stripped=${stripped} failed=${failed}`,
+      at: FieldValue.serverTimestamp(), university_id: 'kyoto_u',
+    });
+  }
+  return { candidates, stripped, failed };
+}
+
 async function describe(db, cmd, id) {
   if (cmd === 'close') {
     const r = await db.collection('takedown_requests').doc(id).get();
@@ -128,17 +159,9 @@ async function main() {
   }
 
   if (opts.command === 'strip-legacy-reports') {
-    let n = 0;
-    for (const c of ['posts', 'hidden_posts']) {
-      for (const d of (await db.collection(c).get()).docs) {
-        if (d.get('reports') === undefined) continue;
-        n++;
-        const len = Array.isArray(d.get('reports')) ? d.get('reports').length : '?';
-        console.log(`${opts.apply ? 'STRIP' : 'WOULD STRIP'} ${c}/${safeText(d.id, 60)} reports (${len} entries)`);
-        if (opts.apply) await d.ref.update({ reports: FieldValue.delete() });
-      }
-    }
-    console.log(`totals: candidates=${n} stripped=${opts.apply ? n : 0}`);
+    const out = await stripLegacyReports(db, FieldValue, opts);
+    console.log(`totals: candidates=${out.candidates} stripped=${out.stripped} failed=${out.failed}`);
+    if (out.failed > 0) { console.error(`FAILED: ${out.failed} document(s) could not be stripped; re-run to retry`); process.exit(1); }
     console.log(opts.apply ? 'done' : 'done (dry run: nothing written)');
     return;
   }
