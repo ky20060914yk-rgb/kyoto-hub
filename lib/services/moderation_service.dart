@@ -58,9 +58,10 @@ class ModerationException implements Exception {
 }
 
 class TakedownResult {
-  const TakedownResult({required this.requestId, required this.hidden});
+  const TakedownResult({required this.requestId, required this.hidden, this.queued = const []});
   final String requestId;
   final List<String> hidden; // post ids the server hid at once (verified requester only)
+  final List<String> queued; // existing named posts only queued for the operator (not hidden)
 }
 
 // Limits mirrored from functions/src/common.ts `MODERATION`; the server re-checks.
@@ -135,6 +136,7 @@ class ModerationService {
     return TakedownResult(
       requestId: r['requestId'] is String ? r['requestId'] as String : '',
       hidden: hidden is List ? hidden.whereType<String>().toList() : const [],
+      queued: r['queued'] is List ? (r['queued'] as List).whereType<String>().toList() : const [],
     );
   }
 

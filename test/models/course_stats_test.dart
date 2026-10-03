@@ -104,10 +104,9 @@ void main() {
     expect(s.pastExamPostCount, 0);
   });
 
-  // Every post that predates Task 8 never issued a `+1`, so deleting one lands
-  // an `increment(-1)` on a counter sitting at 0 and Firestore stores -1. The
-  // UI must never render 「過去問 -1件」; a negative reads as 0 until
-  // `tools/backfill_post_counts.mjs` recounts the doc.
+  // Older docs maintained by increments could hold -1. The UI must never
+  // render 「過去問 -1件」; a negative reads as 0 until
+  // `tools/backfill_course_stats.mjs` recounts the doc.
   test('fromMap clamps negative post counters at 0', () {
     final s = CourseStats.fromMap({
       'courseKey': 'ck',

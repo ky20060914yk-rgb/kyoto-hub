@@ -46,6 +46,17 @@ void main() {
     expect(r.hidden, ['p1']);
   });
 
+  test('submitTakedown parses queued ids (missing or malformed => empty)', () async {
+    Future<TakedownResult> run(Map<String, dynamic> reply) => ModerationService(
+          FakeFirebaseFirestore(), (name, data) async => reply).submitTakedown(
+        postIds: ['p1'], requesterName: 'x', role: TakedownRole.other,
+        contactEmail: 'y@kyoto-u.ac.jp', description: '2024年度の期末試験です');
+    final a = await run({'requestId': 't', 'hidden': ['p1'], 'queued': ['p2', 3]});
+    expect(a.queued, ['p2']);
+    expect((await run({'requestId': 't', 'hidden': <String>[]})).queued, isEmpty);
+    expect((await run({'requestId': 't', 'hidden': <String>[], 'queued': 'p2'})).queued, isEmpty);
+  });
+
   test('streamNotifications returns only the caller’s rows, newest first; markNotificationRead flips read', () async {
     final db = FakeFirebaseFirestore();
     Future<void> row(String id, String uid, int day) => db.collection('notifications').doc(id).set({

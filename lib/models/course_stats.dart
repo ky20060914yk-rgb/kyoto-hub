@@ -6,16 +6,14 @@ import 'review.dart';
 /// is a path separator in a document id. The raw [courseKey] stays in the
 /// document as a field (and is what [applyReview] and every reader key on).
 ///
-/// Phase 1 has no Cloud Functions, so this is maintained client-side:
-/// `ReviewService` reads the doc inside a Firestore transaction, calls
-/// [applyReview], and writes it back with `set(merge: true)` of [toMap].
+/// Since Plan 2B this doc is Function-maintained: `onReviewWritten` /
+/// `onPostWritten` recount the course from scratch and write it with a plain
+/// `set`, so clients never write it (rules deny). [applyReview] stays as the
+/// reference implementation of the formula; `test/fixtures/course_stats_parity.json`
+/// is asserted by both this model and `functions/src/courseStats.ts`.
 ///
-/// **Merge safety (ruling P2):** [toMap] deliberately OMITS `pastExamPostCount`
-/// and `resourcePostCount`. Those are maintained on the same doc by
-/// the `onPostWritten` Function via `FieldValue.increment`, so if a review write emitted
-/// them it would clobber a concurrent increment. [fromMap] still READS them
-/// (they live in the doc from the `onPostWritten` Function) and [applyReview] never touches
-/// them (Task 8 owns them).
+/// [toMap] omits `pastExamPostCount` and `resourcePostCount`; [fromMap] still
+/// READS them (the Function writes them) and [applyReview] never touches them.
 class CourseStats {
   final String courseKey;
   final String universityId;
@@ -33,8 +31,7 @@ class CourseStats {
   /// [rakutanScore] rounded to an int, snapshotted at the last [applyReview].
   /// Stored so a Firestore ranking query can `orderBy('score', descending: true)`
   /// (a getter cannot be indexed). `50` is the neutral value at 0 reviews,
-  /// matching [rakutanScore]. Left untouched by the `onPostWritten` Function — the score does
-  /// not depend on the post counts.
+  /// matching [rakutanScore]. The score does not depend on the post counts.
   final int score;
 
   const CourseStats({
@@ -157,9 +154,8 @@ class CourseStats {
     return next;
   }
 
-  /// P2: post-count fields are intentionally omitted so a review write
-  /// (`set(merge: true)`) cannot clobber a concurrent the `onPostWritten` Function
-  /// `FieldValue.increment`.
+  /// The post-count fields are intentionally omitted: they are owned by the
+  /// Function's recount, not by this reference model.
   Map<String, dynamic> toMap() {
     return {
       'courseKey': courseKey,
@@ -197,11 +193,10 @@ class CourseStats {
       gradingCounts: _intMap(map['gradingCounts']),
       pastExamCounts: _intMap(map['pastExamCounts']),
       bringInCounts: _intMap(map['bringInCounts']),
-      // P2: written by the onPostWritten Function, not by the review path — but always read.
-      // Clamped at >= 0: every post that predates the counters never issued a
-      // `+1`, so deleting one lands an `increment(-1)` on a doc that is at 0
-      // and the UI would render 「過去問 -1件」. A negative stored value is
-      // read as 0 until `tools/backfill_post_counts.mjs` recounts the doc.
+      // Written by the Function's full recount, always read. Clamped at >= 0
+      // defensively (older docs maintained by increments could be negative, and
+      // the UI must never render 「過去問 -1件」); `tools/backfill_course_stats.mjs`
+      // recounts every doc.
       pastExamPostCount: _nonNeg(map['pastExamPostCount']),
       resourcePostCount: _nonNeg(map['resourcePostCount']),
       // M5: this parses an ISO-8601 STRING, which is what `toMap` writes. A
@@ -234,8 +229,8 @@ class CourseStats {
   /// crafted bucket map or post-count field could otherwise crash every reader.
   static int _int(dynamic raw) => (raw is num && raw.isFinite) ? raw.toInt() : 0;
 
-  /// [_int] floored at 0 — for the two counters that can legitimately be driven
-  /// negative by an `increment(-1)` against a doc that never recorded the `+1`.
+  /// [_int] floored at 0 — for the two counters that older, increment-maintained
+  /// docs could drive negative.
   static int _nonNeg(dynamic raw) => _clamp(_int(raw));
 
   static Map<String, int> _intMap(dynamic raw) {
