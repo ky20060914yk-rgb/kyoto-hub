@@ -12,6 +12,12 @@ import { handlePostGone } from './postDeleted.js';
 import { processReport } from './report.js';
 import { processTakedown, type TakedownCaller } from './takedown.js';
 import { handlePostWritten, handleReviewWritten } from './courseStats.js';
+import { processCreateListing, processUpdateListing } from './listings.js';
+import { handleListingCreated } from './listingMatch.js';
+import { handleMessageCreated, processBlockRoom, processOpenChat } from './chat.js';
+import { processRateDeal } from './ratings.js';
+import { handleListingDeleted, processMarketReport } from './marketModeration.js';
+import type { MarketCaller } from './marketCore.js';
 
 initializeApp();
 const db = getFirestore();
@@ -96,3 +102,32 @@ export const onReviewWritten = onDocumentWritten({ ...opts, document: 'reviews/{
 export const onPostWritten = onDocumentWritten({ ...opts, document: 'posts/{postId}' }, async (event) => {
   await handlePostWritten(db, event.data?.before?.data(), event.data?.after?.data());
 });
+
+// --- Textbook market + chat (Plan 3) ------------------------------------------
+// Every market write goes through these: listings, rooms, ratings, reports and
+// blocks are Function-owned (firestore.rules deny client writes). The caller is
+// always a verified KU student; identity for caps and reputation is the mailbox.
+const marketCaller = (auth: Parameters<typeof requireKuVerified>[0]): MarketCaller =>
+  ({ uid: requireKuVerified(auth), email: String(auth?.token.email ?? '') });
+const payload = (data: unknown) => (data ?? {}) as Record<string, unknown>;
+
+export const createListing = onCall(opts, async (req) => processCreateListing(db, marketCaller(req.auth), payload(req.data)));
+export const updateListing = onCall(opts, async (req) => processUpdateListing(db, marketCaller(req.auth), payload(req.data)));
+export const openListingChat = onCall(opts, async (req) => processOpenChat(db, marketCaller(req.auth), payload(req.data)));
+export const blockRoom = onCall(opts, async (req) => processBlockRoom(db, marketCaller(req.auth), payload(req.data)));
+export const rateDeal = onCall(opts, async (req) => processRateDeal(db, marketCaller(req.auth), payload(req.data)));
+export const reportMarket = onCall(opts, async (req) => processMarketReport(db, marketCaller(req.auth), payload(req.data)));
+
+export const onListingCreated = onDocumentCreated({ ...opts, document: 'textbook_listings/{listingId}' }, async (event) => {
+  await handleListingCreated(db, event.params.listingId);
+});
+
+export const onListingDeleted = onDocumentDeleted({ ...opts, document: 'textbook_listings/{listingId}' }, async (event) => {
+  const data = event.data?.data();
+  if (data) await handleListingDeleted(storageDeps, data);
+});
+
+export const onTalkMessageCreated = onDocumentCreated(
+  { ...opts, document: 'talk_rooms/{roomId}/messages/{messageId}' },
+  async (event) => { await handleMessageCreated(db, event.params.roomId, event.data?.data()); },
+);
