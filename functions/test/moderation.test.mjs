@@ -63,7 +63,7 @@ test('restore discredits the reporters behind a report-hide, the requester behin
   const seedHidden = async (hiddenBy, hiddenByUid, reporters) => {
     const { id } = await mkPost();
     await hidePost(db, id, OP);
-    await db.doc(`moderation_queue/${id}`).set({ hiddenBy, hiddenByUid }, { merge: true });
+    await db.doc(`moderation_queue/${id}`).set({ hiddenBy, hiddenByUid, hiddenByKey: hiddenByUid }, { merge: true });
     for (const [r, counted] of reporters) {
       await db.doc(`moderation_queue/${id}/reports/${r}`).set({ counted, university_id: 'kyoto_u' });
     }
@@ -202,9 +202,9 @@ test('restore/remove of a post that is in neither collection retire its queue en
 test('restore logs each discredit increment', async () => {
   const { id } = await mkPost();
   const u = uid('tk');
-  await db.doc(`moderation_queue/${id}`).set({ postId: id, status: 'open', hiddenBy: 'takedown', hiddenByUid: u });
+  await db.doc(`moderation_queue/${id}`).set({ postId: id, status: 'open', hiddenBy: 'takedown', hiddenByUid: u, hiddenByKey: u });
   await hidePost(db, id, OP);
-  await db.doc(`moderation_queue/${id}`).update({ hiddenBy: 'takedown', hiddenByUid: u });
+  await db.doc(`moderation_queue/${id}`).update({ hiddenBy: 'takedown', hiddenByUid: u, hiddenByKey: u });
   await restorePost(db, id, OP);
   const rows = (await db.collection('moderation_log').where('target', '==', u).get()).docs.map((d) => d.data());
   assert.deepEqual(rows.map((r) => r.action), ['discredit']);

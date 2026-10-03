@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { HttpsError } from 'firebase-functions/v2/https';
 
 export const REGION = 'asia-east1'; // = Firestore database region (P2-8)
@@ -38,6 +39,15 @@ export function requireKuVerified(auth: AuthLike | undefined | null): string {
   }
   return auth.uid;
 }
+
+/**
+ * Stable identity of a MAILBOX: sha256 of the lowercased, trimmed email. Used
+ * for the welcome claim (P2-15) and every moderation identity (reports, caps,
+ * discredit counters), so delete-account + re-signup (a new uid, the same
+ * address) cannot become a fresh reporter or reset a cap.
+ */
+export const emailKey = (email: string): string =>
+  createHash('sha256').update(String(email ?? '').trim().toLowerCase()).digest('hex');
 
 /** `YYYY-MM-DD` in Asia/Tokyo (UTC+9, no DST). */
 export function jstDay(now: Date = new Date()): string {

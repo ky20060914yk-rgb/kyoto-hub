@@ -1,7 +1,8 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { db, uid, seedPost } from '../testlib/helpers.mjs';
-import { jstDay } from '../lib/common.js';
+import { restorePost } from '../lib/moderation.js';
+import { jstDay, emailKey } from '../lib/common.js';
 import { processTakedown, parseTakedown } from '../lib/takedown.js';
 
 const get = (path) => db.doc(path).get();
@@ -65,12 +66,12 @@ test('no immediate hide for the post’s own author, an operator-cleared post, o
   assert.deepEqual((await processTakedown(db, verified(), FORM([cleared.id]))).hidden, []);
   assert.equal((await get(`moderation_queue/${cleared.id}`)).get('needsReview'), true);
   const bad = uid('v');
-  await db.doc(`moderation_actors/${bad}`).set({ restoredTakedowns: 2 });
+  await db.doc(`moderation_actors/${emailKey(`${bad}@kyoto-u.ac.jp`)}`).set({ restoredTakedowns: 2 });
   const p = await mk();
   assert.deepEqual((await processTakedown(db, verified(bad), FORM([p.id]))).hidden, []);
   for (const x of [own, cleared, p]) assert.equal((await get(`posts/${x.id}`)).exists, true);
   const once = uid('v');
-  await db.doc(`moderation_actors/${once}`).set({ restoredTakedowns: 1 });
+  await db.doc(`moderation_actors/${emailKey(`${once}@kyoto-u.ac.jp`)}`).set({ restoredTakedowns: 1 });
   const p2 = await mk();
   assert.deepEqual((await processTakedown(db, verified(once), FORM([p2.id]))).hidden, [p2.id]);
 });
@@ -158,4 +159,27 @@ test('a takedown hide is logged as takedown:<uid> with the request id', async ()
   assert.equal(rows.length, 1);
   assert.deepEqual({ by: rows[0].by, action: rows[0].action }, { by: `takedown:${v.uid}`, action: 'hide:takedown' });
   assert.match(rows[0].note, new RegExp(r.requestId));
+});
+
+test('IMPORTANT 1: takedown caps and the hide budget are per mailbox, not per uid', async () => {
+  const email = `${uid('m')}@kyoto-u.ac.jp`; const d = new Date('2027-06-01T03:00:00Z');
+  const as = () => ({ uid: uid('v'), verified: true, email });
+  for (let i = 0; i < 3; i++) await processTakedown(db, as(), FORM([]), d);
+  await assert.rejects(processTakedown(db, as(), FORM([]), d), (e) => e.code === 'resource-exhausted');
+  const e2 = `${uid('m')}@kyoto-u.ac.jp`; const ps = []; for (let i = 0; i < 4; i++) ps.push(await mk());
+  const r1 = await processTakedown(db, { uid: uid('v'), verified: true, email: e2 }, FORM(ps.slice(0, 2).map((p) => p.id)), d);
+  const r2 = await processTakedown(db, { uid: uid('v'), verified: true, email: e2.toUpperCase() }, FORM(ps.slice(2).map((p) => p.id)), d);
+  assert.equal(r1.hidden.length + r2.hidden.length, 3);
+});
+
+test('IMPORTANT 1: restoring a takedown-hide discredits the requester MAILBOX (a new uid inherits it)', async () => {
+  const email = `${uid('m')}@kyoto-u.ac.jp`;
+  const a = await mk(); const b = await mk();
+  const r = await processTakedown(db, { uid: uid('v'), verified: true, email }, FORM([a.id]));
+  assert.deepEqual(r.hidden, [a.id]);
+  await restorePost(db, a.id, { operator: 'op' });
+  assert.equal((await get(`moderation_actors/${emailKey(email)}`)).get('restoredTakedowns'), 1);
+  await db.doc(`moderation_actors/${emailKey(email)}`).set({ restoredTakedowns: 2 }, { merge: true });
+  const r2 = await processTakedown(db, { uid: uid('v2'), verified: true, email }, FORM([b.id]));
+  assert.deepEqual(r2.hidden, []);
 });

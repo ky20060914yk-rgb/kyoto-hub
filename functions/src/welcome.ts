@@ -1,13 +1,11 @@
-import { createHash } from 'node:crypto';
 import { FieldValue, type Firestore } from 'firebase-admin/firestore';
 import { HttpsError } from 'firebase-functions/v2/https';
-import { CREDITS, UNIVERSITY_ID } from './common.js';
+import { CREDITS, UNIVERSITY_ID, emailKey } from './common.js';
 import { readBalance, writeCredit, type Balance } from './credits.js';
 import { newCode, normalizeCode } from './referral.js';
 
 /** Key of the once-per-email claim doc (P2-15): sha256 of the lowercased, trimmed email. */
-export const welcomeKey = (email: string): string =>
-  createHash('sha256').update(email.trim().toLowerCase()).digest('hex');
+export const welcomeKey = emailKey;
 
 /**
  * One-time welcome grant + invitation-code issue + (optional) referral payout,

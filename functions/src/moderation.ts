@@ -21,6 +21,7 @@ export interface QueueDoc {
   takedownRequestIds: string[];
   hiddenBy: HiddenBy | null;
   hiddenByUid: string | null;
+  hiddenByKey: string | null; // emailKey of whoever caused a takedown hide (discredit target)
   autoHide: boolean; // false once an operator has reviewed the post (M-8)
   transitions: number; // hide/restore/remove count; keys the notification ids (M-10)
   needsReview: boolean;
@@ -31,8 +32,8 @@ export interface OperatorAction { operator: string; note?: string }
 export const postRef = (db: Firestore, id: string) => db.collection('posts').doc(id);
 export const hiddenRef = (db: Firestore, id: string) => db.collection('hidden_posts').doc(id);
 export const queueRef = (db: Firestore, id: string) => db.collection('moderation_queue').doc(id);
-export const reportRef = (db: Firestore, postId: string, uid: string) => queueRef(db, postId).collection('reports').doc(uid);
-export const actorRef = (db: Firestore, uid: string) => db.collection('moderation_actors').doc(uid);
+export const reportRef = (db: Firestore, postId: string, key: string) => queueRef(db, postId).collection('reports').doc(key); // key = emailKey
+export const actorRef = (db: Firestore, key: string) => db.collection('moderation_actors').doc(key); // key = emailKey
 export const notificationId = (postId: string, transitions: number) => `mod_${postId}_${transitions}`;
 
 export const num = (v: unknown): number => (typeof v === 'number' && Number.isFinite(v) ? v : 0);
@@ -56,6 +57,7 @@ export function readQueue(snap: DocumentSnapshot, postId: string, post?: Documen
       ? d.takedownRequestIds.filter((x: unknown): x is string => typeof x === 'string') : [],
     hiddenBy: HIDERS.includes(d.hiddenBy) ? d.hiddenBy : null,
     hiddenByUid: typeof d.hiddenByUid === 'string' ? d.hiddenByUid : null,
+    hiddenByKey: typeof d.hiddenByKey === 'string' ? d.hiddenByKey : null,
     autoHide: d.autoHide !== false,
     transitions: num(d.transitions),
     needsReview: d.needsReview === true,
@@ -101,13 +103,14 @@ function log(tx: Transaction, db: Firestore, action: string, target: string, by:
  */
 export function hideInTx(
   tx: Transaction, db: Firestore, q: QueueDoc, post: DocumentData,
-  by: HiddenBy, byUid: string | null, actor: string, note = '',
+  by: HiddenBy, byUid: string | null, actor: string, note = '', byKey: string | null = null,
 ): void {
   tx.create(hiddenRef(db, q.postId), post); // never overwrite a hidden doc
   tx.delete(postRef(db, q.postId));
   q.status = 'hidden';
   q.hiddenBy = by;
   q.hiddenByUid = byUid;
+  q.hiddenByKey = byKey;
   q.transitions += 1;
   q.needsReview = true;
   notify(tx, db, q, 'post_hidden');
@@ -191,7 +194,7 @@ export async function restorePost(
       tx.create(postRef(db, postId), h.data()!);
       tx.delete(hiddenRef(db, postId));
       if (q.hiddenBy === 'reports') for (const r of counted.docs) discredited.push(r.id);
-      if (q.hiddenBy === 'takedown' && q.hiddenByUid) discredited.push(q.hiddenByUid);
+      if (q.hiddenBy === 'takedown' && q.hiddenByKey) discredited.push(q.hiddenByKey);
       const field = q.hiddenBy === 'takedown' ? 'restoredTakedowns' : 'restoredReports';
       for (const u of discredited) {
         tx.set(actorRef(db, u), { [field]: FieldValue.increment(1), university_id: UNIVERSITY_ID }, { merge: true });

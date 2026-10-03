@@ -1,6 +1,6 @@
 import { FieldValue, type Firestore } from 'firebase-admin/firestore';
 import { HttpsError } from 'firebase-functions/v2/https';
-import { MODERATION, UNIVERSITY_ID, isDocId, jstDay } from './common.js';
+import { MODERATION, UNIVERSITY_ID, emailKey, isDocId, jstDay } from './common.js';
 import {
   actorRef, hiddenRef, hideInTx, num, postRef, queueRef, readQueue, reportRef, writeQueue,
 } from './moderation.js';
@@ -15,9 +15,12 @@ export type ReportStatus = 'reported' | 'hidden' | 'duplicate' | 'already_hidden
  * MODERATION.reportHideThreshold DISTINCT counted reporters have reported it,
  * unless an operator already cleared it. Never touches a credit.
  */
+/** The verified caller. Identity for reports, caps and discredit is the MAILBOX (emailKey); uid is kept for operators. */
+export interface Reporter { uid: string; email: string }
+
 export async function processReport(
   db: Firestore,
-  uid: string,
+  reporter: Reporter,
   input: Record<string, unknown>,
   now: Date = new Date(),
 ): Promise<{ status: ReportStatus }> {
@@ -29,13 +32,16 @@ export async function processReport(
   }
   const detail = typeof input.detail === 'string' ? input.detail.trim() : '';
   if (detail.length > MODERATION.maxDetail) throw new HttpsError('invalid-argument', 'detail too long');
+  const { uid } = reporter;
+  const key = emailKey(reporter.email);
+  if (!reporter.email.trim()) throw new HttpsError('permission-denied', 'email required');
   const day = jstDay(now);
 
   return db.runTransaction(async (tx) => {
     const postSnap = await tx.get(postRef(db, postId));
     const hiddenSnap = await tx.get(hiddenRef(db, postId));
-    const mine = await tx.get(reportRef(db, postId, uid));
-    const actorSnap = await tx.get(actorRef(db, uid));
+    const mine = await tx.get(reportRef(db, postId, key));
+    const actorSnap = await tx.get(actorRef(db, key));
     const queueSnap = await tx.get(queueRef(db, postId));
 
     if (!postSnap.exists) {
@@ -55,11 +61,11 @@ export async function processReport(
     const q = readQueue(queueSnap, postId, post);
     q.reportCount += 1;
     if (counted) q.countedReports += 1;
-    tx.create(reportRef(db, postId, uid), {
+    tx.create(reportRef(db, postId, key), {
       postId, reporterUid: uid, category, detail, counted,
       createdAt: FieldValue.serverTimestamp(), university_id: UNIVERSITY_ID,
     });
-    tx.set(actorRef(db, uid), { reportDay: day, reportsToday: usedToday + 1, university_id: UNIVERSITY_ID }, { merge: true });
+    tx.set(actorRef(db, key), { reportDay: day, reportsToday: usedToday + 1, university_id: UNIVERSITY_ID }, { merge: true });
 
     let status: ReportStatus = 'reported';
     if (q.autoHide && q.countedReports >= MODERATION.reportHideThreshold) {

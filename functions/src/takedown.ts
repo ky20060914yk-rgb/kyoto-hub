@@ -1,6 +1,6 @@
 import { FieldValue, type DocumentSnapshot, type Firestore } from 'firebase-admin/firestore';
 import { HttpsError } from 'firebase-functions/v2/https';
-import { MODERATION, UNIVERSITY_ID, isDocId, jstDay } from './common.js';
+import { MODERATION, UNIVERSITY_ID, emailKey, isDocId, jstDay } from './common.js';
 import { actorRef, hiddenRef, hideInTx, num, postRef, queueRef, readQueue, writeQueue } from './moderation.js';
 
 export const TAKEDOWN_ROLES = ['instructor', 'university', 'publisher', 'other'] as const;
@@ -48,12 +48,14 @@ export async function processTakedown(
   const form = parseTakedown(input);
   const day = jstDay(now);
   const verified = caller?.verified === true;
+  // Identity = mailbox (a re-signup cannot reset caps or discredit); an email-less caller falls back to the uid.
+  const key = caller ? (caller.email.trim() ? emailKey(caller.email) : `uid_${caller.uid}`) : null;
   const reqRef = db.collection('takedown_requests').doc();
   const anonRef = db.collection('moderation_meta').doc(`takedown_anon_${day}`);
 
   return db.runTransaction(async (tx) => {
     // ---- reads
-    const actorSnap = caller ? await tx.get(actorRef(db, caller.uid)) : null;
+    const actorSnap = key ? await tx.get(actorRef(db, key)) : null;
     const anonSnap = verified ? null : await tx.get(anonRef);
     const targets: { id: string; post: DocumentSnapshot; hidden: DocumentSnapshot; queue: DocumentSnapshot }[] = [];
     for (const id of form.postIds) {
@@ -99,7 +101,7 @@ export async function processTakedown(
       q.needsReview = true;
       if (!q.takedownRequestIds.includes(reqRef.id)) q.takedownRequestIds.push(reqRef.id);
       if (t.post.exists && mayHide && hidesLeft > 0 && q.autoHide && post.authorId !== caller!.uid) {
-        hideInTx(tx, db, q, post, 'takedown', caller!.uid, `takedown:${caller!.uid}`, `request ${reqRef.id}`);
+        hideInTx(tx, db, q, post, 'takedown', caller!.uid, `takedown:${caller!.uid}`, `request ${reqRef.id}`, key);
         hidden.push(t.id);
         hidesLeft -= 1;
       } else {
@@ -107,8 +109,8 @@ export async function processTakedown(
       }
       writeQueue(tx, db, q, !t.queue.exists);
     }
-    if (caller) {
-      tx.set(actorRef(db, caller.uid), {
+    if (caller && key) {
+      tx.set(actorRef(db, key), {
         takedownDay: day, takedownsToday: usedByCaller + 1,
         takedownHideDay: day, takedownHidesToday: hiddenBefore + hidden.length,
         university_id: UNIVERSITY_ID,

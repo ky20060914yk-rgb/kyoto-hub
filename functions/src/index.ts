@@ -73,8 +73,10 @@ export const onHiddenPostDeleted = onDocumentDeleted({ ...opts, document: 'hidde
   if (data) await handlePostGone(db, storageDeps, event.params.postId, data);
 });
 
-export const reportPost = onCall(opts, async (req) =>
-  processReport(db, requireKuVerified(req.auth), (req.data ?? {}) as Record<string, unknown>));
+export const reportPost = onCall(opts, async (req) => {
+  const uid = requireKuVerified(req.auth); // guarantees a verified KU email on the token
+  return processReport(db, { uid, email: String(req.auth?.token.email ?? '') }, (req.data ?? {}) as Record<string, unknown>);
+});
 
 // The ONE callable that accepts a signed-out caller (a rights-holder has no app
 // account). Classified, never trusted: only a verified KU token may hide (M-6).
