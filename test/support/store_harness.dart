@@ -3,6 +3,7 @@ import 'package:kyoto_exam_hub/models/user_profile.dart';
 import 'package:kyoto_exam_hub/repositories/course_repository.dart';
 import 'package:kyoto_exam_hub/services/app_store.dart';
 import 'package:kyoto_exam_hub/services/credit_service.dart';
+import 'package:kyoto_exam_hub/services/market_service.dart';
 import 'package:kyoto_exam_hub/services/moderation_service.dart';
 import 'package:kyoto_exam_hub/services/ranking_service.dart';
 import 'package:kyoto_exam_hub/services/review_service.dart';
@@ -20,6 +21,7 @@ class Harness {
       CreditService(db, _invoke),
       ModerationService(db, _invoke),
       db: db,
+      market: MarketService(db, _invoke),
     );
   }
 

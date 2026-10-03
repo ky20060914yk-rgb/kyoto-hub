@@ -10,7 +10,6 @@ import '../auth/signup_screen.dart';
 import '../contact/contact_screen.dart';
 import '../notifications/notifications_screen.dart';
 import '../course/review_form_sheet.dart';
-import '../textbook/textbook_lending_screen.dart';
 import '../timetable/timetable_registration_screen.dart';
 
 class MyPageScreen extends StatefulWidget {
@@ -600,16 +599,6 @@ class _MyPageScreenState extends State<MyPageScreen> {
                     onTap: () => Navigator.push(
                       context,
                       MaterialPageRoute(builder: (_) => ContactScreen(store: widget.store)),
-                    ),
-                  ),
-                  const Divider(height: 1, color: Color(0xFFE2E8F0)),
-                  ListTile(
-                    leading: const Icon(Icons.menu_book_outlined, color: Color(0xFF0F4C81)),
-                    title: const Text('参考書の貸し借り', style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600, color: Color(0xFF1E293B))),
-                    trailing: const Icon(Icons.chevron_right, color: Color(0xFF94A3B8)),
-                    onTap: () => Navigator.push(
-                      context,
-                      MaterialPageRoute(builder: (_) => TextbookLendingScreen(store: widget.store)),
                     ),
                   ),
                 ],

@@ -3,10 +3,11 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:kyoto_exam_hub/models/talk_room.dart';
 import 'package:kyoto_exam_hub/services/talk_room_queries.dart';
 
-TalkRoom room(String id, String lender, String borrower, int day) => TalkRoom(
+TalkRoom room(String id, String lender, String borrower, int day, {int? lastMessageDay}) => TalkRoom(
       id: id, requestId: 'r', bookTitle: 'b', subjectName: 's',
       borrowerId: borrower, borrowerName: 'B', lenderId: lender, lenderName: 'L',
-      messages: const [], createdAt: DateTime(2027, 1, day),
+      createdAt: DateTime(2027, 1, day),
+      lastMessageAt: lastMessageDay == null ? null : DateTime(2027, 1, lastMessageDay),
     );
 
 void main() {
@@ -19,6 +20,17 @@ void main() {
       participantTalkRooms(db, 'u1'),
       emitsThrough(predicate<List<TalkRoom>>(
           (l) => l.map((r) => r.id).join(',') == 'borrowed,lent', 'both of u1’s rooms, newest first')),
+    );
+  });
+
+  test('Plan 3: a room with a recent message sorts before a newer but silent room', () async {
+    final db = FakeFirebaseFirestore();
+    for (final r in [room('busy', 'u1', 'u2', 1, lastMessageDay: 9), room('silent', 'u3', 'u1', 5)]) {
+      await db.collection('talk_rooms').doc(r.id).set(r.toMap());
+    }
+    await expectLater(
+      participantTalkRooms(db, 'u1'),
+      emitsThrough(predicate<List<TalkRoom>>((l) => l.map((r) => r.id).join(',') == 'busy,silent', 'last activity first')),
     );
   });
 

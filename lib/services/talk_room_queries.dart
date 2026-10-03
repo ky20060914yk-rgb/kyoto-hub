@@ -6,8 +6,9 @@ import '../models/talk_room.dart';
 
 /// Plan 2B (M-15): `talk_rooms` are readable only by their two participants, so
 /// the client listens to the rooms it lends in and the rooms it borrows in — two
-/// single-field equality queries the rules can prove — and merges them, newest
-/// first. (A university-wide stream is now refused by the rules.)
+/// single-field equality queries the rules can prove — and merges them, most
+/// recent activity (last message, else creation) first. (A university-wide
+/// stream is refused by the rules.)
 Stream<List<TalkRoom>> participantTalkRooms(FirebaseFirestore db, String uid) {
   final rooms = db.collection('talk_rooms');
   var lent = const <TalkRoom>[];
@@ -21,7 +22,7 @@ Stream<List<TalkRoom>> participantTalkRooms(FirebaseFirestore db, String uid) {
 
   void emit() {
     final byId = <String, TalkRoom>{for (final r in [...lent, ...borrowed]) r.id: r};
-    out.add(byId.values.toList()..sort((x, y) => y.createdAt.compareTo(x.createdAt)));
+    out.add(byId.values.toList()..sort((x, y) => y.lastActivity.compareTo(x.lastActivity)));
   }
 
   out = StreamController<List<TalkRoom>>(

@@ -1,9 +1,12 @@
+import 'dart:typed_data';
+
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:fake_cloud_firestore/fake_cloud_firestore.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:kyoto_exam_hub/models/app_notification.dart';
 import 'package:kyoto_exam_hub/models/post.dart';
 import 'package:kyoto_exam_hub/models/review.dart';
+import 'package:kyoto_exam_hub/models/talk_room.dart';
 import 'package:kyoto_exam_hub/services/credit_service.dart';
 import 'package:kyoto_exam_hub/services/moderation_service.dart';
 
@@ -197,5 +200,25 @@ void main() {
     h.store.creditBalance = 5;
     h.store.logout();
     expect([h.store.currentUser, h.store.userTimetable, h.store.creditBalance, h.store.talkRooms], [null, <String, String>{}, 0, []]);
+  });
+
+  test('Plan 3: unreadRoomCount counts rooms with a newer message from the other party', () {
+    final h = Harness();
+    h.signIn();
+    TalkRoom room(String id, {required String last, DateTime? read}) => TalkRoom(
+          id: id, listingId: 'l', bookTitle: 'b', subjectName: 's', lenderId: 'u1', lenderName: 'A', borrowerId: 'u2',
+          borrowerName: 'B', createdAt: DateTime.utc(2027), lastMessageAt: DateTime.utc(2027, 2), lastSenderId: last, lenderReadAt: read,
+        );
+    h.store.talkRooms = [room('a', last: 'u2'), room('b', last: 'u1'), room('c', last: 'u2', read: DateTime.utc(2027, 3))];
+    expect(h.store.unreadRoomCount, 1);
+  });
+
+  test('Plan 3: uploadListingPhoto refuses non-images and photos over 2 MiB before touching Storage', () async {
+    final h = Harness();
+    h.signIn();
+    expect(await h.store.uploadListingPhoto('a.pdf', Uint8List(10)), isNull);
+    expect(h.store.lastNoticeMessage, '写真は JPEG / PNG / WebP のみアップロードできます。');
+    expect(await h.store.uploadListingPhoto('a.jpg', Uint8List(2 * 1024 * 1024 + 1)), isNull);
+    expect(h.store.lastNoticeMessage, '写真は1枚2MBまでです。');
   });
 }

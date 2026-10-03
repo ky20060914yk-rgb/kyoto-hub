@@ -8,7 +8,6 @@ import '../models/user_profile.dart';
 import '../models/subject.dart';
 import '../models/post.dart';
 import '../models/request.dart';
-import '../models/textbook_request.dart';
 import '../models/talk_room.dart';
 import '../models/credit_ledger_entry.dart';
 import '../models/inquiry.dart';
@@ -18,7 +17,8 @@ import '../repositories/inquiry_repository.dart';
 import '../repositories/post_repository.dart';
 import '../repositories/request_repository.dart';
 import '../repositories/user_repository.dart';
-import 'firestore_service.dart';
+import 'market_service.dart';
+import 'chat_service.dart';
 import 'review_service.dart';
 import 'ranking_service.dart';
 import 'credit_service.dart';
@@ -39,7 +39,6 @@ class AppStore extends ChangeNotifier {
 
   /// Plan 3 (Task 9): injectable so tests run AppStore on `fake_cloud_firestore`.
   final FirebaseFirestore _db;
-  late final FirestoreService _firestore = FirestoreService(_db);
 
   /// Feature repositories (Plan 3, Task 10): AppStore keeps the session state
   /// and the UI-facing notices; data access lives in these.
@@ -57,7 +56,6 @@ class AppStore extends ChangeNotifier {
 
   List<Post> posts = [];
   List<MaterialRequest> requests = [];
-  List<TextbookRequest> textbookRequests = [];
   List<TalkRoom> talkRooms = [];
   List<Inquiry> inquiries = [];
 
@@ -95,7 +93,7 @@ class AppStore extends ChangeNotifier {
       notifications = n;
       notifyListeners();
     }, onError: (_) {});
-    _roomsSub = _firestore.streamTalkRoomsFor(uid).listen((rooms) {
+    _roomsSub = chat.streamRooms(uid).listen((rooms) {
       talkRooms = rooms;
       notifyListeners();
     }, onError: (_) {});
@@ -146,8 +144,27 @@ class AppStore extends ChangeNotifier {
     }
   }
 
-  AppStore(this.courses, this.reviews, this.ranking, this.credits, this.moderation, {FirebaseFirestore? db})
-      : _db = db ?? FirebaseFirestore.instance {
+  /// Textbook market callables + listing reads (Plan 3).
+  final MarketService market;
+
+  /// Chat on `talk_rooms/{id}/messages` (Plan 3).
+  final ChatService chat;
+
+  /// Rooms with a message from the other party newer than my read marker (教科書 tab badge).
+  int get unreadRoomCount => talkRooms.where((r) => r.isUnreadFor(currentUser?.uid)).length;
+
+  AppStore(
+    this.courses,
+    this.reviews,
+    this.ranking,
+    this.credits,
+    this.moderation, {
+    FirebaseFirestore? db,
+    MarketService? market,
+    ChatService? chat,
+  })  : _db = db ?? FirebaseFirestore.instance,
+        market = market ?? MarketService.live(db ?? FirebaseFirestore.instance),
+        chat = chat ?? ChatService(db ?? FirebaseFirestore.instance) {
     // _initSampleData(); // Commented out for production release
     _initFirebaseSync();
   }
@@ -218,13 +235,6 @@ class AppStore extends ChangeNotifier {
       _requestRepo.streamMaterialRequests().listen((remoteRequests) {
         if (remoteRequests.isNotEmpty) {
           requests = remoteRequests;
-          notifyListeners();
-        }
-      }, onError: (_) {});
-
-      _firestore.streamTextbookRequests().listen((remoteTextbooks) {
-        if (remoteTextbooks.isNotEmpty) {
-          textbookRequests = remoteTextbooks;
           notifyListeners();
         }
       }, onError: (_) {});
@@ -593,6 +603,37 @@ class AppStore extends ChangeNotifier {
     }
   }
 
+  /// Uploads one listing photo to `listings/<uid>/…` (Plan 3, T-5) and returns
+  /// its storage PATH (the listing stores paths; download URLs are asked for at
+  /// display time). Images only, at most 2 MiB — storage.rules enforce the same.
+  Future<String?> uploadListingPhoto(String fileName, Uint8List bytes) async {
+    final uid = currentUser?.uid;
+    if (uid == null) return null;
+    final contentType = MarketService.photoContentType(fileName);
+    if (contentType == null) {
+      lastNoticeMessage = '写真は JPEG / PNG / WebP のみアップロードできます。';
+      notifyListeners();
+      return null;
+    }
+    if (bytes.length > kListingPhotoMaxBytes) {
+      lastNoticeMessage = '写真は1枚2MBまでです。';
+      notifyListeners();
+      return null;
+    }
+    try {
+      final path = MarketService.photoPath(uid, fileName, DateTime.now().millisecondsSinceEpoch);
+      await fb_storage.FirebaseStorage.instance
+          .ref()
+          .child(path)
+          .putData(bytes, fb_storage.SettableMetadata(contentType: contentType));
+      return path;
+    } catch (_) {
+      lastNoticeMessage = '写真のアップロードに失敗しました。';
+      notifyListeners();
+      return null;
+    }
+  }
+
   Future<void> deletePost(String postId) async {
     final idx = posts.indexWhere((p) => p.id == postId);
     if (idx == -1) return;
@@ -673,122 +714,6 @@ class AppStore extends ChangeNotifier {
     lastNoticeMessage = 'Cloud Firestoreへリクエストを投稿しました！';
     notifyListeners();
     return true;
-  }
-
-  Future<bool> addTextbookRequest({
-    required String subjectId,
-    required String bookTitle,
-  }) async {
-    if (currentUser == null) return false;
-
-    final sub = await courses.byId(subjectId);
-
-    final req = TextbookRequest(
-      id: 'tb_${DateTime.now().millisecondsSinceEpoch}',
-      universityId: 'kyoto_u',
-      requesterId: currentUser!.uid,
-      requesterName: currentUser!.displayName,
-      subjectId: subjectId,
-      subjectName: sub?.name ?? '不明な科目',
-      bookTitle: bookTitle,
-      status: TextbookRequestStatus.open,
-      createdAt: DateTime.now(),
-    );
-
-    textbookRequests.insert(0, req);
-    _firestore.createTextbookRequest(req).catchError((_) {});
-
-    lastNoticeMessage = '参考書リクエストを投稿しました！';
-    notifyListeners();
-    return true;
-  }
-
-  bool respondToTextbookRequest(TextbookRequest req) {
-    if (currentUser == null) return false;
-
-    if (req.requesterId == currentUser!.uid) {
-      lastNoticeMessage = '自分のリクエストに応答することはできません。';
-      notifyListeners();
-      return false;
-    }
-
-    final roomId = 'room_${DateTime.now().millisecondsSinceEpoch}';
-
-    final room = TalkRoom(
-      id: roomId,
-      universityId: 'kyoto_u',
-      requestId: req.id,
-      bookTitle: req.bookTitle,
-      subjectName: req.subjectName,
-      borrowerId: req.requesterId,
-      borrowerName: req.requesterName,
-      lenderId: currentUser!.uid,
-      lenderName: currentUser!.displayName,
-      messages: [
-        ChatMessage(
-          id: 'msg_1',
-          senderId: currentUser!.uid,
-          senderName: currentUser!.displayName,
-          text: '『${req.bookTitle}』をお貸しできます！受け渡し場所や日時を相談させてください。',
-          createdAt: DateTime.now(),
-        ),
-      ],
-      createdAt: DateTime.now(),
-      warningNotice: '取引が完了しなかった場合、アカウント停止の可能性があります',
-    );
-
-    talkRooms.insert(0, room);
-    _firestore.createTalkRoom(room).catchError((_) {});
-
-    final idx = textbookRequests.indexWhere((t) => t.id == req.id);
-    if (idx != -1) {
-      textbookRequests[idx] = textbookRequests[idx].copyWith(
-        status: TextbookRequestStatus.matched,
-        responderId: currentUser!.uid,
-        responderName: currentUser!.displayName,
-        talkRoomId: roomId,
-      );
-      _firestore.createTextbookRequest(textbookRequests[idx]).catchError((_) {});
-    }
-
-    lastNoticeMessage = '貸し出しに応答しました！トークルームを作成しました。';
-    notifyListeners();
-    return true;
-  }
-
-  void sendMessageToTalkRoom(String roomId, String text) {
-    if (currentUser == null || text.trim().isEmpty) return;
-
-    final idx = talkRooms.indexWhere((r) => r.id == roomId);
-    if (idx != -1) {
-      final newMsg = ChatMessage(
-        id: 'msg_${DateTime.now().millisecondsSinceEpoch}',
-        senderId: currentUser!.uid,
-        senderName: currentUser!.displayName,
-        text: text,
-        createdAt: DateTime.now(),
-      );
-
-      final updatedMessages = List<ChatMessage>.from(talkRooms[idx].messages)..add(newMsg);
-
-      talkRooms[idx] = TalkRoom(
-        id: talkRooms[idx].id,
-        universityId: talkRooms[idx].universityId,
-        requestId: talkRooms[idx].requestId,
-        bookTitle: talkRooms[idx].bookTitle,
-        subjectName: talkRooms[idx].subjectName,
-        borrowerId: talkRooms[idx].borrowerId,
-        borrowerName: talkRooms[idx].borrowerName,
-        lenderId: talkRooms[idx].lenderId,
-        lenderName: talkRooms[idx].lenderName,
-        messages: updatedMessages,
-        createdAt: talkRooms[idx].createdAt,
-        warningNotice: talkRooms[idx].warningNotice,
-      );
-
-      _firestore.addChatMessage(roomId, newMsg).catchError((_) {});
-      notifyListeners();
-    }
   }
 
   void submitInquiry({
