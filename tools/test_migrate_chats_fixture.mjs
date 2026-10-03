@@ -31,6 +31,12 @@ if (!mode) {
   });
   assert.deepEqual(plan.messages.map((m) => [m.id, m.senderId, m.text.length]), [['legacy_0000', 'a', 4], ['legacy_0004', 'b', 6], ['legacy_0005', 'b', 1000]]);
   assert.equal(plan.skipped, 3);
+  assert.equal(plan.foreign, 1); // 'x/y' is not a participant (the empty sender / blank text are skipped, not foreign)
+  const f = planRoom({ lenderId: 'a', borrowerId: 'b', messages: [
+    { senderId: 'a', text: 'ok' }, { senderId: 'mallory', text: 'injected by a pre-deploy client' }, { senderId: 'b', text: 'ok2' },
+  ] });
+  assert.deepEqual(f.messages.map((m) => [m.id, m.senderId]), [['legacy_0000', 'a'], ['legacy_0002', 'b']]);
+  assert.deepEqual([f.skipped, f.foreign], [1, 1]);
   const t0 = ms('2026-09-01T10:00:00.000');
   assert.equal(t0, Date.UTC(2026, 8, 1, 1)); // no offset = JST
   assert.deepEqual(plan.messages.map((m) => m.createdAtMs), [t0, t0 + 1, t0 + 2]); // order kept, never backwards
@@ -83,6 +89,7 @@ if (mode === 'seed') {
     messages: [
       { id: 'msg_1', senderId: 'a', senderName: 'A', text: '貸せます', createdAt: '2026-09-01T10:00:00.000' },
       { id: 'msg_2', senderId: 'b', senderName: 'B', text: 'ありがとう', createdAt: '2026-09-01T10:05:00.000' },
+      { id: 'msg_3', senderId: 'mallory', senderName: 'M', text: '偽のメッセージ', createdAt: '2026-09-01T10:06:00.000' }, // not a participant
     ],
   });
   await db.doc('talk_rooms/old_empty').set({ id: 'old_empty', lenderId: 'a', borrowerId: 'c', university_id: 'kyoto_u', messages: [] });
@@ -116,7 +123,7 @@ if (mode === 'seedpost') {
 const checks = {
   unchanged: async () => {
     // A dry run writes nothing: arrays intact, nothing reset, no state, no sealed records.
-    assert.equal((await room('old1')).messages.length, 2);
+    assert.equal((await room('old1')).messages.length, 3);
     assert.equal((await msgs('old1')).length, 0);
     assert.equal((await room('new1')).listingId, 'L');
     assert.equal((await room('forged')).lenderSent, true);
@@ -135,7 +142,7 @@ const checks = {
     const r = await room('old1');
     assert.equal(r.messages, undefined);
     const m = await msgs('old1');
-    assert.deepEqual(m.map((d) => d.id), ['legacy_0000', 'legacy_0001']);
+    assert.deepEqual(m.map((d) => d.id), ['legacy_0000', 'legacy_0001']); // mallory's entry (index 2) is not migrated
     assert.deepEqual(Object.keys(m[0].data()).sort(), ['createdAt', 'senderId', 'text', 'university_id']);
     assert.equal(m[0].get('createdAt').toMillis(), Date.UTC(2026, 8, 1, 1));
     // preview of the history, but a legacy room: no listing link, no rating flags (the trigger sets the flags

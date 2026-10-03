@@ -82,7 +82,8 @@ pre-2B `posts.reports` arrays (they exposed reporter uids). Build first:
 Talk rooms used to keep every message in one `messages` array on the room
 document, and a room was client-writable. `migrate_chats.mjs` moves each array
 into the `talk_rooms/{id}/messages` subcollection (deterministic ids
-`legacy_NNNN`, only the four fields the new rules allow), keeps a preview of the
+`legacy_NNNN`, only the four fields the new rules allow), skips entries whose sender is not one of the room's two parties (counted as
+`foreign-senders`), keeps a preview of the
 last message with both read markers on it, and deletes the array in the same
 batch as the last messages. It also **resets every room that existed before the
 deploy** (summary, `lenderSent`/`borrowerSent`, `listingId`/`listingType`),

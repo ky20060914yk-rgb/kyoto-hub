@@ -27,7 +27,9 @@
 //     rooms alone. Run this BEFORE the hosting deploy (runbook step 5b).
 //   * Messages keep only the four fields the new rules allow (senderId, text,
 //     createdAt, university_id). The sender NAME is dropped: the app shows the
-//     names from the room. Entries without a sender or text are skipped.
+//     names from the room. Entries without a sender or text are skipped, and so
+//     are entries whose sender is neither the room's lenderId nor borrowerId (a
+//     pre-deploy client could forge them); those are counted as foreign-senders.
 //   * A migrated room keeps a preview of its last legacy message and has both
 //     read markers set to it, so migrated history is not "unread". The
 //     lenderSent/borrowerSent flags are written false: the
@@ -100,11 +102,14 @@ export function planRoom(room) {
   const base = ms(room.createdAt) ?? 0;
   const messages = [];
   let skipped = 0;
+  let foreign = 0;
   let prev = base;
   room.messages.forEach((m, i) => {
     const senderId = typeof m?.senderId === 'string' ? m.senderId : '';
     const text = typeof m?.text === 'string' ? m.text.replace(CONTROLS, '').trim().slice(0, MAX_TEXT) : '';
-    if (!senderId || senderId.includes('/') || !text) { skipped++; return; }
+    if (!senderId || !text) { skipped++; return; }
+    // A pre-deploy client could append a message "from" anybody: only the two parties of the room are migrated.
+    if (senderId.includes('/') || (senderId !== room.lenderId && senderId !== room.borrowerId)) { skipped++; foreign++; return; }
     const at = Math.max(ms(m.createdAt) ?? prev, prev);
     prev = at + 1;
     messages.push({ id: `legacy_${String(i).padStart(4, '0')}`, senderId, text, createdAtMs: at });
@@ -117,7 +122,7 @@ export function planRoom(room) {
     lastSenderId: last ? last.senderId : '',
     lastMessageAtMs: last ? last.createdAtMs : null,
   };
-  return { messages, skipped, summary };
+  return { messages, skipped, foreign, summary };
 }
 
 /**
@@ -170,7 +175,7 @@ async function main() {
   }
   const sealedRef = (id) => db.doc(`admin_migrations/chats/rooms/${id}`);
 
-  const tot = { rooms: 0, migrate: 0, reset: 0, skip: 0, messages: 0, skippedMessages: 0, failed: 0 };
+  const tot = { rooms: 0, migrate: 0, reset: 0, skip: 0, messages: 0, skippedMessages: 0, foreign: 0, failed: 0 };
   for (const doc of (await db.collection('talk_rooms').get()).docs) {
     tot.rooms++;
     const sealed = (await sealedRef(doc.id).get()).exists;
@@ -181,7 +186,8 @@ async function main() {
       tot.migrate++;
       tot.messages += plan.messages.length;
       tot.skippedMessages += plan.skipped;
-      console.log(`${opts.apply ? 'MIGRATE' : 'WOULD MIGRATE'} talk_rooms/${id}: ${plan.messages.length} message(s), ${plan.skipped} skipped`);
+      tot.foreign += plan.foreign;
+      console.log(`${opts.apply ? 'MIGRATE' : 'WOULD MIGRATE'} talk_rooms/${id}: ${plan.messages.length} message(s), ${plan.skipped} skipped${plan.foreign ? ` (${plan.foreign} from a non-participant)` : ''}`);
     } else {
       tot.reset++;
       console.log(`${opts.apply ? 'RESET' : 'WOULD RESET'} talk_rooms/${id}: summary, rating flags and listing link cleared`);
@@ -224,7 +230,7 @@ async function main() {
       console.log(`FAIL talk_rooms/${id}: ${safeText(e?.message, 200)}`);
     }
   }
-  console.log(`totals: rooms=${tot.rooms} migrate=${tot.migrate} reset=${tot.reset} skip=${tot.skip} messages=${tot.messages} skipped-messages=${tot.skippedMessages} failed=${tot.failed}`);
+  console.log(`totals: rooms=${tot.rooms} migrate=${tot.migrate} reset=${tot.reset} skip=${tot.skip} messages=${tot.messages} skipped-messages=${tot.skippedMessages} foreign-senders=${tot.foreign} failed=${tot.failed}`);
   console.log(opts.apply ? 'done' : 'done (dry run: nothing written)');
   if (tot.failed > 0) process.exit(1);
 }

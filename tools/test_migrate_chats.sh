@@ -14,7 +14,7 @@ T="node test_migrate_chats_fixture.mjs"
 # exists; 4) a re-run finishes `big` and leaves that room alone; 5) a third run has nothing left to do.
 firebase emulators:exec --only firestore --project demo-chats "\
   $T seed \
-  && $T run 0 'migrate=3 reset=2' --project demo-chats \
+  && $T run 0 'migrate=3 reset=2 skip=0 messages=452 skipped-messages=1 foreign-senders=1' --project demo-chats \
   && $T unchanged \
   && MIGRATE_CHATS_TEST_FAIL=big $T run 1 'failed=1' --project demo-chats --apply \
   && $T partial \
