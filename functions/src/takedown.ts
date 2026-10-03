@@ -11,7 +11,7 @@ export interface TakedownCaller { uid: string; verified: boolean; email: string 
 export interface TakedownForm {
   postIds: string[]; requesterName: string; role: TakedownRole; contactEmail: string; description: string;
 }
-export interface TakedownResult { requestId: string; hidden: string[] }
+export interface TakedownResult { requestId: string; hidden: string[]; queued: string[] }
 
 const EMAIL = /^[^@\s]+@[^@\s]+\.[^@\s]+$/;
 const bad = (what: string) => new HttpsError('invalid-argument', `bad ${what}`);
@@ -83,12 +83,13 @@ export async function processTakedown(
       createdAt: FieldValue.serverTimestamp(),
       university_id: UNIVERSITY_ID,
     });
-    if (caller) {
-      tx.set(actorRef(db, caller.uid), { takedownDay: day, takedownsToday: usedByCaller + 1, university_id: UNIVERSITY_ID }, { merge: true });
-    }
     if (!verified) tx.set(anonRef, { day, count: anonUsed + 1, university_id: UNIVERSITY_ID }, { merge: true });
 
+    // Cap on POSTS hidden at once per requester per day (a request may name several).
+    let hidesLeft = MODERATION.maxImmediateHidesPerDay - (actor.takedownHideDay === day ? num(actor.takedownHidesToday) : 0);
+    const hiddenBefore = MODERATION.maxImmediateHidesPerDay - hidesLeft;
     const hidden: string[] = [];
+    const queued: string[] = [];
     for (const t of targets) {
       const snap = t.post.exists ? t.post : t.hidden;
       if (!snap.exists) continue; // unknown id: kept on the request only, no queue entry
@@ -97,12 +98,22 @@ export async function processTakedown(
       q.priority = 'takedown';
       q.needsReview = true;
       if (!q.takedownRequestIds.includes(reqRef.id)) q.takedownRequestIds.push(reqRef.id);
-      if (t.post.exists && mayHide && q.autoHide && post.authorId !== caller!.uid) {
-        hideInTx(tx, db, q, post, 'takedown', caller!.uid, 'system');
+      if (t.post.exists && mayHide && hidesLeft > 0 && q.autoHide && post.authorId !== caller!.uid) {
+        hideInTx(tx, db, q, post, 'takedown', caller!.uid, `takedown:${caller!.uid}`, `request ${reqRef.id}`);
         hidden.push(t.id);
+        hidesLeft -= 1;
+      } else {
+        queued.push(t.id);
       }
       writeQueue(tx, db, q, !t.queue.exists);
     }
-    return { requestId: reqRef.id, hidden };
+    if (caller) {
+      tx.set(actorRef(db, caller.uid), {
+        takedownDay: day, takedownsToday: usedByCaller + 1,
+        takedownHideDay: day, takedownHidesToday: hiddenBefore + hidden.length,
+        university_id: UNIVERSITY_ID,
+      }, { merge: true });
+    }
+    return { requestId: reqRef.id, hidden, queued };
   });
 }

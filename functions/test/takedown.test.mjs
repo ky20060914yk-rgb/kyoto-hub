@@ -131,3 +131,31 @@ test('the stored request is trimmed and whitelisted: a client cannot claim to be
   assert.equal(req.verified, false);
   assert.equal(req.status, 'open');
 });
+
+test('IMPORTANT 2: a verified requester naming 5 posts hides only 3 (the rest are queued, still priority); the daily total across requests stays 3', async () => {
+  const v = verified(); const d = new Date('2027-03-01T03:00:00Z');
+  const ps = []; for (let i = 0; i < 5; i++) ps.push(await mk());
+  const r = await processTakedown(db, v, FORM(ps.map((p) => p.id)), d);
+  assert.equal(r.hidden.length, 3);
+  assert.deepEqual([...r.hidden, ...r.queued].sort(), ps.map((p) => p.id).sort());
+  assert.equal(r.queued.length, 2);
+  for (const id of r.queued) {
+    assert.equal((await get(`posts/${id}`)).exists, true);
+    assert.equal((await get(`moderation_queue/${id}`)).get('priority'), 'takedown');
+  }
+  const more = await mk();
+  const r2 = await processTakedown(db, v, FORM([more.id]), d);
+  assert.deepEqual({ hidden: r2.hidden, queued: r2.queued }, { hidden: [], queued: [more.id] });
+  // the next JST day the budget is back
+  const r3 = await processTakedown(db, v, FORM([more.id]), new Date('2027-03-01T16:00:00Z'));
+  assert.deepEqual(r3.hidden, [more.id]);
+});
+
+test('a takedown hide is logged as takedown:<uid> with the request id', async () => {
+  const { id } = await mk(); const v = verified();
+  const r = await processTakedown(db, v, FORM([id]));
+  const rows = (await db.collection('moderation_log').where('target', '==', id).get()).docs.map((x) => x.data());
+  assert.equal(rows.length, 1);
+  assert.deepEqual({ by: rows[0].by, action: rows[0].action }, { by: `takedown:${v.uid}`, action: 'hide:takedown' });
+  assert.match(rows[0].note, new RegExp(r.requestId));
+});

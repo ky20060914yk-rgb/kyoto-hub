@@ -54,6 +54,7 @@ export const MODERATION = {
   reportDailyCap: 10, // reports per reporter per JST day (M-7)
   takedownDailyCapUser: 3, // takedown requests per signed-in requester per JST day (M-7)
   takedownDailyCapAnon: 20, // unverified + anonymous takedown requests per JST day, all together (M-7)
+  maxImmediateHidesPerDay: 3, // posts a verified requester may hide at once per JST day; the rest are only queued
   discreditRestoredReports: 3, // from this many restored report-hides a reporter stops counting (M-9)
   discreditRestoredTakedowns: 2, // from this many restored takedown-hides: no more immediate hide (M-9)
   maxTakedownPosts: 5,

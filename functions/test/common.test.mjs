@@ -80,7 +80,7 @@ test('isDocId accepts a plain id and rejects paths, empties, non-strings, reserv
 test('moderation limits match Plan 2B rulings M-2 / M-7 / M-9', () => {
   assert.deepEqual({ ...MODERATION }, {
     reportHideThreshold: 3, reportDailyCap: 10, takedownDailyCapUser: 3, takedownDailyCapAnon: 20,
-    discreditRestoredReports: 3, discreditRestoredTakedowns: 2, maxTakedownPosts: 5, maxDetail: 500,
+    maxImmediateHidesPerDay: 3, discreditRestoredReports: 3, discreditRestoredTakedowns: 2, maxTakedownPosts: 5, maxDetail: 500,
     minDescription: 10, maxDescription: 2000, maxName: 100, maxEmail: 200, maxPostIdLength: 200,
   });
 });
