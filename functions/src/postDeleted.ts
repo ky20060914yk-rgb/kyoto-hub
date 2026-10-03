@@ -1,4 +1,5 @@
 import type { Firestore } from 'firebase-admin/firestore';
+import { postRef, hiddenRef, queueRef, retireQueueTx } from './moderation.js';
 // postDeleted.ts
 export interface DeleteDeps { remove(path: string): Promise<void> }
 
@@ -36,10 +37,29 @@ export async function handlePostGone(
   postId: string,
   post: Record<string, unknown>,
 ): Promise<string[]> {
-  const [live, hidden] = await Promise.all([
-    db.collection('posts').doc(postId).get(),
-    db.collection('hidden_posts').doc(postId).get(),
-  ]);
-  if (live.exists || hidden.exists) return [];
-  return handlePostDeleted(deps, post);
+  // One transaction: confirm the post is in neither collection, then retire a
+  // lingering queue entry so the operator list does not show a ghost.
+  const gone = await db.runTransaction(async (tx) => {
+    const live = await tx.get(postRef(db, postId));
+    const hidden = await tx.get(hiddenRef(db, postId));
+    const qs = await tx.get(queueRef(db, postId));
+    if (live.exists || hidden.exists) return false;
+    retireQueueTx(tx, db, qs, postId, 'gone', 'system');
+    return true;
+  });
+  if (!gone) return [];
+  const removed: string[] = [];
+  const guarded: DeleteDeps = {
+    remove: async (path) => {
+      // Never delete a file another live post (visible or hidden) still lists.
+      for (const col of ['posts', 'hidden_posts']) {
+        const ref = await db.collection(col).where('filePaths', 'array-contains', path).limit(1).get();
+        if (!ref.empty) return;
+      }
+      await deps.remove(path);
+      removed.push(path);
+    },
+  };
+  await handlePostDeleted(guarded, post);
+  return removed;
 }

@@ -72,3 +72,29 @@ test('handlePostGone keeps the author-prefix guard', async () => {
   assert.deepEqual(out, ['resources/attacker/y.pdf']);
   assert.deepEqual(deps.removed, ['resources/attacker/y.pdf']);
 });
+
+test('handlePostGone retires a leftover moderation_queue entry (no longer listed as needing review)', async () => {
+  const a = uid('a'); const id = uid('p');
+  await db.doc(`moderation_queue/${id}`).set({ postId: id, status: 'open', needsReview: true, university_id: 'kyoto_u' });
+  await handlePostGone(db, fakeDeps(), id, owned(a));
+  const q = (await db.doc(`moderation_queue/${id}`).get()).data();
+  assert.deepEqual({ status: q.status, needsReview: q.needsReview }, { status: 'removed', needsReview: false });
+  // a hide (moved to hidden_posts) must NOT retire it
+  const id2 = uid('p');
+  await db.doc(`moderation_queue/${id2}`).set({ postId: id2, status: 'hidden', needsReview: true });
+  await db.doc(`hidden_posts/${id2}`).set({ ...owned(a), university_id: 'kyoto_u' });
+  await handlePostGone(db, fakeDeps(), id2, owned(a));
+  assert.equal((await db.doc(`moderation_queue/${id2}`).get()).get('status'), 'hidden');
+});
+
+test('handlePostGone never deletes a file another live post (posts or hidden_posts) still references', async () => {
+  const a = uid('a'); const shared = `resources/${a}/shared.pdf`; const own = `resources/${a}/own.pdf`;
+  const deps = fakeDeps();
+  await db.doc(`posts/${uid('other')}`).set({ authorId: a, filePaths: [shared], university_id: 'kyoto_u' });
+  assert.deepEqual(await handlePostGone(db, deps, uid('p'), { authorId: a, filePaths: [shared, own] }), [own]);
+  assert.deepEqual(deps.removed, [own]);
+  const deps2 = fakeDeps(); const shared2 = `resources/${a}/shared2.pdf`;
+  await db.doc(`hidden_posts/${uid('other')}`).set({ authorId: a, filePaths: [shared2], university_id: 'kyoto_u' });
+  assert.deepEqual(await handlePostGone(db, deps2, uid('p'), { authorId: a, filePaths: [shared2] }), []);
+  assert.deepEqual(deps2.removed, []);
+});

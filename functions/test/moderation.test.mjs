@@ -165,3 +165,48 @@ test('listQueue: takedown-priority entries first, plus entries that need review,
   assert.deepEqual(mine.slice(1).sort(), [a, c].sort()); // `done` (removed, no review) is not listed
   assert.ok(requests.some((r) => r.id === rid));
 });
+
+test('readQueue takes author/title from the LIVE post, not a stale queue doc (state follows the id)', async () => {
+  const { a, id } = await mkPost();
+  await db.doc(`moderation_queue/${id}`).set({ postId: id, authorId: 'stale_author', postTitle: 'stale title', subjectId: 'stale', status: 'open' });
+  await hidePost(db, id, OP);
+  const q = (await get(`moderation_queue/${id}`)).data();
+  assert.deepEqual({ authorId: q.authorId, postTitle: q.postTitle }, { authorId: a, postTitle: '2024 期末' });
+  assert.equal((await get(`notifications/mod_${id}_1`)).get('uid'), a);
+});
+
+test('hide never overwrites an existing hidden_posts doc (create, not set)', async () => {
+  const { id } = await mkPost();
+  await db.doc(`hidden_posts/${id}`).set({ authorId: 'squatter', university_id: 'kyoto_u' });
+  await assert.rejects(hidePost(db, id, OP));
+  assert.equal((await get(`hidden_posts/${id}`)).get('authorId'), 'squatter');
+  assert.equal((await get(`posts/${id}`)).exists, true);
+});
+
+test('restore/remove of a post that is in neither collection retire its queue entry instead of throwing', async () => {
+  for (const fn of [restorePost, removePost]) {
+    const id = uid('gone');
+    await db.doc(`moderation_queue/${id}`).set({ postId: id, authorId: 'x', status: 'hidden', needsReview: true, university_id: 'kyoto_u' });
+    await fn(db, id, OP);
+    const q = (await get(`moderation_queue/${id}`)).data();
+    assert.deepEqual({ status: q.status, needsReview: q.needsReview }, { status: 'removed', needsReview: false });
+    assert.equal((await db.collection('moderation_log').where('target', '==', id).get()).size, 1);
+    assert.equal((await db.collection('notifications').where('postId', '==', id).get()).size, 0);
+    assert.ok(!(await listQueue(db, 500)).queue.some((e) => e.postId === id));
+    await fn(db, id, OP); // idempotent
+    assert.equal((await db.collection('moderation_log').where('target', '==', id).get()).size, 1);
+  }
+  await assert.rejects(removePost(db, uid('never'), OP), (e) => e.code === 'not-found');
+});
+
+test('restore logs each discredit increment', async () => {
+  const { id } = await mkPost();
+  const u = uid('tk');
+  await db.doc(`moderation_queue/${id}`).set({ postId: id, status: 'open', hiddenBy: 'takedown', hiddenByUid: u });
+  await hidePost(db, id, OP);
+  await db.doc(`moderation_queue/${id}`).update({ hiddenBy: 'takedown', hiddenByUid: u });
+  await restorePost(db, id, OP);
+  const rows = (await db.collection('moderation_log').where('target', '==', u).get()).docs.map((d) => d.data());
+  assert.deepEqual(rows.map((r) => r.action), ['discredit']);
+  assert.match(rows[0].note, /restoredTakedowns/);
+});

@@ -43,9 +43,11 @@ export function readQueue(snap: DocumentSnapshot, postId: string, post?: Documen
   const d: DocumentData = (snap.exists ? snap.data() : undefined) ?? {};
   return {
     postId,
-    authorId: String(d.authorId ?? post?.authorId ?? ''),
-    postTitle: String(d.postTitle ?? post?.title ?? '').slice(0, 200),
-    subjectId: String(d.subjectId ?? post?.subjectId ?? ''),
+    // Moderation state follows the post id: while the post exists its data wins
+    // over whatever an older entry stored (the id may have been reused).
+    authorId: String(post?.authorId ?? d.authorId ?? ''),
+    postTitle: String(post?.title ?? d.postTitle ?? '').slice(0, 200),
+    subjectId: String(post?.subjectId ?? d.subjectId ?? ''),
     status: STATUSES.includes(d.status) ? d.status : 'open',
     priority: d.priority === 'takedown' ? 'takedown' : 'normal',
     reportCount: num(d.reportCount),
@@ -101,7 +103,7 @@ export function hideInTx(
   tx: Transaction, db: Firestore, q: QueueDoc, post: DocumentData,
   by: HiddenBy, byUid: string | null, actor: string, note = '',
 ): void {
-  tx.set(hiddenRef(db, q.postId), post);
+  tx.create(hiddenRef(db, q.postId), post); // never overwrite a hidden doc
   tx.delete(postRef(db, q.postId));
   q.status = 'hidden';
   q.hiddenBy = by;
@@ -110,6 +112,24 @@ export function hideInTx(
   q.needsReview = true;
   notify(tx, db, q, 'post_hidden');
   log(tx, db, `hide:${by}`, q.postId, actor, note);
+}
+
+/**
+ * The post is in neither collection but its queue entry lingers: retire it so
+ * listQueue stops showing it. No notice (the author-visible transition already
+ * happened or the author deleted it themselves). Returns false if nothing to do.
+ */
+export function retireQueueTx(
+  tx: Transaction, db: Firestore, qs: DocumentSnapshot, postId: string, action: string, actor: string, note = '',
+): boolean {
+  if (!qs.exists) return false;
+  if (qs.get('status') === 'removed' && qs.get('needsReview') !== true) return false;
+  tx.set(queueRef(db, postId), {
+    status: 'removed', needsReview: false, autoHide: false,
+    updatedAt: FieldValue.serverTimestamp(), university_id: UNIVERSITY_ID,
+  }, { merge: true });
+  log(tx, db, action, postId, actor, note);
+  return true;
 }
 
 function operatorName(act: OperatorAction | undefined): string {
@@ -158,7 +178,11 @@ export async function restorePost(
     const p = await tx.get(postRef(db, postId));
     const qs = await tx.get(queueRef(db, postId));
     const counted = await tx.get(queueRef(db, postId).collection('reports').where('counted', '==', true));
-    if (!h.exists && !p.exists) throw new HttpsError('not-found', 'post not found');
+    if (!h.exists && !p.exists) {
+      if (retireQueueTx(tx, db, qs, postId, 'retire', `operator:${op}`, act.note)) return { changed: false, discredited: [] };
+      if (qs.exists) return { changed: false, discredited: [] };
+      throw new HttpsError('not-found', 'post not found');
+    }
     if (h.exists && p.exists) throw new HttpsError('failed-precondition', 'a live post holds this id');
 
     const q = readQueue(qs, postId, (h.exists ? h : p).data());
@@ -171,6 +195,7 @@ export async function restorePost(
       const field = q.hiddenBy === 'takedown' ? 'restoredTakedowns' : 'restoredReports';
       for (const u of discredited) {
         tx.set(actorRef(db, u), { [field]: FieldValue.increment(1), university_id: UNIVERSITY_ID }, { merge: true });
+        log(tx, db, 'discredit', u, `operator:${op}`, `${field}+1 for post ${postId}`);
       }
       q.transitions += 1;
       notify(tx, db, q, 'post_restored');
@@ -187,14 +212,18 @@ export async function restorePost(
 /** Operator: permanent removal (visible or hidden). Files go via handlePostGone; credits stay (M-4). */
 export async function removePost(
   db: Firestore, postIdIn: unknown, act: OperatorAction,
-): Promise<{ removedFrom: 'posts' | 'hidden_posts' }> {
+): Promise<{ removedFrom: 'posts' | 'hidden_posts' | 'none' }> {
   const op = operatorName(act);
   const postId = requireId(postIdIn);
   return db.runTransaction(async (tx) => {
     const p = await tx.get(postRef(db, postId));
     const h = await tx.get(hiddenRef(db, postId));
     const qs = await tx.get(queueRef(db, postId));
-    if (!p.exists && !h.exists) throw new HttpsError('not-found', 'post not found');
+    if (!p.exists && !h.exists) {
+      if (!qs.exists) throw new HttpsError('not-found', 'post not found');
+      retireQueueTx(tx, db, qs, postId, 'retire', `operator:${op}`, act.note);
+      return { removedFrom: 'none' as const };
+    }
     const q = readQueue(qs, postId, (p.exists ? p : h).data());
     if (p.exists) tx.delete(postRef(db, postId));
     if (h.exists) tx.delete(hiddenRef(db, postId));
