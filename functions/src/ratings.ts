@@ -2,7 +2,8 @@ import { FieldValue, Timestamp, type DocumentData, type Firestore } from 'fireba
 import { HttpsError } from 'firebase-functions/v2/https';
 import { UNIVERSITY_ID, isDocId } from './common.js';
 import {
-  DAY_MS, MARKET, callerKey, identityRef, keyFromIdentity, millisOf, roomRef, sanitizeLine, type MarketCaller,
+  DAY_MS, MARKET, callerKey, identityRef, keyFromIdentity, listingRef, millisOf, roomIdFor, roomRef, sanitizeLine,
+  type MarketCaller,
 } from './marketCore.js';
 
 export type Side = 'lender' | 'borrower';
@@ -99,9 +100,21 @@ export async function processRateDeal(
     const mine = await tx.get(ratingRef(db, roomId, side));
     const theirs = await tx.get(ratingRef(db, roomId, other));
     const rateeKey = keyFromIdentity(await tx.get(identityRef(db, rateeUid)), rateeUid);
-    if (!r.listingId) throw new HttpsError('failed-precondition', 'legacy-room');
+    const listingId = typeof r.listingId === 'string' ? r.listingId : '';
+    // The room must be what openListingChat would have created: a forged / pre-deploy room
+    // (client-written, with invented listingId or Sent flags) never unlocks a rating (I-1).
+    const listing = isDocId(listingId) ? await tx.get(listingRef(db, listingId)) : null;
+    const tomb = isDocId(listingId) ? await tx.get(db.collection('market_queue').doc(listingId)) : null;
+    if (!listingId) throw new HttpsError('failed-precondition', 'legacy-room');
+    const listingOwner = listing?.exists ? listing.get('ownerId') : tomb?.exists ? tomb.get('ownerId') : undefined;
+    if (roomId !== roomIdFor(listingId, String(r.borrowerId ?? '')) || typeof listingOwner !== 'string' || listingOwner !== r.lenderId) {
+      throw new HttpsError('failed-precondition', 'legacy-room');
+    }
     if (r.lenderSent !== true || r.borrowerSent !== true) throw new HttpsError('failed-precondition', 'no-exchange');
     if (mine.exists) return { status: 'duplicate' as const, revealed: theirs.exists, rateeUid };
+    if (theirs.exists && now.getTime() - millisOf(theirs.get('createdAt')) >= MARKET.ratingRevealDays * DAY_MS) {
+      throw new HttpsError('failed-precondition', 'rating-closed'); // their rating is already public: no retaliation (I-3)
+    }
     if (rateeKey === raterKey) throw new HttpsError('failed-precondition', 'self'); // same mailbox on both sides
 
     tx.create(ratingRef(db, roomId, side), {
@@ -113,8 +126,9 @@ export async function processRateDeal(
     return { status: 'rated' as const, revealed: theirs.exists, rateeUid };
   });
   if (out.status === 'rated') {
-    await refreshReputation(db, out.rateeUid, now);
-    if (out.revealed) await refreshReputation(db, caller.uid, now);
+    const warn = (e: unknown) => console.warn('refreshReputation failed', e); // committed already: never fail the call
+    await refreshReputation(db, out.rateeUid, now).catch(warn);
+    if (out.revealed) await refreshReputation(db, caller.uid, now).catch(warn);
   }
   return { status: out.status, revealed: out.revealed };
 }

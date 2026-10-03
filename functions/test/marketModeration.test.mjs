@@ -132,3 +132,79 @@ test('bad report input is refused before anything is written', async () => {
   assert.equal((await get(`moderation_actors/${keyOf(r)}`)).exists, false);
   await assert.rejects(report(r, uid('nope')), (e) => e.code === 'not-found');
 });
+
+test('bump(): every counted report raises reportsToday by exactly one', async () => {
+  const { listingId } = await mk();
+  const { listingId: second } = await mk();
+  const r = await seedUser(uid('r'));
+  await report(r, listingId);
+  assert.deepEqual([(await get(`moderation_actors/${keyOf(r)}`)).get('reportDay'), (await get(`moderation_actors/${keyOf(r)}`)).get('reportsToday')], ['2027-04-10', 1]);
+  await report(r, second);
+  assert.equal((await get(`moderation_actors/${keyOf(r)}`)).get('reportsToday'), 2);
+  await report(r, second); // duplicate: not counted
+  assert.equal((await get(`moderation_actors/${keyOf(r)}`)).get('reportsToday'), 2);
+});
+
+test('the 10/day cap also applies to room cases; case reports bump the shared counter', async () => {
+  const { listingId } = await mk();
+  const buyer = await seedUser(uid('b'));
+  const { roomId } = await processOpenChat(db, as(buyer), { listingId }, NOW);
+  await db.doc(`moderation_actors/${keyOf(buyer)}`).set({ reportDay: '2027-04-10', reportsToday: 10 });
+  const file = () => processMarketReport(db, as(buyer), { kind: 'room', targetId: roomId, category: 'no_show', detail: '' }, NOW);
+  await assert.rejects(file(), (e) => e.code === 'resource-exhausted');
+  assert.equal((await get(`market_cases/${roomId}_borrower`)).exists, false);
+  await db.doc(`moderation_actors/${keyOf(buyer)}`).set({ reportDay: '2027-04-10', reportsToday: 9 });
+  await file();
+  assert.equal((await get(`moderation_actors/${keyOf(buyer)}`)).get('reportsToday'), 10);
+});
+
+test('M-9: only a report-hide discredits on restore — operator hide + restore discredits nobody', async () => {
+  const { listingId } = await mk();
+  const rs = [await seedUser(uid('r')), await seedUser(uid('r'))];
+  for (const r of rs) await report(r, listingId); // two counted reports, under the threshold
+  await hideListing(db, listingId, OP);
+  const out = await restoreListing(db, listingId, OP);
+  assert.deepEqual([out.changed, out.discredited], [true, []]);
+  for (const r of rs) assert.equal((await get(`moderation_actors/${keyOf(r)}`)).get('restoredReports'), undefined);
+});
+
+test('M-9 boundary: 2 restored reports still count, the 3rd does not', async () => {
+  const { listingId } = await mk();
+  const two = await seedUser(uid('r')); const three = await seedUser(uid('r'));
+  await db.doc(`moderation_actors/${keyOf(two)}`).set({ restoredReports: 2 });
+  await db.doc(`moderation_actors/${keyOf(three)}`).set({ restoredReports: 3 });
+  await report(two, listingId); await report(three, listingId);
+  assert.equal((await get(`market_queue/${listingId}/reports/${keyOf(two)}`)).get('counted'), true);
+  assert.equal((await get(`market_queue/${listingId}/reports/${keyOf(three)}`)).get('counted'), false);
+  assert.equal((await get(`market_queue/${listingId}`)).get('countedReports'), 1);
+});
+
+test('M-4: re-filing after a closed case keeps the closed case intact and opens a NEW one', async () => {
+  const { listingId } = await mk();
+  const buyer = await seedUser(uid('b'));
+  const { roomId } = await processOpenChat(db, as(buyer), { listingId }, NOW);
+  const file = () => processMarketReport(db, as(buyer), { kind: 'room', targetId: roomId, category: 'harassment', detail: '2回目' }, NOW);
+  await processMarketReport(db, as(buyer), { kind: 'room', targetId: roomId, category: 'no_show', detail: '1回目' }, NOW);
+  await closeCase(db, `${roomId}_borrower`, { operator: 'alice' });
+  assert.deepEqual(await file(), { status: 'case_opened' });
+  const old = (await get(`market_cases/${roomId}_borrower`)).data();
+  assert.deepEqual([old.status, old.closedBy, old.category, old.detail], ['closed', 'alice', 'no_show', '1回目']);
+  const fresh = (await get(`market_cases/${roomId}_borrower_2`)).data();
+  assert.deepEqual([fresh.status, fresh.category, fresh.priority], ['open', 'harassment', 'high']);
+  assert.deepEqual(await file(), { status: 'duplicate' });
+});
+
+test('M-5: removing an already-removed listing is idempotent and writes no second notice', async () => {
+  const { listingId } = await mk();
+  assert.deepEqual(await removeListing(db, listingId, OP), { changed: true });
+  assert.deepEqual(await removeListing(db, listingId, OP), { changed: false });
+  assert.equal((await get(`notifications/mkt_${listingId}_2`)).exists, false);
+});
+
+test('M-7: the owner\'s other uid (same mailbox) cannot report their own listing', async () => {
+  const { owner, listingId } = await mk();
+  const twin = await seedUser(uid('t'));
+  await assert.rejects(
+    processMarketReport(db, as(twin, `${owner}@st.kyoto-u.ac.jp`), { kind: 'listing', targetId: listingId, category: 'spam', detail: '' }, NOW),
+    (e) => e.message === 'own-listing');
+});

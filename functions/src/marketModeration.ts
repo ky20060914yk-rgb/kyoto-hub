@@ -5,7 +5,7 @@ import { HttpsError } from 'firebase-functions/v2/https';
 import { MODERATION, UNIVERSITY_ID, isDocId, jstDay } from './common.js';
 import { actorRef, num, type OperatorAction } from './moderation.js';
 import type { DeleteDeps } from './postDeleted.js';
-import { callerKey, listingRef, millisOf, roomRef, sanitizeText, type MarketCaller } from './marketCore.js';
+import { callerKey, identityRef, keyFromIdentity, listingRef, millisOf, roomRef, sanitizeText, type MarketCaller } from './marketCore.js';
 
 export const LISTING_REPORT_CATEGORIES = ['not_textbook', 'spam', 'inappropriate', 'other'] as const;
 export const ROOM_REPORT_CATEGORIES = ['harassment', 'no_show', 'fraud', 'other'] as const;
@@ -120,9 +120,10 @@ export async function processMarketReport(
       const r = room.data()!;
       const side = r.lenderId === reporter.uid ? 'lender' : r.borrowerId === reporter.uid ? 'borrower' : null;
       if (!side) throw new HttpsError('permission-denied', 'not-participant');
-      const ref = caseRef(db, `${targetId}_${side}`);
-      const existing = await tx.get(ref);
-      if (existing.exists && existing.get('status') === 'open') return { status: 'duplicate' as const };
+      // Earlier cases of this side (open or closed): a closed one is history and is never overwritten (M-4).
+      const prior = await tx.get(db.collection('market_cases').where('roomId', '==', targetId).where('reporterUid', '==', reporter.uid));
+      if (prior.docs.some((d) => d.get('status') === 'open')) return { status: 'duplicate' as const };
+      const ref = caseRef(db, prior.empty ? `${targetId}_${side}` : `${targetId}_${side}_${prior.size + 1}`);
       if (usedToday >= MODERATION.reportDailyCap) throw new HttpsError('resource-exhausted', 'report-limit');
       tx.set(ref, {
         roomId: targetId, listingId: String(r.listingId ?? ''), category, detail, status: 'open',
@@ -139,8 +140,9 @@ export async function processMarketReport(
     const qs = await tx.get(marketQueueRef(db, targetId));
     if (!listing.exists) throw new HttpsError('not-found', 'listing not found');
     const l = listing.data()!;
+    const ownerKey = keyFromIdentity(await tx.get(identityRef(db, String(l.ownerId ?? ''))), String(l.ownerId ?? ''));
     if (l.status === 'hidden') return { status: 'already_hidden' as const };
-    if (l.ownerId === reporter.uid) throw new HttpsError('failed-precondition', 'own-listing');
+    if (l.ownerId === reporter.uid || ownerKey === key) throw new HttpsError('failed-precondition', 'own-listing');
     if (mine.exists) return { status: 'duplicate' as const };
     if (usedToday >= MODERATION.reportDailyCap) throw new HttpsError('resource-exhausted', 'report-limit');
     const counted = num(actor.restoredReports) < MODERATION.discreditRestoredReports;
@@ -236,7 +238,10 @@ export async function removeListing(db: Firestore, idIn: unknown, act: OperatorA
   return db.runTransaction(async (tx) => {
     const l = await tx.get(listingRef(db, id));
     const qs = await tx.get(marketQueueRef(db, id));
-    if (!l.exists) throw new HttpsError('not-found', 'listing not found');
+    if (!l.exists) {
+      if (qs.exists && qs.get('status') === 'removed') return { changed: false }; // already removed: idempotent
+      throw new HttpsError('not-found', 'listing not found');
+    }
     const q = readMarketQueue(qs, id, l.data());
     tx.delete(listingRef(db, id));
     q.status = 'removed';

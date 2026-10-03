@@ -47,23 +47,37 @@ export const marketActorRef = (db: Firestore, key: string) => db.collection('mar
 export const blockRef = (db: Firestore, blocker: string, blocked: string) =>
   db.collection('market_blocks').doc(`${blocker}_${blocked}`);
 
+/** One room per (listing, requester): opening twice returns the same room (T-14). */
+export const roomIdFor = (listingId: string, uid: string) => `l_${listingId}_${uid}`;
+
 export const DAY_MS = 24 * 3600 * 1000;
 
-// C0/C1 controls and the bidi overrides/isolates (U+202A-202E, U+2066-2069):
-// an RLO in a name or title can make 「運営」 appear out of other text.
-const CONTROLS = /[\u0000-\u0008\u000b-\u001f\u007f-\u009f‪-‮⁦-⁩]/g;
+/**
+ * Blocks are stored twice (T-17): by uid (operator-friendly) and by MAILBOX, so a
+ * blocked person cannot shed the block by deleting the account and re-signing up.
+ */
+export const mailboxBlockRef = (db: Firestore, blockerKey: string, blockedKey: string) =>
+  db.collection('market_blocks').doc(`mb_${blockerKey}_${blockedKey}`);
 
-/** One line of user text: controls out, whitespace runs collapsed, trimmed. */
+// Controls (Cc), invisible format characters (Cf: zero-width, bidi overrides and
+// isolates, soft hyphen, BOM...) and the blank fillers that render as nothing
+// (Hangul fillers, Braille blank). Tab and newline are kept for the callers to fold.
+const INVISIBLE = /(?![\t\n])[\p{Cc}\p{Cf}\u3164\u115f\u1160\u2800]/gu;
+
+/** One line of user text: controls and invisibles out, whitespace runs collapsed, trimmed. */
 export function sanitizeLine(v: unknown): string {
-  return typeof v === 'string' ? v.replace(CONTROLS, '').replace(/\s+/g, ' ').trim() : '';
+  return typeof v === 'string' ? v.replace(INVISIBLE, '').replace(/\s+/g, ' ').trim() : '';
 }
 
 /** Multi-line user text: controls out (newlines kept, at most 2 in a row), trimmed. */
 export function sanitizeText(v: unknown): string {
   if (typeof v !== 'string') return '';
-  return v.replace(/\r\n?/g, '\n').replace(CONTROLS, '').replace(/[^\S\n]+/g, ' ')
+  return v.replace(/\r\n?/g, '\n').replace(INVISIBLE, '').replace(/[^\S\n]+/g, ' ')
     .replace(/\n{3,}/g, '\n\n').trim();
 }
+
+/** `s` cut to at most `n` code points (never splits a surrogate pair). */
+export const clip = (s: string, n: number): string => [...s].slice(0, n).join('');
 
 /** Matching key of a title: NFKC, lower case, no whitespace / punctuation / symbols. */
 export function normalizeTitle(v: unknown): string {
@@ -71,12 +85,13 @@ export function normalizeTitle(v: unknown): string {
 }
 
 // Names that would let a student pass as the operator (T-13).
-const RESERVED_NAME = /運営|公式|管理者|事務局|admin|official|support|infohub/i;
+const RESERVED_NAME = /運営|運營|公式|管理者|事務局|admin|official|support|infohub/i;
 
 /** The name shown next to a listing or in a chat: sanitized, bounded, never an operator-looking name. */
 export function displayNameFor(v: unknown): string {
-  const s = sanitizeLine(v).slice(0, MARKET.maxDisplayName);
-  return s === '' || RESERVED_NAME.test(s.normalize('NFKC')) ? '京大生' : s;
+  const s = clip(sanitizeLine(v), MARKET.maxDisplayName);
+  const probe = s.normalize('NFKC').replace(/[\s\p{Cf}]/gu, ''); // "運 営" and "ad<ZWJ>min" must not slip through
+  return s === '' || RESERVED_NAME.test(probe) ? '京大生' : s;
 }
 
 /** The mailbox key of a verified caller (throws if the token carries no email). */

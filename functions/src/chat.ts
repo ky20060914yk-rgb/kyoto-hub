@@ -2,13 +2,14 @@ import { FieldValue, type DocumentData, type Firestore } from 'firebase-admin/fi
 import { HttpsError } from 'firebase-functions/v2/https';
 import { UNIVERSITY_ID, isDocId, jstDay } from './common.js';
 import {
-  MARKET, blockRef, callerKey, displayNameFor, identityRef, isLive, listingRef, marketActorRef, millisOf, roomRef,
-  sanitizeLine, type MarketCaller,
+  MARKET, blockRef, callerKey, clip, displayNameFor, identityRef, isLive, keyFromIdentity, listingRef, mailboxBlockRef,
+  marketActorRef, millisOf, roomIdFor, roomRef, sanitizeLine, type MarketCaller,
 } from './marketCore.js';
 import { refreshReputation } from './ratings.js';
 
-/** One room per (listing, requester): opening twice returns the same room (T-14). */
-export const roomIdFor = (listingId: string, uid: string) => `l_${listingId}_${uid}`;
+export { roomIdFor };
+
+const CLOCK_SKEW_MS = 60_000; // trigger clock vs. server timestamp
 
 export const ROOM_WARNING =
   'アプリはお金を扱いません。代金は受け渡しのときに当事者どうしで直接やりとりしてください。電話番号・住所などの個人情報は送らないでください。';
@@ -37,10 +38,13 @@ export async function processOpenChat(
     if (!listing.exists) throw new HttpsError('not-found', 'listing not found');
     const l = listing.data()!;
     const ownerId = String(l.ownerId ?? '');
-    const blocked = await tx.get(blockRef(db, ownerId, caller.uid));
-    const blocking = await tx.get(blockRef(db, caller.uid, ownerId));
-    if (ownerId === caller.uid) throw new HttpsError('failed-precondition', 'own-listing');
-    if (blocked.exists || blocking.exists) throw new HttpsError('failed-precondition', 'blocked');
+    const ownerKey = keyFromIdentity(await tx.get(identityRef(db, ownerId)), ownerId);
+    const blocks = await Promise.all([
+      tx.get(blockRef(db, ownerId, caller.uid)), tx.get(blockRef(db, caller.uid, ownerId)),
+      tx.get(mailboxBlockRef(db, ownerKey, key)), tx.get(mailboxBlockRef(db, key, ownerKey)),
+    ]);
+    if (ownerId === caller.uid || ownerKey === key) throw new HttpsError('failed-precondition', 'own-listing');
+    if (blocks.some((b) => b.exists)) throw new HttpsError('failed-precondition', 'blocked');
     if (room.exists) return { roomId, created: false, ownerId };
     if (!isLive(l, now)) throw new HttpsError('failed-precondition', 'listing-closed');
     const used = actor.get('roomDay') === day ? Number(actor.get('roomsToday') ?? 0) : 0;
@@ -73,7 +77,8 @@ export async function processOpenChat(
     tx.set(identityRef(db, caller.uid), { key, updatedAt: FieldValue.serverTimestamp(), university_id: UNIVERSITY_ID }, { merge: true });
     return { roomId, created: true, ownerId };
   });
-  await refreshReputation(db, out.ownerId, now); // lazy reveal of the owner's old one-sided ratings (T-11)
+  // Lazy reveal of the owner's old one-sided ratings (T-11); best-effort, and only when a room was created.
+  if (out.created) await refreshReputation(db, out.ownerId, now).catch((e) => console.warn('refreshReputation failed', e));
   return { roomId: out.roomId, created: out.created };
 }
 
@@ -94,10 +99,15 @@ export async function processBlockRoom(
     const r = room.data()!;
     const other = r.lenderId === caller.uid ? r.borrowerId : r.borrowerId === caller.uid ? r.lenderId : null;
     if (typeof other !== 'string' || other === '') throw new HttpsError('permission-denied', 'not-participant');
+    const myKey = callerKey(caller);
+    const otherKey = keyFromIdentity(await tx.get(identityRef(db, other)), other);
     if (r.closedBy) return { changed: false };
     tx.update(roomRef(db, roomId), { closedBy: caller.uid, closedAt: FieldValue.serverTimestamp() });
     tx.set(blockRef(db, caller.uid, other), {
       blocker: caller.uid, blocked: other, roomId, createdAt: FieldValue.serverTimestamp(), university_id: UNIVERSITY_ID,
+    });
+    tx.set(mailboxBlockRef(db, myKey, otherKey), {
+      blockerKey: myKey, blockedKey: otherKey, roomId, createdAt: FieldValue.serverTimestamp(), university_id: UNIVERSITY_ID,
     });
     return { changed: true };
   });
@@ -111,7 +121,9 @@ export async function processBlockRoom(
  * message processed late (trigger retries, the chat migration) never moves the
  * preview backwards. Returns false when the message is not from a participant.
  */
-export async function handleMessageCreated(db: Firestore, roomId: string, msg: DocumentData | undefined): Promise<boolean> {
+export async function handleMessageCreated(
+  db: Firestore, roomId: string, msg: DocumentData | undefined, now: Date = new Date(),
+): Promise<boolean> {
   if (!msg || !isDocId(roomId)) return false;
   return db.runTransaction(async (tx) => {
     const room = await tx.get(roomRef(db, roomId));
@@ -122,8 +134,10 @@ export async function handleMessageCreated(db: Firestore, roomId: string, msg: D
     if (!side) return false;
     const patch: Record<string, unknown> = { [`${side}Sent`]: true };
     const at = millisOf(msg.createdAt);
-    if (at > 0 && at >= millisOf(r.lastMessageAt)) {
-      patch.lastMessageText = sanitizeLine(msg.text).slice(0, MARKET.previewLength);
+    // A stored time in the future is forged (rooms are Function-written; pre-deploy rooms are not trusted): ignore it.
+    const stored = millisOf(r.lastMessageAt);
+    if (at > 0 && at >= (stored > now.getTime() + CLOCK_SKEW_MS ? 0 : stored)) {
+      patch.lastMessageText = clip(sanitizeLine(msg.text), MARKET.previewLength);
       patch.lastMessageAt = msg.createdAt;
       patch.lastSenderId = sender;
     }

@@ -67,11 +67,11 @@ test('T-18: the message trigger keeps a monotonic summary and records who has sp
   const { owner, buyer, listingId } = await setup();
   const { roomId } = await processOpenChat(db, as(buyer), { listingId }, NOW);
   const t = NOW.getTime();
-  assert.equal(await handleMessageCreated(db, roomId, msg(buyer, 'こんにちは\u0000！', t + 1000)), true);
+  assert.equal(await handleMessageCreated(db, roomId, msg(buyer, 'こんにちは\u0000！', t + 1000), NOW), true);
   let room = (await get(`talk_rooms/${roomId}`)).data();
   assert.deepEqual([room.lastMessageText, room.lastSenderId, room.borrowerSent, room.lenderSent], ['こんにちは！', buyer, true, false]);
-  await handleMessageCreated(db, roomId, msg(owner, 'x'.repeat(200), t + 3000));
-  await handleMessageCreated(db, roomId, msg(buyer, 'older, processed late', t + 2000));
+  await handleMessageCreated(db, roomId, msg(owner, 'x'.repeat(200), t + 3000), NOW);
+  await handleMessageCreated(db, roomId, msg(buyer, 'older, processed late', t + 2000), NOW);
   room = (await get(`talk_rooms/${roomId}`)).data();
   assert.equal(room.lastMessageText, 'x'.repeat(80));
   assert.equal(room.lastSenderId, owner);
@@ -87,4 +87,72 @@ test('a message from a non-participant (or to an unknown room) changes nothing',
   assert.equal(await handleMessageCreated(db, uid('noroom'), msg(buyer, 'hi', NOW.getTime())), false);
   const room = (await get(`talk_rooms/${roomId}`)).data();
   assert.deepEqual([room.lastMessageText, room.lenderSent, room.borrowerSent], ['', false, false]);
+});
+
+test('a hidden listing refuses NEW rooms', async () => {
+  const { buyer, listingId } = await setup();
+  await db.doc(`textbook_listings/${listingId}`).update({ status: 'hidden' });
+  await assert.rejects(processOpenChat(db, as(buyer), { listingId }, NOW), (e) => e.message === 'listing-closed');
+});
+
+test('the block check comes BEFORE the re-open shortcut: a blocked pair cannot re-enter an existing room', async () => {
+  const { owner, buyer, listingId } = await setup();
+  const { roomId } = await processOpenChat(db, as(buyer), { listingId }, NOW);
+  await processBlockRoom(db, as(owner), { roomId });
+  await assert.rejects(processOpenChat(db, as(buyer), { listingId }, NOW), (e) => e.message === 'blocked');
+});
+
+test('I-2: a block follows the MAILBOX — the blocked user re-signing up (new uid, same address) is still refused', async () => {
+  const { owner, buyer, listingId } = await setup();
+  const { roomId } = await processOpenChat(db, as(buyer), { listingId }, NOW);
+  await processBlockRoom(db, as(owner), { roomId });
+  const reborn = await seedUser(uid('b'));
+  const other = (await processCreateListing(db, as(owner), LISTING(), NOW)).listingId;
+  await assert.rejects(processOpenChat(db, as(reborn, `${buyer}@st.kyoto-u.ac.jp`), { listingId: other }, NOW), (e) => e.message === 'blocked');
+  // and the reverse direction: the blocked person's listing, the blocker's reborn account
+  const theirs = (await processCreateListing(db, as(reborn, `${buyer}@st.kyoto-u.ac.jp`), LISTING(), NOW)).listingId;
+  const ownerReborn = await seedUser(uid('o'));
+  await assert.rejects(processOpenChat(db, as(ownerReborn, `${owner}@st.kyoto-u.ac.jp`), { listingId: theirs }, NOW), (e) => e.message === 'blocked');
+  assert.equal((await get(`market_blocks/${owner}_${buyer}`)).exists, true); // the uid-keyed doc stays for the operator
+});
+
+test('T-6 follows the mailbox: the room cap survives a re-signup', async () => {
+  const buyer = await seedUser(uid('b'));
+  const ids = [];
+  for (let i = 0; i < 11; i++) ids.push((await processCreateListing(db, as(await seedUser(uid('o'))), LISTING(), NOW)).listingId);
+  for (let i = 0; i < 10; i++) await processOpenChat(db, as(buyer), { listingId: ids[i] }, NOW);
+  const reborn = await seedUser(uid('b'));
+  await assert.rejects(processOpenChat(db, as(reborn, `${buyer}@st.kyoto-u.ac.jp`), { listingId: ids[10] }, NOW), (e) => e.code === 'resource-exhausted');
+});
+
+test('M-7: the same mailbox under another uid cannot chat with its own listing', async () => {
+  const { owner, listingId } = await setup();
+  const twin = await seedUser(uid('t'));
+  await assert.rejects(processOpenChat(db, as(twin, `${owner}@st.kyoto-u.ac.jp`), { listingId }, NOW), (e) => e.message === 'own-listing');
+});
+
+test('summary: a message with the SAME timestamp still updates the preview (>=, not >)', async () => {
+  const { owner, buyer, listingId } = await setup();
+  const { roomId } = await processOpenChat(db, as(buyer), { listingId }, NOW);
+  const t = NOW.getTime() + 1000;
+  await handleMessageCreated(db, roomId, msg(buyer, 'first', t), NOW);
+  await handleMessageCreated(db, roomId, msg(owner, 'second', t), NOW);
+  const room = (await get(`talk_rooms/${roomId}`)).data();
+  assert.deepEqual([room.lastMessageText, room.lastSenderId], ['second', owner]);
+});
+
+test('I-1: a forged far-future lastMessageAt cannot freeze the summary', async () => {
+  const { buyer, listingId } = await setup();
+  const { roomId } = await processOpenChat(db, as(buyer), { listingId }, NOW);
+  await db.doc(`talk_rooms/${roomId}`).update({ lastMessageAt: Timestamp.fromMillis(NOW.getTime() + 400 * 24 * 3600 * 1000), lastMessageText: 'forged' });
+  await handleMessageCreated(db, roomId, msg(buyer, 'real', NOW.getTime() + 1000), NOW);
+  const room = (await get(`talk_rooms/${roomId}`)).data();
+  assert.deepEqual([room.lastMessageText, room.lastMessageAt.toMillis()], ['real', NOW.getTime() + 1000]);
+});
+
+test('M-3: the preview is cut by code point', async () => {
+  const { buyer, listingId } = await setup();
+  const { roomId } = await processOpenChat(db, as(buyer), { listingId }, NOW);
+  await handleMessageCreated(db, roomId, msg(buyer, '𠮷'.repeat(100), NOW.getTime() + 1), NOW);
+  assert.equal((await get(`talk_rooms/${roomId}`)).get('lastMessageText'), '𠮷'.repeat(80));
 });

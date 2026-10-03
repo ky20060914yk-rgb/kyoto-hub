@@ -56,3 +56,18 @@ test('keyFromIdentity falls back to uid:<uid>; isLive needs active AND unexpired
   assert.equal(isLive({ status: 'closed', expiresAt: at(now.getTime() + 1e9) }, now), false);
   assert.equal(isLive(undefined, now), false);
 });
+
+test('I-5: invisible characters and look-alikes never let a name pass as the operator', () => {
+  for (const n of ['運\u200b営', '運\u00ad営', 'ad\u200dmin', '運 営', '運營', '運\u3164営', 'ad\u2800min', '公\u2060式']) {
+    assert.equal(displayNameFor(n), '京大生', JSON.stringify(n));
+  }
+  assert.equal(sanitizeLine('a\u200bb\u00adc\ufeffd\u3164e'), 'abcde');
+  assert.equal(sanitizeLine('\u200b\u3164 \u2060'), ''); // invisible-only is empty
+  assert.equal(sanitizeText('a\u200b\nb'), 'a\nb'); // newlines survive in text
+});
+
+test('M-3: names are cut by code point, never through a surrogate pair', () => {
+  const n = displayNameFor('𠮷'.repeat(40));
+  assert.equal([...n].length, 30);
+  assert.equal(n, '𠮷'.repeat(30)); // no lone surrogate at the end
+});

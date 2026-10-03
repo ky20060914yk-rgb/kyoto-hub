@@ -4,6 +4,8 @@ import { Timestamp } from 'firebase-admin/firestore';
 import { db, uid, as, keyOf, get, NOW, DAY, later, LISTING, seedUser } from '../testlib/market.mjs';
 import { processCreateListing } from '../lib/listings.js';
 import { processOpenChat, handleMessageCreated } from '../lib/chat.js';
+import { removeListing } from '../lib/marketModeration.js';
+import { roomIdFor } from '../lib/chat.js';
 import { processRateDeal, refreshReputation, aggregateRatings } from '../lib/ratings.js';
 
 /** A market room in which both parties have spoken (the rating precondition). */
@@ -107,4 +109,47 @@ test('aggregateRatings ignores malformed stars and keeps the 5 newest comments, 
   const out = aggregateRatings(rs, NOW);
   assert.equal(out.ratingCount, 6);
   assert.deepEqual(out.recentComments.map((c) => c.comment), ['c1', 'c2', 'c3', 'c4', 'c5']);
+});
+
+test('I-1: a forged / pre-deploy room (array-less, invented listingId and Sent flags) never unlocks a rating', async () => {
+  const d = await deal();
+  const listingId = (await db.collection('textbook_listings').where('ownerId', '==', d.owner).limit(1).get()).docs[0].id;
+  const stranger = await seedUser(uid('o'));
+  const forge = async (roomId, room) => {
+    await db.doc(`talk_rooms/${roomId}`).set({ lenderSent: true, borrowerSent: true, ...room });
+    await assert.rejects(rate(room.borrowerId, roomId, 5), (e) => e.message === 'legacy-room', roomId);
+  };
+  await forge('forged1', { lenderId: d.owner, borrowerId: d.buyer, listingId: uid('nolisting') }); // listing does not exist
+  await forge('forged2', { lenderId: stranger, borrowerId: d.buyer, listingId }); // listing is someone else's
+  await forge(`l_${listingId}_zzz`, { lenderId: d.owner, borrowerId: d.buyer, listingId }); // id is not roomIdFor(listing, borrower)
+  const buyer2 = await seedUser(uid('b'));
+  await forge(roomIdFor(listingId, buyer2), { lenderId: stranger, borrowerId: buyer2, listingId }); // well-formed id, but the listing's owner is not the room's lender
+  assert.equal((await get(`market_ratings/forged1_borrower`)).exists, false);
+  assert.equal((await rate(d.buyer, d.roomId, 5)).status, 'rated'); // the legit room still works
+});
+
+test('I-1: a room whose listing an operator removed can still be rated (tombstone owner)', async () => {
+  const d = await deal();
+  const listingId = (await db.collection('textbook_listings').where('ownerId', '==', d.owner).limit(1).get()).docs[0].id;
+  await removeListing(db, listingId, { operator: 'tester' });
+  assert.equal((await get(`textbook_listings/${listingId}`)).exists, false);
+  assert.equal((await rate(d.buyer, d.roomId, 4)).status, 'rated');
+  assert.equal(d.roomId, roomIdFor(listingId, d.buyer));
+});
+
+test('I-3: once the other side\'s rating is 14 days old you cannot answer it (13.9 days accepted, exactly 14 refused)', async () => {
+  const a = await deal();
+  await rate(a.buyer, a.roomId, 1, 'ひどい');
+  assert.equal((await rate(a.owner, a.roomId, 5, '', later(13.9))).status, 'rated');
+  const b = await deal();
+  await rate(b.buyer, b.roomId, 1, 'ひどい');
+  await assert.rejects(rate(b.owner, b.roomId, 5, '', later(14)), (e) => e.message === 'rating-closed');
+  assert.equal((await get(`market_ratings/${b.roomId}_lender`)).exists, false);
+});
+
+test('self guard: the same mailbox on both sides cannot rate itself', async () => {
+  const d = await deal();
+  await db.doc(`market_identities/${d.buyer}`).set({ key: keyOf(d.owner) });
+  await assert.rejects(processRateDeal(db, as(d.buyer, `${d.owner}@st.kyoto-u.ac.jp`), { roomId: d.roomId, stars: 5 }, NOW), (e) => e.message === 'self');
+  assert.equal((await get(`market_ratings/${d.roomId}_borrower`)).exists, false);
 });

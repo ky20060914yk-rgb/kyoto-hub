@@ -1,7 +1,9 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { db, uid, as, get, NOW, later, LISTING, seedUser, seedCourse } from '../testlib/market.mjs';
+import { Timestamp } from 'firebase-admin/firestore';
 import { processCreateListing } from '../lib/listings.js';
+import { processOpenChat, processBlockRoom } from '../lib/chat.js';
 import { handleListingCreated, titlesMatch, listingsMatch } from '../lib/listingMatch.js';
 import { normalizeTitle } from '../lib/marketCore.js';
 
@@ -13,7 +15,10 @@ const offer = async (u, over = {}, now = NOW) => (await processCreateListing(db,
 const notes = async (listingId) => (await db.collection('notifications').where('listingId', '==', listingId).get()).docs.map((d) => d.data());
 
 test('titlesMatch: containment of normalized titles, never below 4 characters', () => {
-  assert.equal(titlesMatch(normalizeTitle('線形代数'), normalizeTitle('線形代数入門 第2版')), true);
+  assert.equal(titlesMatch(normalizeTitle('線形代数入門'), normalizeTitle('線形代数入門 第2版')), true);
+  assert.equal(titlesMatch(normalizeTitle('線形代数'), normalizeTitle('線形代数入門 第2版 演習問題集付き')), false); // M-6: shorter < half of longer
+  assert.equal(titlesMatch('abcd', 'abcdefgh'), true); // boundary: exactly half
+  assert.equal(titlesMatch('abcd', 'abcdefghi'), false); // just under half
   assert.equal(titlesMatch(normalizeTitle('Campbell Biology'), normalizeTitle('ｃａｍｐｂｅｌｌ ｂｉｏｌｏｇｙ 11th')), true);
   assert.equal(titlesMatch('数学', '数学入門'), false); // 2 chars: too loose
   assert.equal(titlesMatch('abc', 'abcd'), false); // boundary: 3 never matches
@@ -97,4 +102,72 @@ test('a block in either direction suppresses match notices', async () => {
   await db.doc(`market_blocks/${seller}_${w2}`).set({ blocker: seller, blocked: w2 });
   const id = await offer(seller, { title });
   assert.deepEqual(await handleListingCreated(db, id, NOW), []);
+});
+
+test('an offer that is not live (closed or expired) notifies nobody', async () => {
+  const title = T();
+  const w = await seedUser(uid('w')); await want(w, { title });
+  const seller = await seedUser(uid('s'));
+  const closed = await offer(seller, { title });
+  await db.doc(`textbook_listings/${closed}`).update({ status: 'closed' });
+  assert.deepEqual(await handleListingCreated(db, closed, NOW), []);
+  const live = await offer(seller, { title: `${title}2` });
+  assert.deepEqual(await handleListingCreated(db, live, later(31)), []); // expired by then
+  assert.deepEqual(await handleListingCreated(db, uid('nope'), NOW), []);
+});
+
+test('one owner with several matching wants gets ONE notice', async () => {
+  const title = T();
+  const w = await seedUser(uid('w'));
+  await want(w, { title }); await want(w, { title: `${title}第2版` });
+  const id = await offer(await seedUser(uid('s')), { title });
+  assert.deepEqual(await handleListingCreated(db, id, NOW), [w]);
+  assert.equal((await notes(id)).length, 1);
+});
+
+test('when more than 20 want, the NEWEST wanters are notified (newest-first), whatever the expiry order', async () => {
+  const title = T();
+  const ws = [];
+  for (let i = 0; i < 22; i++) {
+    const w = await seedUser(uid('w')); ws.push(w);
+    const id = await want(w, { title });
+    // createdAt rises with i while expiresAt FALLS with i, so the two orders disagree
+    await db.doc(`textbook_listings/${id}`).update({
+      createdAt: Timestamp.fromMillis(NOW.getTime() + i * 1000), expiresAt: Timestamp.fromMillis(NOW.getTime() + 30 * 86400000 + (21 - i) * 1000),
+    });
+  }
+  const id = await offer(await seedUser(uid('s')), { title });
+  assert.deepEqual((await handleListingCreated(db, id, NOW)).sort(), ws.slice(2).sort());
+});
+
+test('I-2: a block follows the mailbox — a re-signed-up blocked offerer sends no match notice to the blocker', async () => {
+  const title = T();
+  const blocker = await seedUser(uid('w')); const blocked = await seedUser(uid('s'));
+  await want(blocker, { title });
+  const chatListing = await offer(blocker, { title: `${uid('x')}別の本` });
+  const { roomId } = await processOpenChat(db, as(blocked), { listingId: chatListing }, NOW);
+  await processBlockRoom(db, as(blocker), { roomId });
+  const reborn = await seedUser(uid('s')); // same address, new uid
+  const id = (await processCreateListing(db, as(reborn, `${blocked}@st.kyoto-u.ac.jp`), LISTING({ title }), NOW)).listingId;
+  assert.deepEqual(await handleListingCreated(db, id, NOW), []);
+  const fine = await offer(await seedUser(uid('s')), { title }); // control: an unblocked offerer does reach the wanter
+  assert.deepEqual(await handleListingCreated(db, fine, NOW), [blocker]);
+});
+
+test('I-4: a pile of expired wants cannot crowd a live want out of the 500-row window', async () => {
+  const title = T();
+  const w = await seedUser(uid('w'));
+  const liveId = await want(w, { title });
+  const exp = Timestamp.fromMillis(NOW.getTime() - 86400000);
+  for (let i = 0; i < 2; i++) { // 2 x 260 expired wants whose ids sort BEFORE any auto-id
+    const batch = db.batch();
+    for (let j = 0; j < 260; j++) {
+      batch.set(db.doc(`textbook_listings/-exp-${i}-${j}-${liveId}`), {
+        type: 'want', status: 'active', ownerId: `old${i}_${j}`, title, courseId: '', expiresAt: exp, createdAt: exp, university_id: 'kyoto_u',
+      });
+    }
+    await batch.commit();
+  }
+  const id = await offer(await seedUser(uid('s')), { title });
+  assert.deepEqual(await handleListingCreated(db, id, NOW), [w]);
 });

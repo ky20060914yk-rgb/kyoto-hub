@@ -110,3 +110,27 @@ test('an expired listing cannot be edited (renew it first); a hidden one cannot 
     await assert.rejects(processUpdateListing(db, as(u), { listingId, action, ...LISTING() }, NOW), (e) => e.message === 'not-active');
   }
 });
+
+test('photo paths are at most 300 characters (boundary) and listPrice is bounded 0..100000', () => {
+  const u = 'u1';
+  const path = (n) => `listings/u1/${'a'.repeat(n - 12 - 4)}.jpg`;
+  assert.equal(path(300).length, 300);
+  assert.deepEqual(parseListingDraft(LISTING({ photoPaths: [path(300)] }), u).photoPaths, [path(300)]);
+  assert.throws(() => parseListingDraft(LISTING({ photoPaths: [path(301)] }), u), (e) => e.code === 'invalid-argument');
+  assert.equal(parseListingDraft(LISTING({ listPrice: 100000 }), u).listPrice, 100000);
+  assert.equal(parseListingDraft(LISTING({ listPrice: 0 }), u).listPrice, 0);
+  for (const lp of [100001, -1, 1.5, '3000']) {
+    assert.throws(() => parseListingDraft(LISTING({ listPrice: lp }), u), (e) => e.code === 'invalid-argument', String(lp));
+  }
+  for (const title of ['\u200b\u3164', '\u2060\u00ad']) { // I-5: an invisible-only title is empty
+    assert.throws(() => parseListingDraft(LISTING({ title }), u), (e) => e.code === 'invalid-argument');
+  }
+});
+
+test('T-8 boundary to the millisecond: 7 days + 1 ms left is too early, exactly 7 days is allowed', async () => {
+  const u = await seedUser(uid('s'));
+  const { listingId } = await create(u);
+  const edge = NOW.getTime() + 23 * DAY;
+  await assert.rejects(processUpdateListing(db, as(u), { listingId, action: 'renew' }, new Date(edge - 1)), (e) => e.message === 'too-early');
+  assert.equal((await processUpdateListing(db, as(u), { listingId, action: 'renew' }, new Date(edge))).expiresAtMs, edge + 30 * DAY);
+});
