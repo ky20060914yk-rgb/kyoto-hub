@@ -240,3 +240,24 @@ test('a path containing a .. segment invalidates the post', async () => {
   await seedPost(id, { authorId: a, filePaths: [bad], subjectId: uid('c') });
   assert.equal((await handlePostCreated(db, fakeDeps([bad]), id)).valid, false);
 });
+
+test('hide + re-upload cannot re-earn: a same course+year+category post in hidden_posts makes the new upload a duplicate', async () => {
+  const subjectId = uid('c');
+  const first = await mk({ subjectId });
+  assert.equal((await handlePostCreated(db, fakeDeps([first.path]), first.id)).granted, 3);
+  const data = (await db.collection('posts').doc(first.id).get()).data();
+  await db.collection('hidden_posts').doc(first.id).set(data);   // hidden: moved, so its createTime is the hide time
+  await db.collection('posts').doc(first.id).delete();
+  await sleep(20);
+  const againPath = first.path.replace('1_a', '2_a');
+  const again = await mk({ subjectId, authorId: first.a, filePaths: [againPath] });
+  const r = await handlePostCreated(db, fakeDeps([againPath]), again.id);
+  assert.deepEqual([r.duplicate, r.granted], [true, 0]);
+  // a different year is not a duplicate of the hidden post
+  const other = await mk({ subjectId, year: 1999 });
+  assert.equal((await handlePostCreated(db, fakeDeps([other.path]), other.id)).duplicate, false);
+  // the original poster's restore: the hidden doc is gone, so the post is judged against live posts only
+  await db.collection('posts').doc(first.id).set(data);
+  await db.collection('hidden_posts').doc(first.id).delete();
+  assert.equal((await handlePostCreated(db, fakeDeps([first.path]), first.id)).granted, 0); // already paid: ledger id is idempotent
+});

@@ -59,6 +59,18 @@ export async function handlePostCreated(
       const theirs = createMillis(d);
       return theirs < mine || (theirs === mine && d.id < postId);
     });
+    // A HIDDEN post of the same course/year/category (M-1) still counts, whatever
+    // its timestamps (a hidden doc's createTime is the hide time): otherwise
+    // hide + re-upload would re-earn the +3. Restoring the original removes it
+    // from hidden_posts first, so the restored post is judged against live posts
+    // only (its own ledger id keeps a paid upload from paying twice).
+    if (!duplicate) {
+      const hidden = await db.collection('hidden_posts')
+        .where('subjectId', '==', post.subjectId)
+        .where('category', '==', 'past_exam')
+        .get();
+      duplicate = hidden.docs.some((d) => d.id !== postId && yearKey(d.get('year')) === myYear);
+    }
   }
 
   const requestId = typeof post.requestId === 'string' && post.requestId !== '' ? post.requestId : null;
