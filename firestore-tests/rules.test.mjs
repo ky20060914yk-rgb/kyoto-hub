@@ -649,6 +649,15 @@ test('talk rooms cannot be deleted', async () => {
   await assertFails(deleteDoc(doc(asKu(), 'talk_rooms/room_1')));
 });
 
+test('talk_rooms: a participant cannot re-point lenderId/borrowerId, add a third uid, or change university_id', async () => {
+  await assertFails(updateDoc(doc(asKu2(), 'talk_rooms/room_1'), { lenderId: 'u3' }));
+  await assertFails(updateDoc(doc(asKu(), 'talk_rooms/room_1'), { borrowerId: 'u3' }));
+  await assertFails(updateDoc(doc(asKu(), 'talk_rooms/room_1'), { borrowerId: 'u1' }));
+  await assertFails(updateDoc(doc(asKu2(), 'talk_rooms/room_1'), { university_id: 'other_u' }));
+  await assertFails(updateDoc(doc(asKu2(), 'talk_rooms/room_1'), { thirdId: 'u3', lenderId: 'u3' }));
+  await assertSucceeds(updateDoc(doc(asKu2(), 'talk_rooms/room_1'), { lenderId: 'u1' })); // unchanged value is fine
+});
+
 // --- talk_rooms: participants only (Plan 2B, M-15) --------------------------
 
 test('talk_rooms: only the two participants can read a room (2B)', async () => {

@@ -165,6 +165,11 @@ service cloud.firestore {
       allow update: if signedIn()
         && (resource.data.lenderId == request.auth.uid
             || resource.data.borrowerId == request.auth.uid)
+        // The parties and tenant are fixed at create: a participant cannot
+        // re-point lenderId/borrowerId (hand the room to a third uid).
+        && request.resource.data.lenderId == resource.data.lenderId
+        && request.resource.data.borrowerId == resource.data.borrowerId
+        && request.resource.data.get('university_id', null) == resource.data.get('university_id', null)
         && request.resource.data.get('messages', [])
              .hasAll(resource.data.get('messages', []));
       allow delete: if false;
