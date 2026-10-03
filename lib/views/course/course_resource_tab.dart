@@ -6,6 +6,7 @@ import '../../models/subject.dart';
 import '../../services/app_store.dart';
 import '../../services/moderation_service.dart';
 import '../../utils/file_picker_helper.dart';
+import '../moderation/takedown_screen.dart';
 
 const _brand = Color(0xFF0F4C81);
 
@@ -112,69 +113,96 @@ class _CourseResourceTabState extends State<CourseResourceTab> {
   }
 
   void _showReportDialog(String postId) {
-    final reasonController = TextEditingController();
-    final contactController = TextEditingController(text: widget.store.currentUser?.email ?? '');
+    final detailController = TextEditingController();
+    var category = ReportCategory.copyright;
+    var sending = false;
 
     showDialog(
       context: context,
-      builder: (context) => AlertDialog(
-        title: const Row(
-          children: [
-            Icon(Icons.report_problem_outlined, color: Colors.redAccent),
-            SizedBox(width: 8),
-            Text('投稿の通報 (コンプライアンス)'),
+      builder: (dialogContext) => StatefulBuilder(
+        builder: (dialogContext, setLocal) => AlertDialog(
+          title: const Row(
+            children: [
+              Icon(Icons.report_problem_outlined, color: Colors.redAccent),
+              SizedBox(width: 8),
+              Text('投稿の通報'),
+            ],
+          ),
+          content: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text(
+                  '通報が一定数に達した投稿は非表示になる場合があり、運営が確認します。通報したことが投稿者に知らされることはありません。',
+                  style: TextStyle(fontSize: 12, color: Color(0xFF64748B)),
+                ),
+                const SizedBox(height: 12),
+                Wrap(
+                  spacing: 8,
+                  runSpacing: 4,
+                  children: [
+                    for (final c in ReportCategory.values)
+                      ChoiceChip(
+                        label: Text(c.label, style: const TextStyle(fontSize: 12)),
+                        selected: c == category,
+                        onSelected: (_) => setLocal(() => category = c),
+                      ),
+                  ],
+                ),
+                const SizedBox(height: 12),
+                TextField(
+                  controller: detailController,
+                  maxLines: 3,
+                  maxLength: kReportMaxDetail,
+                  decoration: const InputDecoration(hintText: '具体的な理由（任意）', border: OutlineInputBorder()),
+                ),
+                Align(
+                  alignment: Alignment.centerLeft,
+                  child: TextButton.icon(
+                    onPressed: () {
+                      Navigator.pop(dialogContext);
+                      Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                          builder: (_) => TakedownScreen(
+                            moderation: widget.store.moderation,
+                            initialPostId: postId,
+                            signedInEmail: widget.store.currentUser?.email,
+                          ),
+                        ),
+                      );
+                    },
+                    icon: const Icon(Icons.gavel_rounded, size: 16),
+                    label: const Text('担当教員・権利者の方はこちら', style: TextStyle(fontSize: 12)),
+                  ),
+                ),
+              ],
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: sending ? null : () => Navigator.pop(dialogContext),
+              child: const Text('キャンセル'),
+            ),
+            ElevatedButton(
+              onPressed: sending
+                  ? null
+                  : () async {
+                      setLocal(() => sending = true);
+                      await widget.store.reportPost(postId, category: category, detail: detailController.text);
+                      if (!mounted) return;
+                      if (dialogContext.mounted) Navigator.pop(dialogContext);
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        SnackBar(content: Text(widget.store.lastNoticeMessage ?? '通報を送信しました。')),
+                      );
+                      setState(() {});
+                    },
+              style: ElevatedButton.styleFrom(backgroundColor: Colors.redAccent, foregroundColor: Colors.white),
+              child: const Text('通報を送信'),
+            ),
           ],
         ),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            const Text(
-              '著作権侵害や不適切なコンテンツの通報を受け付けています。（プロバイダ責任制限法対応）',
-              style: TextStyle(fontSize: 12, color: Color(0xFF64748B)),
-            ),
-            const SizedBox(height: 12),
-            TextField(
-              controller: reasonController,
-              maxLines: 3,
-              decoration: const InputDecoration(
-                hintText: '通報の具体的な理由を入力してください',
-                border: OutlineInputBorder(),
-              ),
-            ),
-            const SizedBox(height: 10),
-            TextField(
-              controller: contactController,
-              decoration: const InputDecoration(
-                labelText: 'ご連絡先メールアドレス',
-                border: OutlineInputBorder(),
-              ),
-            ),
-          ],
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('キャンセル'),
-          ),
-          ElevatedButton(
-            onPressed: () async {
-              if (reasonController.text.trim().isNotEmpty) {
-                await widget.store.reportPost(postId, category: ReportCategory.copyright, detail: reasonController.text.trim());
-
-                if (mounted) {
-                  Navigator.pop(context);
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    SnackBar(content: Text(widget.store.lastNoticeMessage ?? '通報を送信しました。')),
-                  );
-                  setState(() {});
-                }
-              }
-            },
-            style: ElevatedButton.styleFrom(backgroundColor: Colors.redAccent, foregroundColor: Colors.white),
-            child: const Text('通報を送信'),
-          ),
-        ],
       ),
     );
   }

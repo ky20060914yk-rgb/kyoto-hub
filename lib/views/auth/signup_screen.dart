@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import '../../services/app_store.dart';
 import '../onboarding/onboarding_screen.dart';
 import '../navigation_root_screen.dart';
+import '../moderation/takedown_screen.dart';
 
 class SignupScreen extends StatefulWidget {
   final AppStore store;
@@ -492,6 +493,17 @@ class _SignupScreenState extends State<SignupScreen> {
               fontWeight: FontWeight.w600,
               color: Color(0xFF0F4C81),
             ),
+          ),
+        ),
+        const SizedBox(height: 4),
+        TextButton(
+          onPressed: () => Navigator.push(
+            context,
+            MaterialPageRoute(builder: (_) => TakedownScreen(moderation: widget.store.moderation)),
+          ),
+          child: const Text(
+            '担当教員・権利者の方へ（掲載資料の削除依頼）',
+            style: TextStyle(fontSize: 12, color: Color(0xFF64748B)),
           ),
         ),
       ],

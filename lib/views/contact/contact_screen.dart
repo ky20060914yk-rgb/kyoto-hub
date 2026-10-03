@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import '../../services/app_store.dart';
+import '../moderation/takedown_screen.dart';
 
 class ContactScreen extends StatefulWidget {
   final AppStore store;
@@ -81,6 +82,30 @@ class _ContactScreenState extends State<ContactScreen> {
                 style: TextStyle(fontSize: 13, color: Color(0xFF64748B)),
               ),
               const SizedBox(height: 24),
+              Card(
+                elevation: 0,
+                color: const Color(0xFFFEF2F2),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(10),
+                  side: const BorderSide(color: Color(0xFFFECACA)),
+                ),
+                child: ListTile(
+                  leading: const Icon(Icons.gavel_rounded, color: Color(0xFFB91C1C)),
+                  title: const Text('著作権者・担当教員の方の削除依頼', style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold)),
+                  subtitle: const Text('掲載資料の削除はこちらのフォームから優先して受け付けます', style: TextStyle(fontSize: 11.5)),
+                  trailing: const Icon(Icons.chevron_right),
+                  onTap: () => Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (_) => TakedownScreen(
+                        moderation: widget.store.moderation,
+                        signedInEmail: widget.store.currentUser?.email,
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+              const SizedBox(height: 20),
 
               // Category Selector
               const Text('お問い合わせカテゴリ', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14, color: Color(0xFF334155))),

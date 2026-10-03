@@ -8,6 +8,7 @@ import '../../models/post.dart';
 import '../../models/review.dart';
 import '../auth/signup_screen.dart';
 import '../contact/contact_screen.dart';
+import '../notifications/notifications_screen.dart';
 import '../course/review_form_sheet.dart';
 import '../textbook/textbook_lending_screen.dart';
 import '../timetable/timetable_registration_screen.dart';
@@ -278,6 +279,18 @@ class _MyPageScreenState extends State<MyPageScreen> {
           style: TextStyle(color: Color(0xFF1E293B), fontWeight: FontWeight.bold),
         ),
         actions: [
+          IconButton(
+            tooltip: 'お知らせ',
+            onPressed: () => Navigator.push(
+              context,
+              MaterialPageRoute(builder: (_) => NotificationsScreen(store: widget.store)),
+            ),
+            icon: Badge(
+              isLabelVisible: widget.store.unreadNotificationCount > 0,
+              label: Text('${widget.store.unreadNotificationCount}'),
+              child: const Icon(Icons.notifications_none_rounded, color: Colors.grey),
+            ),
+          ),
           IconButton(
             icon: const Icon(Icons.logout_rounded, color: Colors.grey),
             onPressed: _showLogoutConfirmDialog,

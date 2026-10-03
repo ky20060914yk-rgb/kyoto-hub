@@ -273,7 +273,8 @@ class _TextbookLendingScreenState extends State<TextbookLendingScreen> {
                           const SizedBox(height: 12),
 
                           if (isMatched) ...[
-                            if (req.talkRoomId != null)
+                            if (req.talkRoomId != null &&
+                                (isMyRequest || req.responderId == widget.store.currentUser?.uid))
                               SizedBox(
                                 width: double.infinity,
                                 child: OutlinedButton.icon(
