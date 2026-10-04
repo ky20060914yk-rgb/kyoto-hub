@@ -1,84 +1,150 @@
 <!DOCTYPE html>
-<html>
+<html lang="ja">
 <head>
   <!--
-    If you are serving your web app in a path other than the root, change the
-    href value below to reflect the base path you are serving from.
-
-    The path provided below has to start and end with a slash "/" in order for
-    it to work correctly.
-
-    For more details:
-    * https://developer.mozilla.org/en-US/docs/Web/HTML/Element/base
-
-    This is a placeholder for base href that will be replaced by the value of
-    the `--base-href` argument provided to `flutter build`.
+    `flutter build web --base-href` replaces $FLUTTER_BASE_HREF. The app is
+    served at the site root (Plan 4, Ruling L-1), so it stays "/".
   -->
   <base href="$FLUTTER_BASE_HREF">
 
   <meta charset="UTF-8">
-  <meta content="IE=Edge" http-equiv="X-UA-Compatible">
-  <meta name="description" content="京大生専用の過去問、テスト対策情報共有、教科書の貸借マッチングサービス「京大InfoHub」。欲しい情報が手に入り、教科書も貸し借りできる、京大生のスマートな単位取得を強力にサポートするプラットフォームです。">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#0F4C81">
+  <meta name="color-scheme" content="light">
+  <title>京大InfoHub — 京大生専用の授業レビュー・過去問共有・教科書マーケット</title>
+  <meta name="description" content="京大InfoHub は京大生専用のアプリです。授業レビュー、過去問・資料の共有、教科書の譲り合い・売買ができます。@st.kyoto-u.ac.jp のメールアドレスで登録・認証した京大生だけが使えます。">
+  <link rel="canonical" href="https://kyodai-info.web.app/">
 
-  <!-- Open Graph / Facebook -->
+  <!-- Open Graph / link previews: a real 1200x630 image (web/og-image.png, Plan 4 Task 5) -->
   <meta property="og:type" content="website">
+  <meta property="og:site_name" content="京大InfoHub">
+  <meta property="og:locale" content="ja_JP">
   <meta property="og:url" content="https://kyodai-info.web.app/">
-  <meta property="og:title" content="京大InfoHub">
-  <meta property="og:description" content="京大生専用の過去問、テスト対策情報共有、教科書の貸借マッチングサービス「京大InfoHub」。欲しい情報が手に入り、教科書も貸し借りできる、京大生のスマートな単位取得を強力にサポートするプラットフォームです。">
-  <meta property="og:image" content="https://kyodai-info.web.app/favicon.png">
-
-  <!-- Twitter -->
-  <meta property="twitter:card" content="summary_large_image">
-  <meta property="twitter:url" content="https://kyodai-info.web.app/">
-  <meta property="twitter:title" content="京大InfoHub">
-  <meta property="twitter:description" content="京大生専用の過去問、テスト対策情報共有、教科書の貸借マッチングサービス「京大InfoHub」。欲しい情報が手に入り、教科書も貸し借りできる、京大生のスマートな単位取得を強力にサポートするプラットフォームです。">
-  <meta property="twitter:image" content="https://kyodai-info.web.app/favicon.png">
+  <meta property="og:title" content="京大InfoHub — 京大生専用の授業レビュー・過去問共有・教科書マーケット">
+  <meta property="og:description" content="授業レビュー、過去問・資料の共有、教科書の譲り合い・売買。京大のメールで認証した京大生だけが使えるアプリです。">
+  <meta property="og:image" content="https://kyodai-info.web.app/og-image.png">
+  <meta property="og:image:width" content="1200">
+  <meta property="og:image:height" content="630">
+  <meta property="og:image:alt" content="京大InfoHub — 京大生専用の授業レビュー・過去問共有・教科書マーケット">
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:title" content="京大InfoHub — 京大生専用の授業レビュー・過去問共有・教科書マーケット">
+  <meta name="twitter:description" content="授業レビュー、過去問・資料の共有、教科書の譲り合い・売買。京大のメールで認証した京大生だけが使えるアプリです。">
+  <meta name="twitter:image" content="https://kyodai-info.web.app/og-image.png">
 
   <!-- iOS meta tags & icons -->
   <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black">
-  <meta name="apple-mobile-web-app-title" content="kyodai_info_hub">
+  <meta name="apple-mobile-web-app-title" content="京大InfoHub">
   <link rel="apple-touch-icon" href="icons/Icon-192.png">
-
-  <!-- Favicon -->
-  <link rel="icon" type="image/png" href="favicon.png"/>
-
-  <title>京大InfoHub</title>
+  <link rel="icon" type="image/png" href="favicon.png">
   <link rel="manifest" href="manifest.json">
-</head>
-<body style="margin: 0; padding: 0; background-color: #f8fafc;">
-  <!-- Premium Loading Spinner -->
-  <div id="loading-indicator" style="display: flex; flex-direction: column; justify-content: center; align-items: center; height: 100vh; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; transition: opacity 0.3s ease;">
-    <div style="width: 44px; height: 44px; border: 4px solid #e2e8f0; border-top-color: #0f4c81; border-radius: 50%; animation: spin 0.8s linear infinite;"></div>
-    <div style="margin-top: 20px; font-size: 16px; font-weight: bold; color: #1e293b;">京大InfoHub を読み込み中</div>
-    <div style="margin-top: 6px; font-size: 12px; color: #64748b;">初回ロードには数秒かかる場合があります...</div>
-  </div>
+
   <style>
-    @keyframes spin {
-      to { transform: rotate(360deg); }
+    /* Start screen (Plan 4, Task 2): visible without JavaScript, removed on Flutter's first frame. */
+    :root {
+      --brand: #0F4C81; --ink: #1E293B; --muted: #475569; --bg: #F8FAFC; --card: #FFFFFF;
+      --line: #E2E8F0; --warn-bg: #FEF2F2; --warn-line: #FCA5A5; --warn-ink: #991B1B;
     }
+    html, body { margin: 0; padding: 0; background: var(--bg); }
+    #start {
+      position: fixed; inset: 0; z-index: 1; overflow-y: auto; touch-action: pan-y;
+      -webkit-user-select: text; user-select: text;
+      display: flex; align-items: center; justify-content: center; padding: 24px 16px; box-sizing: border-box;
+      background: var(--bg); color: var(--ink); transition: opacity .2s ease;
+      font-family: -apple-system, BlinkMacSystemFont, "Hiragino Sans", "Hiragino Kaku Gothic ProN", "Yu Gothic UI", Meiryo, "Noto Sans JP", sans-serif;
+    }
+    #start.start--gone { opacity: 0; pointer-events: none; }
+    .start__card { width: 100%; max-width: 420px; background: var(--card); border-radius: 16px; padding: 28px 24px; box-sizing: border-box; box-shadow: 0 4px 20px rgba(0, 0, 0, .05); text-align: center; }
+    .start__logo { width: 64px; height: 64px; margin: 0 auto 12px; }
+    .start__card h1 { margin: 0; font-size: 22px; line-height: 1.3; }
+    .start__lead { margin: 8px 0 20px; font-size: 14px; line-height: 1.6; color: var(--muted); }
+    .start__status { display: flex; align-items: center; justify-content: center; gap: 10px; min-height: 28px; font-size: 14px; font-weight: 600; }
+    .start__spinner { width: 20px; height: 20px; flex: none; border: 3px solid var(--line); border-top-color: var(--brand); border-radius: 50%; animation: start-spin .8s linear infinite; }
+    .start__slow { margin: 10px 0 0; font-size: 13px; line-height: 1.6; color: var(--muted); }
+    .start__fail { margin-top: 4px; padding: 16px; border: 1px solid var(--warn-line); border-radius: 12px; background: var(--warn-bg); color: var(--warn-ink); text-align: left; }
+    .start__fail h2 { margin: 0 0 8px; font-size: 16px; }
+    .start__fail p { margin: 0 0 12px; font-size: 13px; line-height: 1.6; }
+    .start__retry { display: block; width: 100%; padding: 12px; border: 0; border-radius: 10px; background: var(--brand); color: #FFFFFF; font: inherit; font-size: 15px; font-weight: 700; cursor: pointer; }
+    .start__retry:focus-visible, .start__about a:focus-visible { outline: 3px solid #93C5FD; outline-offset: 2px; }
+    .start__contact { margin: 12px 0 0 !important; color: var(--ink); word-break: break-all; }
+    .start__contact a { color: var(--brand); }
+    .start__about { margin: 20px 0 0; font-size: 13px; }
+    .start__about a { color: var(--brand); }
+    #start .start__slow, #start .start__fail { display: none; }
+    #start[data-state="slow"] .start__slow { display: block; }
+    #start[data-state="failed"] .start__status { display: none; }
+    #start[data-state="failed"] .start__fail { display: block; }
+    @keyframes start-spin { to { transform: rotate(360deg); } }
+    @media (prefers-reduced-motion: reduce) { .start__spinner { animation-duration: 3s; } #start { transition: none; } }
   </style>
+</head>
+<body>
+  <div id="start" data-state="loading">
+    <main class="start__card">
+      <svg class="start__logo" viewBox="0 0 64 64" aria-hidden="true" focusable="false">
+        <rect width="64" height="64" rx="12" fill="#0F4C81"/>
+        <path d="M32 19 50 28 32 37 14 28Z" fill="#FFFFFF"/>
+        <path d="M22 33v7c0 3 4.5 6 10 6s10-3 10-6v-7l-10 5Z" fill="#FFFFFF" opacity=".85"/>
+      </svg>
+      <h1>京大InfoHub</h1>
+      <p class="start__lead">京大生専用の授業レビュー・過去問共有・教科書マーケット</p>
+      <div class="start__status" role="status" aria-live="polite">
+        <span class="start__spinner" aria-hidden="true"></span>
+        <span>アプリを読み込んでいます…</span>
+      </div>
+      <p class="start__slow" role="status">通信環境によっては 30 秒ほどかかることがあります。このままお待ちください。</p>
+      <div class="start__fail" role="alert">
+        <h2>アプリを起動できませんでした</h2>
+        <p>通信が不安定か、学内・社内などのネットワークで Google のサーバー（gstatic.com）への接続が制限されている可能性があります。電波の良い場所や別のネットワークで、もう一度お試しください。</p>
+        <button id="start-retry" class="start__retry" type="button">再読み込み</button>
+        <p class="start__contact"><!-- contact:begin -->解決しない場合は、アプリが開けるときに「マイページ → お問い合わせ」からご連絡ください。<!-- contact:end --></p>
+      </div>
+      <noscript><p class="start__lead">京大InfoHub を使うには JavaScript を有効にしてください。</p></noscript>
+      <p class="start__about"><a href="about/">京大InfoHub について</a></p>
+    </main>
+  </div>
 
   <script>
-    // MutationObserver to fade out and remove the loader once Flutter adds its view
-    const observer = new MutationObserver((mutations) => {
-      for (const mutation of mutations) {
-        for (const node of mutation.addedNodes) {
-          if (node.tagName === 'FLUTTER-VIEW' || node.tagName === 'CANVAS' || node.id === 'flutter-view') {
-            const loader = document.getElementById('loading-indicator');
-            if (loader) {
-              loader.style.opacity = '0';
-              setTimeout(() => loader.remove(), 300);
-            }
-            observer.disconnect();
-            return;
-          }
-        }
-      }
-    });
-    observer.observe(document.body, { childList: true });
-  </script>
+    (function () {
+      var start = document.getElementById('start');
+      var done = false;
+      var SLOW_MS = 8000;     // S-2: "this can take ~30 s" hint
+      var FAIL_MS = 60000;    // S-2: no first frame by then = failure screen
+      var slowTimer = setTimeout(function () {
+        if (start.getAttribute('data-state') === 'loading') start.setAttribute('data-state', 'slow');
+      }, SLOW_MS);
+      var failTimer = setTimeout(function () { fail('timeout'); }, FAIL_MS);
 
-  <script src="flutter_bootstrap.js" async></script>
+      function fail(reason) {
+        if (done || start.getAttribute('data-state') === 'failed') return;
+        clearTimeout(slowTimer);
+        clearTimeout(failTimer);
+        start.setAttribute('data-state', 'failed');
+        start.setAttribute('data-reason', reason);
+        try { console.warn('[kyotohub] start-up failed: ' + reason); } catch (e) {}
+        var retry = document.getElementById('start-retry');
+        if (retry) retry.focus();
+      }
+      // Called by flutter_bootstrap.js (engine/loader errors), the <script>
+      // onerror below, and lib/main.dart (Firebase did not initialise).
+      window.kyotoHubBootFailed = function (reason) { fail(String(reason || 'unknown')); };
+
+      // The first Flutter frame always wins, even after a failure was shown.
+      window.addEventListener('flutter-first-frame', function () {
+        done = true;
+        clearTimeout(slowTimer);
+        clearTimeout(failTimer);
+        try {
+          performance.mark('kyotohub-first-frame');
+          console.info('[kyotohub] first frame ' + Math.round(performance.now()) + ' ms'); // R-1: local only
+        } catch (e) {}
+        start.classList.add('start--gone');
+        setTimeout(function () { if (start.parentNode) start.parentNode.removeChild(start); }, 250);
+      }, { once: true });
+
+      document.getElementById('start-retry').addEventListener('click', function () { location.reload(); });
+    })();
+  </script>
+  <script src="flutter_bootstrap.js" async onerror="window.kyotoHubBootFailed('bootstrap')"></script>
 </body>
 </html>
