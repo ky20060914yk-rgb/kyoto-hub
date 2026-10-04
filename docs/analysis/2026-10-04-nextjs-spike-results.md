@@ -264,7 +264,65 @@ Firebase only allows on the Blaze plan, so Blaze is presumably active [inferred,
 
 ## Part A.3 — Risks: migrate before vs after 2A/2B/3, cutover plan outline
 
-(in progress)
+### A.3.1 The fact that shapes this [verified-code]
+
+The combined runbook (`docs/superpowers/plans/2026-10-05-phase3-textbook-market.md:7771` ff.) states that
+none of 2A, 2B, 3 is deployed and that they ship as one sequence. That sequence is a **breaking backend change for
+the client now in production**: the 2A migration removes `fileUrls`, the chat migration removes message arrays,
+and the new rules refuse the old client's writes; hence "deploy hosting IMMEDIATELY after step 5b" (`:7852-7856`)
+and "redeploying the previous hosting build alone is not enough" for rollback (2A plan `:2848`, 2B plan `:4228`).
+By contrast, a later Flutter→Next switch on top of an already-deployed 2A/2B/3 backend changes **only the client**:
+same rules, same data, same functions, and (A.2) the same session.
+
+### A.3.2 Before vs after
+
+| | Migrate **before** deploying 2A/2B/3 (Next client ships with the backend change) | Migrate **after** (deploy 2A/2B/3 + Plan 4 with Flutter now, switch client later) |
+|---|---|---|
+| Time to users getting 2A/2B/3 | delayed by the whole rewrite (A.1.6: ~25–90 dev-days, estimate) | now; runbook and 192 Dart + 220 functions + 118 rules/storage tests already exist |
+| Blast radius of the deploy | backend migration + new rules + new client framework in **one** window; a bug cannot be attributed quickly to rules, migration or client | two smaller windows; the second one is client-only |
+| Rollback | client rollback is possible (the Flutter build at the same commit is a valid client for the new backend, and sessions carry over — A.2.2 cases 2/7), but the backend rollback stays as hard as the runbook says | client rollback = redeploy the Flutter hosting build; data compatible both ways; sessions carry |
+| Test baseline | the Next client must reach parity *before* the first production run of 2A/2B/3; the Dart tests that pin the 2A/2B/3 behaviour would be discarded before they ever guarded production | production behaviour of 2A/2B/3 is known first; the Next port can be tested against a known-good contract (and against the Flutter client side by side) |
+| Wasted work | Flutter 2A/2B/3 UI and Plan 4 never get production use (the work is already spent either way) | Flutter UI is used for a while, then dropped; Plan 4's Flutter-specific hosting layer (bootstrap, start screen) is dropped at the switch |
+| Moving target | none — the feature set is frozen at 2A/2B/3 | any feature added to Flutter during the rewrite must be ported too → needs a feature freeze or double implementation |
+| Users see | one client change | two client changes (looks and behaves differently twice) |
+| Security/abuse fixes in 2A/2B (server-side credits, moderation, takedown) | delayed with the rewrite | live now |
+
+Judgement: the "after" path carries less risk per deploy and gets the server-side fixes live sooner; "before"
+avoids one user-visible change and a period of keeping Flutter alive. The data for "before" being worth it would
+have to come from Part B (how much the first load actually improves) and from a product decision on public
+content (A.4) — neither exists yet.
+
+### A.3.3 Other risks (either path)
+
+- **Effort estimate risk**: the range is assumption-based (A.1.6); the five hard screens dominate it.
+- **Behaviour drift**: the Dart code holds many small rules (domain check, rune-length limits, error-code → message
+  maps, catalog cache freshness rule, policy-notice logic). Missing one is a silent regression; port the 192 Dart
+  test cases as a checklist, not only the code.
+- **Error-code mapping**: JS `FunctionsError.code` is `functions/<code>` (A.2.7 item 4) vs Dart's bare code.
+- **Firestore cost**: losing the persistent cache (or using a different cache name/app) re-reads the ~10k-doc
+  catalog per visitor; `CourseRepository` comments say this would exhaust the free read quota after a handful of visitors.
+- **Logout bug carried or fixed**: today logout does not sign out (A.1.4); fixing it changes user-visible behaviour.
+- **iOS Safari**: storage eviction and IME behaviour were not tested for either client.
+- **Preview channels** (`kyodai-info--<channel>.web.app`) are a different origin: no shared session (expected), and
+  whether they need adding to Auth authorized domains for this project was not checked [unverified].
+- **Two clients open at once** during the switch (old Flutter tab, new Next tab): Firestore single-tab cache
+  contention (A.2.3) [unverified].
+
+### A.3.4 Cutover plan outline (if the owner chooses to migrate)
+
+1. **Gate**: Part B numbers + an explicit decision on whether any content becomes public (A.4).
+2. Deploy 2A/2B/3 + Plan 4 with Flutter per the existing runbook (recommended "after" path).
+3. Build the Next.js client on a branch as a **static export**: same web app config (`apiKey`, default app name),
+   `getAuth()` defaults, `persistentLocalCache`, `getFunctions(app,'asia-east1')`; port Dart tests to TS unit tests;
+   add Playwright e2e against the emulators (the repo already has emulator-based suites and `tools/perf`).
+4. Feature freeze on the Flutter client from parity-start to cutover (or a port-list for each change).
+5. Test on a preview channel (separate origin; sign in again there).
+6. Cutover: `firebase.json` `public` → the export dir, rewrites for dynamic routes, `Cache-Control: immutable` for
+   `/_next/static/**` and `no-cache` for HTML; keep `/manifest.json`, icons, `/about/`, `robots.txt`, `sitemap.xml`,
+   `og-image.png` and the `/flutter_service_worker.js` unregister stub. Deploy hosting only.
+7. Run the A.2.7 list on production; watch callable error rates and Firestore read counts for a day.
+8. Rollback = redeploy the last Flutter hosting build (keep it built and tagged); sessions survive (verified in emulator).
+9. Delete the Flutter client only after a stable period.
 
 ## Part A.4 — What Next.js would and would not fix
 
