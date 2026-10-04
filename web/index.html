@@ -95,8 +95,8 @@
       <p class="start__slow" role="status">通信環境によっては 30 秒ほどかかることがあります。このままお待ちください。</p>
       <div class="start__fail" role="alert">
         <h2>アプリを起動できませんでした</h2>
-        <p>通信が不安定か、学内・社内などのネットワークで Google のサーバー（gstatic.com）への接続が制限されている可能性があります。電波の良い場所や別のネットワークで、もう一度お試しください。</p>
-        <button id="start-retry" class="start__retry" type="button">再読み込み</button>
+        <p id="start-fail-text">通信が不安定か、学内・社内などのネットワークで Google のサーバー（gstatic.com）への接続が制限されている可能性があります。電波の良い場所や別のネットワークで、もう一度お試しください。</p>
+        <button id="start-retry" class="start__retry" type="button" aria-describedby="start-fail-text">再読み込み</button>
         <p class="start__contact"><!-- contact:begin -->解決しない場合は、アプリが開けるときに「マイページ → お問い合わせ」からご連絡ください。<!-- contact:end --></p>
       </div>
       <noscript><p class="start__lead">京大InfoHub を使うには JavaScript を有効にしてください。</p></noscript>

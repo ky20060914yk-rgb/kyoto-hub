@@ -21,6 +21,8 @@ void main() {
     expect(index.contains('content="https://kyodai-info.web.app/favicon.png"'), isFalse);
     expect(index.contains('貸借'), isFalse, reason: 'lending is not offered (spec §3)');
     expect(index, contains('id="start" data-state="loading"'));
+    expect(index, contains('<button id="start-retry" class="start__retry" type="button" aria-describedby="start-fail-text">'), reason: 'retry button is described by the failure text');
+    expect(index, contains('<p id="start-fail-text">'));
     expect(index, contains("addEventListener('flutter-first-frame'"));
     expect(index, contains('window.kyotoHubBootFailed = function'));
     expect(index, contains('<script src="flutter_bootstrap.js" async onerror="window.kyotoHubBootFailed(\'bootstrap\')"></script>'));
@@ -31,7 +33,11 @@ void main() {
     expect(boot, startsWith('{{flutter_js}}\n{{flutter_build_config}}\n'));
     expect(boot, contains('var kyotoHubBuild = {{flutter_service_worker_version}};'));
     expect(boot, contains("b.mainJsPath += '?v=' + encodeURIComponent(build);"), reason: 'C-2: a new URL per build');
-    expect(boot, contains("fetch(path, { cache: 'reload' })"), reason: 'C-2: refresh assets cached as immutable');
+    expect(boot, contains("fetch(path, { cache: 'no-cache' })"), reason: 'C-2: revalidate assets cached as immutable');
+    expect(boot, contains("'assets/shaders/ink_sparkle.frag'"), reason: 'shaders are refreshed too');
+    expect(boot, contains("'assets/shaders/stretch_effect.frag'"));
+    expect(boot, contains('Promise.race([refreshed'), reason: 'a stalled refresh must not block the engine');
+    expect(boot, contains('REFRESH_MS'));
     expect(boot, contains("window.kyotoHubBootFailed('engine')"));
     expect(boot, contains("window.kyotoHubBootFailed('loader')"));
   });

@@ -13,6 +13,7 @@
 // The service-worker settings are the stock ones (Flutter's worker is a
 // self-unregistering stub; keeping the call keeps the clean-up of an old one).
 var kyotoHubBuild = {{flutter_service_worker_version}};
+var REFRESH_MS = 5000;
 (function () {
   var build = String(kyotoHubBuild);
   _flutter.buildConfig.builds.forEach(function (b) {
@@ -23,12 +24,14 @@ var kyotoHubBuild = {{flutter_service_worker_version}};
   try { seen = window.localStorage.getItem(KEY); } catch (e) { /* storage blocked: refresh every time */ }
   var refreshed = Promise.resolve();
   if (seen !== build) {
-    var reload = function (path) { return fetch(path, { cache: 'reload' }); };
+    var reload = function (path) { return fetch(path, { cache: 'no-cache' }); };
     refreshed = Promise.all([reload('assets/AssetManifest.bin.json'), reload('assets/AssetManifest.bin'), reload('assets/FontManifest.json')])
       .then(function (r) { return r[2].ok ? r[2].json() : []; })
       .then(function (families) {
         var files = [];
         (families || []).forEach(function (f) { (f.fonts || []).forEach(function (x) { if (x.asset) files.push(reload('assets/' + x.asset)); }); });
+        // The framework's own shaders (ink_sparkle / stretch_effect) are not in the manifests.
+        ['assets/shaders/ink_sparkle.frag', 'assets/shaders/stretch_effect.frag'].forEach(function (p) { files.push(reload(p).catch(function () {})); });
         return Promise.all(files);
       })
       .then(function () { try { window.localStorage.setItem(KEY, build); } catch (e) {} })
@@ -40,7 +43,8 @@ var kyotoHubBuild = {{flutter_service_worker_version}};
     },
     onEntrypointLoaded: async function (engineInitializer) {
       try {
-        await refreshed;
+        // Never let a stalled refresh hold the engine back: wait at most REFRESH_MS.
+        await Promise.race([refreshed, new Promise(function (r) { setTimeout(r, REFRESH_MS); })]);
         const appRunner = await engineInitializer.initializeEngine();
         await appRunner.runApp();
       } catch (e) {

@@ -85,6 +85,19 @@ try {
     check(s.state === 'failed' && s.reason === 'timeout', `after 60 s: failure screen (reason ${s.reason})`);
     await ctx.close();
   }
+  // 4b. The one-time asset refresh stalls (FontManifest.json never answers): the 5 s cap lets the engine start anyway.
+  {
+    const ctx = await newContext(browser, 'desktop');
+    const page = await ctx.newPage();
+    let stalled = 0; // only the bootstrap's refresh request hangs; the engine's own later request goes through
+    await page.route('**/assets/FontManifest.json', (r) => { if (stalled++ === 0) return; r.continue(); });
+    const t0 = Date.now();
+    await page.goto(srv.origin + '/', { waitUntil: 'domcontentloaded' });
+    const started = await firstFrame(page, 40000);
+    check(started, `refresh stalled: the app still starts (first frame after ${((Date.now() - t0) / 1000).toFixed(1)} s)`);
+    check(await page.evaluate(() => !document.getElementById('start') || document.getElementById('start').getAttribute('data-state') !== 'failed'), 'refresh stalled: no failure screen');
+    await ctx.close();
+  }
   // 5. Without JavaScript: the brand, the description and the noscript text are still there.
   {
     const ctx = await newContext(browser, 'desktop', { javaScriptEnabled: false });

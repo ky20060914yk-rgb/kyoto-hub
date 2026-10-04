@@ -63,6 +63,9 @@ export function headerProblems(table) {
   expect('/about/', '/about/index.html');
   expect('/robots.txt', '/robots.txt');
   expect('/sitemap.xml', '/sitemap.xml');
+  const type = (path) => table.get(path)?.contentType ?? '';
+  if (!/^text\/plain/.test(type('/robots.txt'))) problems.push(`/robots.txt: Content-Type must be text/plain, got ${type('/robots.txt') || 'none'}`);
+  if (!/xml/.test(type('/sitemap.xml'))) problems.push(`/sitemap.xml: Content-Type must be an xml type, got ${type('/sitemap.xml') || 'none'}`);
   const bare = table.get('/about');
   if (!(bare && ((bare.status === 200 && bare.file === '/about/index.html') || (bare.status === 301 && /\/about\/$/.test(bare.location ?? ''))))) {
     problems.push(`/about: expected the landing page or a redirect to /about/, got ${bare ? `${bare.status} ${bare.file ?? bare.location}` : 'nothing'}`);
@@ -77,6 +80,23 @@ export function bootstrapProblems(src) {
   if (!/var kyotoHubBuild = "\d+"/.test(src)) problems.push('flutter_bootstrap.js: no numeric per-build id (built with --pwa-strategy=none?)');
   if (!src.includes("b.mainJsPath += '?v='")) problems.push('flutter_bootstrap.js: main.dart.js is not loaded with ?v=<build id>');
   return problems;
+}
+
+/**
+ * Pure verdict for --returning-user. `used` = Map<path, statuses[]> of v1's first
+ * visit, `second` = same for the second visit, `hashes(f) -> [h1, h2]`.
+ * Returns {changed, stale, problems}. `/` is index.html; /main.dart.js MUST differ.
+ */
+export function returningVerdict(files, used, second, hashes) {
+  const norm = (m) => new Map([...m].map(([p, s]) => [p === '/' ? '/index.html' : p, s]));
+  const first = norm(used);
+  const next = norm(second);
+  const changed = files.filter((f) => first.has(f) && hashes(f)[0] !== hashes(f)[1]);
+  const problems = [];
+  if (!changed.includes('/main.dart.js')) problems.push('v1 and v2 identical: /main.dart.js did not change, so this run proves nothing');
+  // A 304 is only ever sent for the CURRENT file's ETag, so 200 or 304 both mean "has v2".
+  const stale = changed.filter((f) => !(next.get(f) ?? []).some((st) => st === 200 || st === 304));
+  return { changed, stale, problems, requested: next };
 }
 
 async function returningUser(v1, v2, sdkDir, fj1, fj2) {
@@ -101,13 +121,12 @@ async function returningUser(v1, v2, sdkDir, fj1, fj2) {
     srv.swap({ dir: v2, table: t2 }); // the "deploy"
     const second = await visit();
     const hash = (dir, f) => { try { return sha1(readFileSync(join(dir, f))); } catch { return null; } };
-    const changed = listFiles(v1).filter((f) => first.requested.has(f) && hash(v1, f) !== hash(v2, f));
-    // A 304 is only ever sent for the CURRENT file's ETag, so 200 or 304 both mean "has v2".
-    const stale = changed.filter((f) => !(second.requested.get(f) ?? []).some((st) => st === 200 || st === 304));
+    const v = returningVerdict(listFiles(v1), first.requested, second.requested, (f) => [hash(v1, f), hash(v2, f)]);
     console.log(`v1 title: ${first.title}\nv2 title: ${second.title}`);
-    console.log(`files used by v1 that changed in v2: ${changed.join(', ') || 'none'}`);
-    for (const f of changed) console.log(`  ${f}: second visit ${second.requested.has(f) ? `fetched (${second.requested.get(f).join(', ')})` : 'NOT requested (taken from cache)'}`);
-    return stale;
+    console.log(`files used by v1 that changed in v2: ${v.changed.join(', ') || 'none'}`);
+    for (const f of v.changed) console.log(`  ${f}: second visit ${v.requested.has(f) ? `fetched (${v.requested.get(f).join(', ')})` : 'NOT requested (taken from cache)'}`);
+    for (const p of v.problems) console.log(`FAIL ${p}`);
+    return v;
   } finally {
     await browser.close();
     await srv.close();
@@ -120,8 +139,9 @@ if (isMain) {
     if (!a.v1 || !a.v2) { console.error('--returning-user needs --v1 <dir> --v2 <dir>'); process.exit(2); }
     const sdkDir = a['sandbox-sdk'] ? join(REPO, 'tools', 'perf', 'node_modules', 'firebase') : null;
     const fj2 = resolve(a['firebase-json']);
-    const stale = await returningUser(resolve(a.v1), resolve(a.v2), sdkDir, a['v1-firebase-json'] ? resolve(a['v1-firebase-json']) : fj2, fj2);
-    if (stale.length) { console.log(`STALE: a returning visitor kept ${stale.join(', ')} from v1`); process.exit(1); }
+    const verdict = await returningUser(resolve(a.v1), resolve(a.v2), sdkDir, a['v1-firebase-json'] ? resolve(a['v1-firebase-json']) : fj2, fj2);
+    if (verdict.problems.length) process.exit(1);
+    if (verdict.stale.length) { console.log(`STALE: a returning visitor kept ${verdict.stale.join(', ')} from v1`); process.exit(1); }
     console.log('OK: every changed file was fetched again after the deploy');
   } else {
     const dir = resolve(a.dir);
