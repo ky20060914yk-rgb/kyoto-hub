@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../../config/contact.dart';
 import '../../services/moderation_service.dart';
 
 const _brand = Color(0xFF0F4C81);
@@ -11,11 +12,20 @@ const _brand = Color(0xFF0F4C81);
 /// Kyoto University sender hides the named post at once; anyone else files a
 /// priority request that the operators review.
 class TakedownScreen extends StatefulWidget {
-  const TakedownScreen({super.key, required this.moderation, this.initialPostId, this.signedInEmail});
+  const TakedownScreen({
+    super.key,
+    required this.moderation,
+    this.initialPostId,
+    this.signedInEmail,
+    this.operatorEmail = kOperatorContactEmail,
+  });
 
   final ModerationService moderation;
   final String? initialPostId;
   final String? signedInEmail;
+
+  /// Shown when the daily pool is exhausted; empty = point to the contact screen.
+  final String operatorEmail;
 
   @override
   State<TakedownScreen> createState() => _TakedownScreenState();
@@ -29,6 +39,7 @@ class _TakedownScreenState extends State<TakedownScreen> {
   TakedownRole _role = TakedownRole.instructor;
   bool _sending = false;
   String? _error;
+  bool _limitHit = false;
   TakedownResult? _done;
 
   @override
@@ -49,6 +60,7 @@ class _TakedownScreenState extends State<TakedownScreen> {
     setState(() {
       _sending = true;
       _error = null;
+      _limitHit = false;
     });
     try {
       final id = _postId.text.trim();
@@ -63,9 +75,12 @@ class _TakedownScreenState extends State<TakedownScreen> {
       setState(() => _done = r);
     } on ModerationException catch (e) {
       if (!mounted) return;
-      setState(() => _error = e.isLimit
-          ? '本日の受付件数の上限に達しました。お手数ですが、明日以降にもう一度お送りください。'
-          : '送信できませんでした。入力内容をご確認のうえ、もう一度お試しください。');
+      setState(() {
+        _limitHit = e.isLimit;
+        _error = e.isLimit
+            ? '本日の受付件数の上限に達しました。お手数ですが、明日以降にもう一度お送りください。'
+            : '送信できませんでした。入力内容をご確認のうえ、もう一度お試しください。';
+      });
     } catch (_) {
       if (!mounted) return;
       setState(() => _error = '送信できませんでした。通信環境をご確認のうえ、もう一度お試しください。');
@@ -154,6 +169,15 @@ class _TakedownScreenState extends State<TakedownScreen> {
         if (_error != null) ...[
           const SizedBox(height: 8),
           Text(_error!, style: const TextStyle(color: Color(0xFFDC2626), fontSize: 13)),
+          if (_limitHit) ...[
+            const SizedBox(height: 6),
+            if (widget.operatorEmail.isNotEmpty)
+              SelectableText('こちらのメールからご連絡ください: ${widget.operatorEmail}',
+                  style: const TextStyle(color: Color(0xFF1E293B), fontSize: 13, fontWeight: FontWeight.bold))
+            else
+              const Text('お問い合わせ画面からご連絡ください',
+                  style: TextStyle(color: Color(0xFF1E293B), fontSize: 13, fontWeight: FontWeight.bold)),
+          ],
         ],
         const SizedBox(height: 16),
         SizedBox(
