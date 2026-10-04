@@ -8,6 +8,10 @@ class UserProfile {
   final bool isVerified;
   final String? pendingReferralCode;
 
+  /// `users/{uid}.policyNoticeV2SeenAt` exists: the one-time 「ポイント制がクレジット制に変わりました」 notice
+  /// was dismissed. Written by the client on the user's own doc, never part of [toMap].
+  final bool policyNoticeSeen;
+
   UserProfile({
     required this.uid,
     this.universityId = 'kyoto_u',
@@ -17,6 +21,7 @@ class UserProfile {
     this.downloadCount = 0,
     this.isVerified = false,
     this.pendingReferralCode,
+    this.policyNoticeSeen = false,
   });
 
   UserProfile copyWith({
@@ -28,6 +33,7 @@ class UserProfile {
     int? downloadCount,
     bool? isVerified,
     String? pendingReferralCode,
+    bool? policyNoticeSeen,
   }) {
     return UserProfile(
       uid: uid ?? this.uid,
@@ -38,6 +44,7 @@ class UserProfile {
       downloadCount: downloadCount ?? this.downloadCount,
       isVerified: isVerified ?? this.isVerified,
       pendingReferralCode: pendingReferralCode ?? this.pendingReferralCode,
+      policyNoticeSeen: policyNoticeSeen ?? this.policyNoticeSeen,
     );
   }
 
@@ -66,6 +73,7 @@ class UserProfile {
       downloadCount: map['downloadCount'] ?? 0,
       isVerified: map['isVerified'] ?? false,
       pendingReferralCode: map['pendingReferralCode'],
+      policyNoticeSeen: map['policyNoticeV2SeenAt'] != null,
     );
   }
 }

@@ -380,6 +380,12 @@ test('user can write only their own profile', async () => {
   await assertFails(setDoc(doc(mine, 'users/u2'), { displayName: 'hax' }));
 });
 
+test('the one-time policy notice flag: the owner can set policyNoticeV2SeenAt on their own doc, nobody else can', async () => {
+  await assertSucceeds(setDoc(doc(asKu(), 'users/u1'), { policyNoticeV2SeenAt: serverTimestamp(), university_id: 'kyoto_u' }, { merge: true }));
+  await assertFails(setDoc(doc(asKu(), 'users/u2'), { policyNoticeV2SeenAt: serverTimestamp() }, { merge: true }));
+  await assertFails(setDoc(doc(asAnon(), 'users/u1'), { policyNoticeV2SeenAt: serverTimestamp() }, { merge: true }));
+});
+
 test('a user can read only their own profile (2B)', async () => {
   await assertSucceeds(getDoc(doc(asKu(), 'users/u1')));
   await assertFails(getDoc(doc(asKu(), 'users/u2')));

@@ -4,6 +4,7 @@ import 'search/search_screen.dart';
 import 'home/home_screen.dart';
 import 'mypage/my_page_screen.dart';
 import 'market/market_screen.dart';
+import '../widgets/policy_notice_gate.dart';
 
 class NavigationRootScreen extends StatefulWidget {
   final AppStore store;
@@ -35,7 +36,9 @@ class _NavigationRootScreenState extends State<NavigationRootScreen> {
   }
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context) => PolicyNoticeGate(store: widget.store, child: _buildScaffold(context));
+
+  Widget _buildScaffold(BuildContext context) {
     final user = widget.store.currentUser;
     final isUnverified = user != null && !user.isVerified;
 

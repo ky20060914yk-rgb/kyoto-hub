@@ -133,6 +133,33 @@ class AppStore extends ChangeNotifier {
   /// Returns null when the call failed (retried on the next login or
   /// verification check), otherwise whether this call actually granted credits.
   bool _welcomePending = false;
+  bool _policyNoticeDismissed = false;
+
+  /// Make the flag write fail (tests only): the notice must still never loop or block.
+  @visibleForTesting
+  bool failPolicyNoticeWriteForTest = false;
+
+  /// The one-time 「ポイント制がクレジット制に変わりました」 notice: verified, signed in, flag absent on the user doc,
+  /// and not already dismissed in this session (so a failed flag write can never make it loop).
+  bool get shouldShowPolicyNotice {
+    final u = currentUser;
+    return u != null && u.isVerified && !u.policyNoticeSeen && !_policyNoticeDismissed;
+  }
+
+  /// Dismissed: closed for this session first, then remembered on the user's doc. A failed write is swallowed
+  /// (the notice may show once more next login); it never blocks anything.
+  Future<void> markPolicyNoticeSeen() async {
+    final u = currentUser;
+    if (u == null) return;
+    _policyNoticeDismissed = true;
+    currentUser = u.copyWith(policyNoticeSeen: true);
+    try {
+      if (failPolicyNoticeWriteForTest) throw StateError('write failed');
+      await _userRepo.markPolicyNoticeSeen(u.uid);
+    } catch (_) {/* best effort */}
+    notifyListeners();
+  }
+
   Future<bool?> _claimWelcome() async {
     try {
       final r = await credits.claimWelcome();
@@ -192,8 +219,10 @@ class AppStore extends ChangeNotifier {
                 email: email,
                 displayName: '京大生_$randomNum',
                 createdAt: DateTime.now(),
+                policyNoticeSeen: true, // brand new: there are no old points to explain
               );
               await _userRepo.saveUserProfile(profile);
+              _userRepo.markPolicyNoticeSeen(uid).catchError((_) {});
 
             }
 
@@ -332,7 +361,8 @@ class AppStore extends ChangeNotifier {
       );
 
       await _userRepo.saveUserProfile(profile);
-      currentUser = profile;
+      _userRepo.markPolicyNoticeSeen(uid).catchError((_) {}); // brand new: there are no old points to explain
+      currentUser = profile.copyWith(policyNoticeSeen: true);
       _watchCredits(uid); // authStateChanges may fire before the profile exists
       _watchUserStreams(uid);
 
