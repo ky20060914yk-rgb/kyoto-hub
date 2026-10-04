@@ -1,0 +1,1 @@
+void reportBootFailure(String reason) {}

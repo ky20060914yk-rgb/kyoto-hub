@@ -12,12 +12,20 @@ import 'views/auth/signup_screen.dart';
 import 'views/navigation_root_screen.dart';
 
 import 'views/onboarding/onboarding_screen.dart';
+import 'startup/boot_signal.dart';
+import 'startup/startup.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  await Firebase.initializeApp(
-    options: DefaultFirebaseOptions.currentPlatform,
+  final ready = await initializeBeforeRunApp(
+    initFirebase: () => Firebase.initializeApp(
+      options: DefaultFirebaseOptions.currentPlatform,
+    ),
+    onFailure: reportBootFailure,
   );
+  // Without Firebase nothing may start (no AppStore, no auth listener): the
+  // page's start screen shows the failure state and a reload button (Plan 4).
+  if (!ready) return;
   FirebaseFirestore.instance.settings = const Settings(
     persistenceEnabled: true,
     cacheSizeBytes: Settings.CACHE_SIZE_UNLIMITED,
