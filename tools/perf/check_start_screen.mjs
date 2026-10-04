@@ -92,6 +92,8 @@ try {
     await page.goto(srv.origin + '/', { waitUntil: 'load' });
     check((await page.textContent('#start h1')) === '京大InfoHub', 'no JS: brand visible');
     check((await page.content()).includes('JavaScript を有効にしてください'), 'no JS: noscript text present');
+    await page.goto(srv.origin + '/about/', { waitUntil: 'load' });
+    check((await page.textContent('h1')) === '京大InfoHub' && (await page.isVisible('a.cta')), 'no JS: /about/ is complete (heading + アプリを開く)');
     await ctx.close();
   }
   // 6. L-1: links into the app keep working — a sign-in-link style query and an old deep path both start the app.

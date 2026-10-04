@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Only pages that anyone can read (Plan 4, Ruling L-2). Nothing behind the login is listed. -->
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+  <url><loc>https://kyodai-info.web.app/</loc></url>
+  <url><loc>https://kyodai-info.web.app/about/</loc></url>
+</urlset>

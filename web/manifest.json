@@ -1,11 +1,11 @@
 {
-    "name": "kyodai_info_hub",
-    "short_name": "KyodaiInfoHub",
+    "name": "京大InfoHub",
+    "short_name": "京大InfoHub",
     "start_url": ".",
     "display": "standalone",
-    "background_color": "#0175C2",
-    "theme_color": "#0175C2",
-    "description": "京大生専用の過去問、テスト対策情報共有、教科書の貸借マッチングサービス「京大InfoHub」",
+    "background_color": "#F8FAFC",
+    "theme_color": "#0F4C81",
+    "description": "京大生専用の授業レビュー・過去問共有・教科書マーケット「京大InfoHub」",
     "orientation": "portrait-primary",
     "prefer_related_applications": false,
     "icons": [

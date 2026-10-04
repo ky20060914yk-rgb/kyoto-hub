@@ -1,6 +1,7 @@
 // Static, crawler-facing web files (Plan 4). These run on the VM with dart:io:
 // they read files in web/ and firebase.json; they never build or serve anything.
 import 'dart:io';
+import 'dart:typed_data';
 
 import 'package:flutter_test/flutter_test.dart';
 
@@ -30,5 +31,28 @@ void main() {
     expect(boot, contains('serviceWorkerVersion: {{flutter_service_worker_version}}'));
     expect(boot, contains("window.kyotoHubBootFailed('engine')"));
     expect(boot, contains("window.kyotoHubBootFailed('loader')"));
+  });
+
+  test('about/: static page with its own canonical, a link to the app and no app code', () {
+    final about = read('web/about/index.html');
+    expect(about, contains('<html lang="ja">'));
+    expect(about, contains('<link rel="canonical" href="https://kyodai-info.web.app/about/">'));
+    expect(about, contains('<a class="cta" href="/">'));
+    expect(about.contains('<script src='), isFalse, reason: 'the landing must not start the app');
+    expect(about, contains('c.saveData'), reason: 'P-1: no prefetch with Data Saver');
+  });
+
+  test('robots.txt and sitemap.xml list only public pages', () {
+    expect(read('web/robots.txt'), 'User-agent: *\nAllow: /\n\nSitemap: https://kyodai-info.web.app/sitemap.xml\n');
+    final locs = RegExp(r'<loc>([^<]+)</loc>').allMatches(read('web/sitemap.xml')).map((m) => m.group(1)).toList();
+    expect(locs, ['https://kyodai-info.web.app/', 'https://kyodai-info.web.app/about/']);
+  });
+
+  test('og-image.png is a 1200x630 PNG under 100 KB', () {
+    final bytes = File('web/og-image.png').readAsBytesSync();
+    expect(bytes.length, lessThan(100 * 1024));
+    expect(bytes.sublist(0, 8), [137, 80, 78, 71, 13, 10, 26, 10]);
+    final ihdr = ByteData.sublistView(Uint8List.fromList(bytes), 16, 24);
+    expect([ihdr.getUint32(0), ihdr.getUint32(4)], [1200, 630]);
   });
 }
