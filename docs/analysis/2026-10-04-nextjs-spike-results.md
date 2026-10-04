@@ -10,6 +10,24 @@ No timings, no builds of the app, no deploys. Every number below is either count
 Legend: **[verified-code]** = read in this repo or in installed package sources;
 **[verified-test]** = observed in a local test run; **[unverified]** = reasoning only, needs a test.
 
+### Part A summary
+
+- **Scope**: 56 Dart files / 11,716 LOC (7,502 in 18 screen files) and 192 Dart tests would be rewritten; 10 simple,
+  5 medium, 5 hard screens/widgets. Reused unchanged: functions (2,332 LOC, 220 tests), rules (461 LOC, 118 tests),
+  tools, plans. Every Firebase call already runs on the JS SDK 12.19.0 underneath FlutterFire, so the backend
+  contract maps 1:1 (10 callables in `asia-east1`, streams, 2 transactions, server timestamps, 2 upload paths).
+- **Effort (estimate, wide error bars)**: ~25–90 focused-developer-days, from LOC and component-count bases with
+  assumed rates (A.1.6).
+- **Auth cutover**: sessions carry over in both directions on the same origin when the new client uses the
+  default app name, the same web apiKey and local persistence — verified in source **and** in a browser test
+  against the Auth emulator with the real Flutter build (A.2.2). Not tested: production, Safari/iOS.
+- **Found in passing**: `logout()` never calls `signOut()`; the e-mail-link sign-in branch can never succeed.
+- **Before vs after 2A/2B/3**: 2A/2B/3 is a breaking backend change for the current production client; a later
+  framework switch is client-only and data-compatible both ways. "After" is the lower-risk order (A.3).
+- **Next.js would not fix** login-gated (non-indexable) content, Firestore start-up, real-user network; it
+  **would** give HTML first paint, per-route splitting, real URLs, native a11y/IME, and allow dropping the
+  eager Google auth iframe on mobile (A.4).
+
 ## Part A.1 — Rewrite scope
 
 All counts are from `wc -l` / `grep -c` on the tree at `7abb8fb` (the commit before this report).
@@ -300,7 +318,8 @@ content (A.4) — neither exists yet.
   test cases as a checklist, not only the code.
 - **Error-code mapping**: JS `FunctionsError.code` is `functions/<code>` (A.2.7 item 4) vs Dart's bare code.
 - **Firestore cost**: losing the persistent cache (or using a different cache name/app) re-reads the ~10k-doc
-  catalog per visitor; `CourseRepository` comments say this would exhaust the free read quota after a handful of visitors.
+  catalog per visitor; the `CourseRepository` comment (`course_repository.dart:134-137`) puts a full fetch at ~10k
+  reads per session, i.e. the Spark plan's 50k reads/day after five visitors (on Blaze: billed reads instead).
 - **Logout bug carried or fixed**: today logout does not sign out (A.1.4); fixing it changes user-visible behaviour.
 - **iOS Safari**: storage eviction and IME behaviour were not tested for either client.
 - **Preview channels** (`kyodai-info--<channel>.web.app`) are a different origin: no shared session (expected), and
@@ -326,9 +345,50 @@ content (A.4) — neither exists yet.
 
 ## Part A.4 — What Next.js would and would not fix
 
-(in progress)
+Measured numbers cited here come from the companion measurements doc (§1, lab conditions, not real users).
+
+### A.4.1 What a rewrite would NOT fix
+
+| Issue | Why the framework does not change it | Basis |
+|---|---|---|
+| **Login-gated content → nothing indexable** | every Firestore read rule is `kuDomain()`, `owns()`, a uid check or `false` (`firestore.rules`: all 37 `allow read` lines checked); Storage reads are `false` (`storage.rules:28,55`). Server-rendering cannot render data the server is not allowed to read without an Admin-SDK design and a product decision on what is public | [verified-code] |
+| **Firebase SDK weight** | today the app downloads the SDK at runtime (0.23 MB brotli, measurements §1.3); a Next client bundles Auth + Firestore (+ Functions, Storage on demand) — tree-shaken, but Firestore with persistent cache is still the largest piece of a Firebase web app. Part B must measure the real first-load JS for the login page and for a signed-in screen | measured in companion doc for Flutter; Next figure = Part B |
+| **Firestore connection start-up** | the listen channel, auth token fetch, and the catalog load (`CourseRepository.warmUp` → `meta/catalog` + cached or ~10k-doc server read, `course_repository.dart:91-142`) are the same calls in any client | [verified-code] |
+| **Real-user network** | latency from Kyoto to Firestore and to `asia-east1` callables, mobile radio wake-up, school Wi-Fi filters — unchanged | not measured anywhere yet (companion doc §8) |
+| **Google-hosted dependencies at runtime** | partly: a bundled SDK removes the `www.gstatic.com/firebasejs/` fetch (whose failure today means "no app", `lib/startup/startup.dart` comment) and the CanvasKit fetch; but Auth/Firestore/Functions endpoints are still Google APIs, and with the default `browserPopupRedirectResolver` the JS SDK loads `https://apis.google.com/js/api.js` + the auth iframe **eagerly on mobile browsers, Safari and iOS** (`_shouldInitProactively`, `@firebase/auth` `index-4NFEPWkC.js:2716,10833-10836,11314`) | [verified-code] |
+| **Logic bugs** (e.g. logout not signing out) | would be ported unless explicitly fixed | [verified-code] |
+
+### A.4.2 What a rewrite WOULD enable
+
+| Enables | Detail | Basis |
+|---|---|---|
+| Real HTML first paint | the login screen and every public page are DOM/HTML from the first byte, with no 1.64 MB CanvasKit engine and no 0.74 MB `main.dart.js` before the first frame (measurements §1.3); the empty Next.js export floor was 116 KiB / 7 requests (§1.7). How close a *real* screen gets to that floor is Part B's question | companion doc + Part B |
+| Per-route code splitting | the market, chat, course and my-page code load only when visited; Flutter ships one `main.dart.js` | framework property; size effect = Part B |
+| Server-rendered or statically generated public pages | e.g. course pages or aggregate stats **if** the product decides they are public (today nothing is); static generation from `tools/courses.json` (~10k courses) needs no server | requires product decision |
+| SEO / link previews per URL | real URLs + per-page `<title>`/OG tags; today every path serves the same `index.html` (no routes) | [verified-code] |
+| Native accessibility and text behaviour | DOM semantics, browser find-in-page, copy/paste, screen readers, native IME composition in `<input>`; Flutter web has 9 semantics hints in `lib/` | [verified-code] for the count; benefit is judgement |
+| Dropping the eager Google iframe | a password-only client can call `initializeAuth(app, {persistence: [indexedDBLocalPersistence, browserLocalPersistence, browserSessionPersistence]})` **without** `popupRedirectResolver`; the session key does not depend on the resolver (A.2.1), so hand-over is unaffected. FlutterFire hard-codes the resolver (`auth.dart:36`) | [verified-code]; startup effect = Part B |
+| Simpler start-up/caching story | hashed `/_next/static/*` filenames + `no-cache` HTML replace Plan 4's build-id bootstrap and asset refresh | framework property |
+
+### A.4.3 What Part B must measure (so the decision rests on numbers, not on the floors)
+
+1. First-load JS/CSS bytes (brotli) and request count for: login page, a signed-in heavy screen (course detail or
+   market), with the real Firebase modules the screen needs (Auth + Firestore persistent cache; Functions/Storage lazily).
+2. Time to interactive login form and time to a **signed-in** rendered screen for a returning user (session in
+   IndexedDB), mobile and desktop throttling identical to the companion doc, vs the Flutter build of the same commit.
+3. Same with `getAuth()` vs `initializeAuth` without `popupRedirectResolver` on the mobile profile (A.4.2).
+4. Static export vs `next start` (server) — whether SSR helps at all for login-gated screens (A.2.3 says it cannot see the session).
+5. Growth: JS added per ported screen (to extrapolate to 20 screens), and the time it took to port one real screen
+   (replaces the assumed rate in A.1.6).
+6. Re-run the session hand-over (A.2.2) between the Part B prototype and the Flutter build.
 
 ## Part B — measured prototype (to be added)
 
 Reserved for the Part B agent (built-and-measured Next.js prototype). Do not edit above this line
 except to correct Part A.
+
+Note for Part B: the session scratchpad holds leftovers of the earlier, lost attempts (`spike/next-spike` — Next
+16.3.8 + firebase 12.19.0 prototype, `spike/flutter-emu` — emulator-pointed Flutter build, `spike/results/*.json`,
+`spike/NOTES.md`). Part A did **not** verify or use any of those numbers; treat them as unconfirmed and re-measure.
+The A.2.2 hand-over test is `cut/cutover.mjs` in the same scratchpad
+(`node cutover.mjs <flutter build/web>` with Auth + Firestore emulators on 9099/8080, project `demo-spike`).
