@@ -1546,7 +1546,7 @@ replace the whole test `flutter_bootstrap.js template keeps the stock tokens and
     expect(boot, startsWith('{{flutter_js}}\n{{flutter_build_config}}\n'));
     expect(boot, contains('var kyotoHubBuild = {{flutter_service_worker_version}};'));
     expect(boot, contains("b.mainJsPath += '?v=' + encodeURIComponent(build);"), reason: 'C-2: a new URL per build');
-    expect(boot, contains("fetch(path, { cache: 'reload' })"), reason: 'C-2: refresh assets cached as immutable');
+    expect(boot, contains("fetch(path, { cache: 'no-cache' })"), reason: 'C-2: refresh assets cached as immutable');
     expect(boot, contains("window.kyotoHubBootFailed('engine')"));
     expect(boot, contains("window.kyotoHubBootFailed('loader')"));
   });
@@ -1790,11 +1790,12 @@ with:
 //    main.dart.js is loaded as main.dart.js?v=<id>, and when the id differs
 //    from the one this browser last started, the Flutter asset files (manifests
 //    and the tree-shaken icon fonts) are re-downloaded once with
-//    cache: 'reload'. Both escape copies that older deploys cached as
+//    cache: 'no-cache' (revalidation ignores a copy cached as immutable; verified in Chromium). Both escape copies that older deploys cached as
 //    "immutable" for a year, which no header change can reach.
 // The service-worker settings are the stock ones (Flutter's worker is a
 // self-unregistering stub; keeping the call keeps the clean-up of an old one).
 var kyotoHubBuild = {{flutter_service_worker_version}};
+var REFRESH_MS = 5000;
 (function () {
   var build = String(kyotoHubBuild);
   _flutter.buildConfig.builds.forEach(function (b) {
@@ -1805,12 +1806,14 @@ var kyotoHubBuild = {{flutter_service_worker_version}};
   try { seen = window.localStorage.getItem(KEY); } catch (e) { /* storage blocked: refresh every time */ }
   var refreshed = Promise.resolve();
   if (seen !== build) {
-    var reload = function (path) { return fetch(path, { cache: 'reload' }); };
+    var reload = function (path) { return fetch(path, { cache: 'no-cache' }); };
     refreshed = Promise.all([reload('assets/AssetManifest.bin.json'), reload('assets/AssetManifest.bin'), reload('assets/FontManifest.json')])
       .then(function (r) { return r[2].ok ? r[2].json() : []; })
       .then(function (families) {
         var files = [];
         (families || []).forEach(function (f) { (f.fonts || []).forEach(function (x) { if (x.asset) files.push(reload('assets/' + x.asset)); }); });
+        // The framework's own shaders are not in the manifests.
+        ['assets/shaders/ink_sparkle.frag', 'assets/shaders/stretch_effect.frag'].forEach(function (p) { files.push(reload(p).catch(function () {})); });
         return Promise.all(files);
       })
       .then(function () { try { window.localStorage.setItem(KEY, build); } catch (e) {} })
@@ -1822,7 +1825,8 @@ var kyotoHubBuild = {{flutter_service_worker_version}};
     },
     onEntrypointLoaded: async function (engineInitializer) {
       try {
-        await refreshed;
+        // Never let a stalled refresh hold the engine back: wait at most REFRESH_MS.
+        await Promise.race([refreshed, new Promise(function (r) { setTimeout(r, REFRESH_MS); })]);
         const appRunner = await engineInitializer.initializeEngine();
         await appRunner.runApp();
       } catch (e) {
@@ -2196,20 +2200,36 @@ git commit -m "docs(tools): web performance and cache checks (Plan 4)"
 
 **This section extends, and does not replace, the Deploy section of `2026-10-05-phase3-textbook-market.md`** (the combined 2A + 2B + 3 runbook, itself superseding 2A's and 2B's). None of 2A, 2B, 3 or 4 is deployed. Plan 4 has **no** Functions, rules, indexes, Storage or data steps; it ships entirely in the combined runbook's **step 6** (`firebase deploy --only hosting` also deploys `firebase.json`'s `hosting.headers`). **Nothing here is run from the implementation environment.** The USER runs every step on their own machine (PowerShell 5.1: one line per command, `;` chains). Plan 4's checks need Node 22 and the firebase CLI the runbook already uses (the Hosting emulator needs no Java and no login).
 
+**Implemented subset (read first).** Only **Tasks 1–5** are implemented. **Tasks 6–8 are deferred** (pending the Next.js spike decision): no Japanese-font override (F-1), **no `tools/sync_web_contact.mjs`** (C-3) and no contact-address mirroring, no docs/AFTER-numbers task. Consequences for this runbook: the static pages (`web/index.html` failure screen, `web/about/index.html`) show the fallback text 「マイページ → お問い合わせ」 **even after `kOperatorContactEmail` is set**; nothing in `flutter test` checks that they agree with the constant. Expected counts for the implemented subset: `flutter test` **192**, `flutter analyze` **21**, functions 220 / rules 138 / storage rules 9 unchanged. Steps marked "only when Task N is implemented" are skipped until then.
+
 **Order (recommended, A): implement Plan 4 before the combined deploy, then run the combined runbook with these additions.** Never deploy a Plan 4 hosting build before the combined runbook's steps 1–5b: the build contains the 2A/2B/3 client.
 
 ```
 PRE (additions, in this order — the rest of PRE unchanged):
-     a) After setting kOperatorContactEmail in lib/config/contact.dart (existing checklist item), from the repo root:
-        node tools/sync_web_contact.mjs
-        # copies the address into web/index.html and web/about/index.html; commit both with contact.dart.
-        # If the address stays empty, this prints "up to date" twice (the pages keep the お問い合わせ fallback text).
+     a) ONLY WHEN TASK 7 IS IMPLEMENTED (it is NOT in the implemented subset: tools/sync_web_contact.mjs does not exist yet — skip this item):
+        after setting kOperatorContactEmail in lib/config/contact.dart, `node tools/sync_web_contact.mjs` copies the address into
+        web/index.html and web/about/index.html. Until then those pages keep the fallback text 「マイページ → お問い合わせ」
+        whatever kOperatorContactEmail says.
      b) The existing `flutter build web --release` (production build, CanvasKit from the CDN).
-     c) After the build, the stale-code check (needs Node 22 + the firebase CLI; starts the Hosting emulator locally):
+     c) HARD GATE — the stale-code check on the BUILT output (needs Node 22 + the firebase CLI; starts the Hosting emulator locally):
         npm --prefix tools/perf ci ; node tools/perf/check_web_cache.mjs
-        # must print "OK: every response revalidates ..." — on FAIL do not deploy hosting.
-     d) Expected suite counts change for Plan 4: flutter test 194 (was 181); functions 220, rules 138, storage rules 9,
-        flutter analyze 21 issues unchanged.
+        # must print "OK: every response revalidates ..." and exit 0. DO NOT DEPLOY HOSTING if it fails, for any reason.
+        # It fails (by design) when: build/web/flutter_bootstrap.js has no numeric build id — i.e. the {{flutter_service_worker_version}}
+        # token was not substituted, came out null, or is still a literal {{...}} (a build with --pwa-strategy=none, or a future Flutter
+        # that dropped the token; without the id the per-build URL and the one-time asset refresh silently do nothing and returning
+        # visitors can run stale code); when main.dart.js is not loaded as ?v=<id>; when any response is `immutable`/cached > 1 day
+        # (images) or lacks Cache-Control; and when /, deep paths, /about/, /robots.txt (text/plain) or /sitemap.xml (xml) are
+        # answered by the wrong file or type.
+     d) Expected suite counts for the implemented subset (Tasks 1–5): flutter test 192 (was 181), functions 220, rules 138,
+        storage rules 9, flutter analyze 21 issues unchanged. (194 only after Tasks 6–8.)
+     e) BEFORE the deploy, read-only: confirm production's service worker is Flutter's self-unregistering stub:
+        curl.exe -s https://kyodai-info.web.app/flutter_service_worker.js | findstr unregister
+        # expect at least one line. If NOTHING is printed, production still serves an old CACHING service worker: such a worker
+        # serves main.dart.js from its own cache, so returning visitors would keep the old code and (because the localStorage flag
+        # is then set by the refresh against a stale cache) skip a useful refresh. Do not rely on Plan 4 alone: stop, tell the owner,
+        # and either (1) first deploy a hosting release whose flutter_service_worker.js is the stub (a current Flutter build of this repo is: its `build/web/flutter_service_worker.js` only unregisters itself)
+        # and wait a day, or (2) after the deploy have testers clear the site data (Chrome: lock icon -> Site settings -> Delete data;
+        # unregisters the worker). Plan 4 changes neither the worker file nor its scope.
 
 6. (unchanged command)  firebase deploy --only hosting --project kyodai-sns
    # Plan 4 rides on this deploy: start screen, /about/, robots.txt, sitemap.xml, og-image.png, new Cache-Control headers.
@@ -2229,11 +2249,19 @@ PRE (additions, in this order — the rest of PRE unchanged):
    # expect "301 https://kyodai-info.web.app/about/" (or 200).
    curl.exe -sI -H "Accept-Encoding: br" https://kyodai-info.web.app/main.dart.js
    # note content-encoding (br or gzip) — the lab assumed brotli; production compression was never verified.
-   curl.exe -sI -H "If-None-Match: <the etag value from the first command, with its quotes>" https://kyodai-info.web.app/main.dart.js
+   curl.exe -sI https://kyodai-info.web.app/flutter_bootstrap.js
+   # expect "cache-control: no-cache" (and 200) — the file that carries the per-build id must never be cached.
+   curl.exe -sI -H 'If-None-Match: \"<the etag value from the first command, WITHOUT its surrounding quotes>\"' https://kyodai-info.web.app/main.dart.js
+   # PowerShell 5.1 drops unescaped double quotes when it starts a native program, so the header is single-quoted for
+   # PowerShell and each literal quote is written \" for curl.exe's command-line parser. Example for etag "abc123":
+   #   curl.exe -sI -H 'If-None-Match: \"abc123\"' https://kyodai-info.web.app/main.dart.js
    # expect "HTTP/1.1 304" or "HTTP/2 304" — this is what keeps repeat visits cheap under no-cache (not verifiable in the lab).
+   # UNTESTED in PowerShell: curl.exe/PowerShell are not available in the implementation environment; the quoting is reasoned from
+   # PowerShell 5.1's documented argument-passing behaviour. If you get 200 instead of 304, run the same request with a
+   # header file instead: write `If-None-Match: "abc123"` into h.txt and use `curl.exe -sI -H @h.txt <url>`.
 
 8. (unchanged) Tell testers to reload the app TWICE.
-   # Plan 4 note: with Plan 4 one normal reload is enough, and returning visitors whose browsers still hold the OLD
+   # Plan 4 note (requires the service-worker stub confirmed in PRE e): with Plan 4 one normal reload is enough, and returning visitors whose browsers still hold the OLD
    # main.dart.js / icon font (cached as "immutable" by today's production headers) get the new ones on their first
    # visit (C-2). WITHOUT Plan 4, the dry run measured that two reloads still run the old code under today's headers:
    # testers would have to clear the site data (Chrome: lock icon -> Site settings -> Delete data).
@@ -2241,14 +2269,17 @@ PRE (additions, in this order — the rest of PRE unchanged):
 
 **Order B (only if Plan 4 is implemented after the combined deploy is live):** PRE a)–d) as above, then `flutter build web --release`, then `firebase deploy --only hosting --project kyodai-sns`, then 6b. Plan 4 needs nothing else from the backend.
 
-**Rollback (hosting only).** Firebase console → Hosting → the `kyodai-info` site → Release history → the release before Plan 4 → ⋮ → Roll back (a release carries its own files and headers). Or in Git Bash: `git log --diff-filter=A --format=%h -- docs/superpowers/plans/2026-10-06-first-load-and-public-pages.md` prints the commit that added this plan (its tree is the code without Plan 4); `git checkout <that commit>`, `flutter build web --release`, `firebase deploy --only hosting --project kyodai-sns`, `git checkout master-wf96b2`. Consequences: the old `immutable` headers return (files fetched under them are cached for a year again, the stale-code risk is back); browsers that ran Plan 4 hold `no-cache` copies and revalidate — nothing breaks; `/about/`, robots, sitemap and the share image disappear (soft-200 HTML again).
+**Rollback.** Two different things are called "rollback" here; do not mix them up.
+
+1. **Roll back Plan 4's hosting layer only** (headers, start screen, `/about/`, bootstrap): Use Git, not the console's Release history (under order A a console rollback also reverts the 2A/2B/3 client — see 2). In Git Bash: `git log --diff-filter=A --format=%h -- docs/superpowers/plans/2026-10-06-first-load-and-public-pages.md` prints the commit that added this plan (call it `<P4>`; its tree is the code without Plan 4 and with 2A/2B/3), then `git checkout <P4>`, `flutter build web --release`, `firebase deploy --only hosting --project kyodai-sns`, `git checkout master-wf96b2`. Consequences: the old `immutable` headers return (the stale-code risk is back, and files fetched under Plan 4's `no-cache` stay revalidated), `/about/`, robots, sitemap and the share image disappear (soft-200 HTML again). Browsers that ran Plan 4 hold `no-cache` copies and revalidate — nothing breaks.
+2. **Roll back app code (2A / 2B / 3 client) while keeping Plan 4's hosting layer — the normal case under order A.** Under order A, Plan 4 and the 2A/2B/3 client went out in the same release, so rolling back to an earlier release in the console (Hosting → `kyodai-info` → Release history) is a rollback of the 2A/2B/3 *client* against the already-deployed *backend* (new rules, Functions and migrated data), and because a release carries its own `firebase.json` headers and files it also removes Plan 4's headers and bootstrap. **Every app-code rollback must therefore keep Plan 4's hosting files.** In Git Bash: `git checkout <P>` (the older tree, e.g. the combined runbook's `<P>` or `bc72fb0`), then `git checkout master-wf96b2 -- firebase.json web/flutter_bootstrap.js web/index.html web/about web/robots.txt web/sitemap.xml web/og-image.png web/manifest.json`, then `flutter build web --release`, `node tools/perf/check_web_cache.mjs` (HARD GATE as PRE c), `firebase deploy --only hosting --project kyodai-sns`, and finally `git checkout master-wf96b2`. `lib/main.dart` keeps the older version in this case (the startup guard lives in `lib/startup/`; an older `lib/main.dart` simply does not call it, so the failure screen's Dart-side signals are absent but the page watchdog still works). Backend rollbacks (rules, Functions, data) are separate and stay as written in the combined runbook.
 
 ## Manual E2E (production, after step 6b; user + phone + desktop browser)
 
 1. **Start screen:** on a phone (mobile data, cache cleared), open `https://kyodai-info.web.app/` → within about a second the blue logo, 「京大InfoHub」 and the one-line description appear with 「アプリを読み込んでいます…」; if loading takes more than 8 s the 30-秒 hint appears; then the sign-up screen replaces it with no blank flash.
-2. **Failure screen:** desktop Chrome → DevTools → Network → right-click any `www.gstatic.com/firebasejs/…` request → Block request domain → reload → after ≈ 30 s 「アプリを起動できませんでした」 with a focused 再読み込み button and the contact text (the address if `kOperatorContactEmail` was set). Unblock (Network request blocking panel) → 再読み込み → the app starts.
+2. **Failure screen** (the contact text is the fallback 「マイページ → お問い合わせ」 — Task 7 is not implemented, so the address is not mirrored): desktop Chrome → DevTools → Network → right-click any `www.gstatic.com/firebasejs/…` request → Block request domain → reload → after ≈ 30 s 「アプリを起動できませんでした」 with a focused 再読み込み button and the contact text (the address if `kOperatorContactEmail` was set). Unblock (Network request blocking panel) → 再読み込み → the app starts.
 3. **Console:** DevTools Console shows `[kyotohub] first frame N ms` (note N for phone and desktop: the first real-world numbers, R-1).
-4. **Fonts:** DevTools Network, filter `fonts.gstatic` on a cold load → only `notosansjp` (and one `roboto`) files, no `notosanssc` / `notosanshk`.
+4. **Fonts — ONLY WHEN TASK 6 IS IMPLEMENTED (skip otherwise; it is not in the implemented subset):** DevTools Network, filter `fonts.gstatic` on a cold load → only `notosansjp` (and one `roboto`) files, no `notosanssc` / `notosanshk`.
 5. **Returning visitor:** open the app on a device that used the app BEFORE this deploy (do not clear anything) → Network shows `main.dart.js?v=<number>` with status 200 and `MaterialIcons-Regular.otf` fetched; icons on マイページ / 教科書 render (no empty boxes). Reload → `main.dart.js?v=…` 304 (or "memory cache").
 6. **Links still work:** sign up a test account and use the verification e-mail link (it opens `kyodai-sns.firebaseapp.com/__/auth/action…`, unchanged), then 検証ステータスを更新する → onboarding; a bookmarked `https://kyodai-info.web.app/` and `https://kyodai-info.web.app/anything` open the app; an installed PWA (if any) still opens the app.
 7. **Landing:** `https://kyodai-info.web.app/about/` → readable page, no login; アプリを開く → the app (it opens faster after reading for ~15 s); DevTools Network on `/about/` shows prefetches of `main.dart.js?v=…` and `canvaskit.wasm` about a second after load (the Data Saver / 2G skip is covered by the static test; desktop DevTools cannot reliably emulate it).
@@ -2341,4 +2372,9 @@ Each is implemented as the ruling says and can be reversed cheaply (the "Cost if
 12. **D-1** no deferred loading (< 0.2 s possible gain).
 13. **X-1** manifest name/colours and the corrected meta description (no 教科書の貸借).
 14. **Deploy order A** — implement Plan 4 before the combined 2A + 2B + 3 deploy so step 8's reload instruction actually works (vs order B, Plan 4 later with testers clearing site data after the combined deploy).
+16. **No-cache everywhere (C-1) — cost and the cheaper alternative.** Every non-image file is revalidated on every load; measured in the lab: warm mobile first frame 4.45 → 5.21 s (+0.76 s on a 562 ms-RTT emulated link; production on a typical link is likely smaller, not measured). Cheaper alternative: because `main.dart.js` is now *always* requested as `?v=<build id>`, `/main.dart.js` alone could carry `max-age=31536000, immutable` (a new build is a new URL) and everything else stays `no-cache`; the saving is one 304 round trip per visit. Not adopted: it makes the check rule and the headers file more complex and the unversioned `/main.dart.js` (e.g. an old `/about/` prefetch or a hand-typed URL) would then be immutable-cached without the id.
+17. **60 s watchdog on very slow links.** A phone that needs more than 60 s for the first frame (a lab cold mobile load is ≈ 19 s; 3× margin) sees the failure screen, though the app may still start behind it (the first frame removes the screen, even after a failure was shown). Raise `FAIL_MS` if real timings (R-1) show slower loads.
+18. **iOS / Safari prefetch behaviour (P-1).** `<link rel=prefetch>` is honoured differently by iOS Safari (historically ignored or limited); on iOS the landing prefetch may simply not happen, which only costs the speed-up. Not tested on a device.
+19. **gstatic dependency.** In the production (CDN) build CanvasKit comes from `www.gstatic.com` and the Firebase JS SDK from `gstatic.com/firebasejs`; networks that block gstatic show the failure screen (S-1/S-2) rather than a blank page. Self-hosting CanvasKit (`--no-web-resources-cdn`, about 7 MB more on your own hosting) is the alternative; not adopted.
+20. **Tasks 6–8 deferred** pending the Next.js spike decision (Japanese font override, contact mirroring, final docs/AFTER numbers): until then the static pages show the fallback contact text only.
 15. **Search Console** — whether to register the site and submit the sitemap (needs the owner's Google account; not part of this plan).
