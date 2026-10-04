@@ -4293,4 +4293,9 @@ Each is implemented as the ruling says and can be reversed cheaply (the "Cost if
 15. **M-20** moderation identity = mailbox (a re-signup with the same address cannot reset caps or discredit).
 16. **M-7 / Task 5** at most 3 posts hidden at once per requester per day; the result is `{requestId, hidden, queued}`.
 17. **M-21** hide + re-upload no longer re-earns the upload credit.
-18. **Anonymous takedown pool exhaustion:** the 20/day unverified pool can be used up by anyone and the form then answers `resource-exhausted` with no fallback route. Recommended (NOT implemented): show a contact e-mail in that error, or add App Check.
+18. **Anonymous takedown pool exhaustion:** the 20/day unverified pool can be used up by anyone and the form then answers `resource-exhausted` with no fallback route. **DECIDED (owner): the error shows a contact e-mail** — one constant `kOperatorContactEmail` in `lib/config/contact.dart`, empty by default (then the error points to the お問い合わせ screen); the owner sets it before the release build. App Check is not added.
+19. **DECIDED (owner) — legacy points:** the old `users.points` / `transactions` are abandoned, discarded and not converted; everyone gets +3 credits at verification (existing verified users claim it automatically at their first login after the deploy).
+20. **DECIDED (owner) — existing posts:** the 5 production past-exam posts are reviewed by the owner before the storage migration; copyright-problematic ones are deleted with `moderate.mjs delete`, the rest are migrated.
+21. **DECIDED (owner) — no uploader reward for migrated posts:** the migration writes with Admin privileges and rewrites existing documents, so `onPostCreated` never fires and their uploaders earn no credit.
+22. **DECIDED (owner) — one-time in-app notice** 「ポイント制がクレジット制に変わりました」 at the first login after the deploy (flag `users/{uid}.policyNoticeV2SeenAt`, written by the client on the user's own doc).
+23. **DECIDED (owner) — M-6 immediate hide stays as is:** a verified KU student's takedown hides the post at once (capped, discreditable).

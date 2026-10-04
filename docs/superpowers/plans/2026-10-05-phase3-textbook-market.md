@@ -98,6 +98,14 @@ Round 1 fixes, implemented in `functions/` with tests (the code blocks in Tasks 
 - **Task 14 (`migrate_chats`) MUST** reset `lastMessageText`/`lastMessageAt`/`lastSenderId`, `lenderSent`/`borrowerSent` and every listingId-derived claim on EVERY room that existed before the deploy (not only rooms with a `messages` array): pre-deploy rooms were client-writable and must not be trusted — the fixture's `new1` room that keeps `listingId: 'L'` must be reset too, and pre-deploy rooms never unlock a rating until real post-deploy messages set the flags.
 - **Rulings:** T-17 now says "block by uid AND mailbox"; T-10 gains "rating refused once the other side's is 14 days old"; no new T-numbers.
 
+## Existing data decisions (owner, final)
+
+- **Legacy points are abandoned.** `users.points` and the old `transactions` ledger are not read, converted or migrated; the old points were discarded. Everyone gets **+3 credits** when verified, and existing verified users claim it automatically at their first login after the deploy (`claimWelcomeCredits`, once per mailbox).
+- **Migrated past exams earn their uploaders NO credit.** The storage migration rewrites existing `posts` documents with Admin privileges; it does not create documents, so `onPostCreated` (the only upload-credit path) never fires for them.
+- **Existing posts are reviewed first.** The 5 production past-exam posts are reviewed by the owner (Deploy step PRE-2) and any copyright-problematic ones are deleted with `moderate.mjs delete` before the storage migration.
+- **One-time in-app notice.** At the first login after the deploy a verified user sees 「ポイント制がクレジット制に変わりました」 once (old points ended and were not converted, +3 credits at registration/verification, 1 credit per download, link to the credit-rules dialog). The flag is `users/{uid}.policyNoticeV2SeenAt`, written by the client on the user's own document (the `users` rule allows the owner's write; `notifications` are Function-owned). Brand-new accounts are marked seen at creation. A failed flag write never blocks or loops (the notice stays closed for the session).
+- **Operator contact.** `lib/config/contact.dart` `kOperatorContactEmail` ships empty; set it before the release build (PRE checklist). Takedown form, daily pool exhausted: with an address the error shows 「こちらのメールからご連絡ください: <address>」 (selectable), without one 「お問い合わせ画面からご連絡ください」.
+
 ## File Structure
 
 **Created**
@@ -7770,8 +7778,18 @@ PRE. From the repo root (PowerShell): npm --prefix functions ci; npm --prefix fu
      bash tools/test_functions.sh ; bash tools/test_rules.sh ; bash tools/test_storage_rules.sh ;
      bash tools/test_migrate_storage.sh ; bash tools/test_backfill_course_stats.sh ; bash tools/test_moderate.sh ;
      bash tools/test_migrate_chats.sh ; flutter analyze ; flutter test
-     # expected: functions 220, rules 137, storage rules 9, flutter test 172, flutter analyze 21 issues,
+     # expected: functions 220, rules 138, storage rules 9, flutter test 181, flutter analyze 21 issues,
      # the other four tool suites exit 0.
+     # PRE-RELEASE CHECKLIST (before the `flutter build web --release` above): set kOperatorContactEmail in
+     # lib/config/contact.dart to the operator's real address (it ships EMPTY; empty = the takedown form's
+     # "daily limit reached" error points to the お問い合わせ screen instead of showing an e-mail).
+
+PRE-2. Review the 5 existing production past-exam posts BEFORE migrating anything (read-only until you decide):
+     list them (Firebase console -> Firestore -> posts, or `node moderate.mjs list --project kyodai-sns` for anything
+     already queued), open each file, and for any that is copyright-problematic delete it with
+       node moderate.mjs delete <postId> --project kyodai-sns --apply --operator <you>
+     (dry run first without --apply). Do this BEFORE step 5 (storage migration): a post deleted now is never copied
+     into the private bucket and never shown in the new app.
 
 0. (2A) Read-only audit before anything is deployed: in the Firebase console (Firestore -> requests) note docs
    with isFulfilled == true or fulfilledPostId set that no real fulfilment produced; clear the bogus ones
@@ -7948,3 +7966,13 @@ Each is implemented as the ruling says and can be reversed cheaply (the "Cost if
 20. **Listing photos (review item 7, left as is):** photos stay readable by `get` to any KU address after a listing is closed (only an operator removal deletes them); uploads are not bounded in count per user and photos that are never attached to a listing (orphans) are never cleaned up. Reversal: a cleanup tool / a per-user upload cap.
 21. **Legacy-room mailbox block fallback (review item 9, left as is):** for a room whose other party has no `market_identities` record the block falls back to the `uid:<uid>` key, so a re-signup of such a legacy user is not covered by the mailbox block.
 22. **Chats stay open after an operator hides a listing:** hiding or removing a listing does not close its existing rooms (the two parties may still finish the handoff); an operator uses `case-close` / account disabling for abuse.
+
+Owner answers (DECIDED, follow-up round 2):
+
+23. **DECIDED — legacy points discarded**, not converted; everyone gets +3 credits at verification (existing verified users automatically at the first login after the deploy).
+24. **DECIDED — existing posts reviewed, then migrated:** the 5 production past exams are reviewed first (Deploy step PRE-2); problematic ones are deleted before the migration.
+25. **DECIDED — no uploader reward** for migrated posts (Admin writes do not fire `onPostCreated`).
+26. **DECIDED — one-time in-app notice** 「ポイント制がクレジット制に変わりました」 (flag on the user's own doc).
+27. **DECIDED — contact e-mail in the takedown "daily limit" error** (`kOperatorContactEmail`, set before the release build; empty = point to お問い合わせ).
+28. **DECIDED — the 2B immediate hide stays as is** (a verified KU student's takedown hides at once; capped and discreditable).
+29. **DECIDED — listing photos after close and chats after an operator hides a listing stay as they are** (items 20 and 22 above are final).
