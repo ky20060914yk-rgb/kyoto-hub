@@ -1,0 +1,12 @@
+{
+  "name": "kyodai-info-perf",
+  "private": true,
+  "type": "module",
+  "description": "Lab-only web performance measurement and cache checks (Plan 4). Never deploys, never reads credentials.",
+  "dependencies": {
+    "chrome-launcher": "1.2.2",
+    "firebase": "12.19.0",
+    "lighthouse": "13.5.0",
+    "playwright-core": "1.56.1"
+  }
+}
