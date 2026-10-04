@@ -382,13 +382,34 @@ Measured numbers cited here come from the companion measurements doc (§1, lab c
    (replaces the assumed rate in A.1.6).
 6. Re-run the session hand-over (A.2.2) between the Part B prototype and the Flutter build.
 
-## Part B — measured prototype (to be added)
+## Part B — measured prototype
 
-Reserved for the Part B agent (built-and-measured Next.js prototype). Do not edit above this line
-except to correct Part A.
+Status: **in progress** (written in checkpoints; sections marked *pending* are not measured yet).
+Every number in Part B was measured in this session unless labelled **estimate** (with basis) or
+**cited** (from the companion doc). Numbers from earlier, lost attempts were not reused.
 
-Note for Part B: the session scratchpad holds leftovers of the earlier, lost attempts (`spike/next-spike` — Next
-16.3.8 + firebase 12.19.0 prototype, `spike/flutter-emu` — emulator-pointed Flutter build, `spike/results/*.json`,
-`spike/NOTES.md`). Part A did **not** verify or use any of those numbers; treat them as unconfirmed and re-measure.
-The A.2.2 hand-over test is `cut/cutover.mjs` in the same scratchpad
-(`node cutover.mjs <flutter build/web>` with Auth + Firestore emulators on 9099/8080, project `demo-spike`).
+### B.0 Summary — *pending*
+
+### B.1 Prototype and conditions — *pending*
+
+### B.2 JS bytes and requests (login, heavy signed-in screen) — *pending*
+
+### B.3 Cold/warm load: Lighthouse and applied throttling vs Flutter — *pending*
+
+### B.4 Returning signed-in user: time to the signed-in screen with data — *pending*
+
+### B.5 Google auth iframe: `getAuth()` vs `initializeAuth` without resolver — *pending*
+
+### B.6 Static export vs server-rendered build — *pending*
+
+### B.7 Bundle growth per screen-equivalent (extrapolation) and porting one real screen — *pending*
+
+### B.8 Session hand-over prototype ↔ Flutter build — *pending*
+
+### B.9 Side-by-side table with comparability caveats — *pending*
+
+### B.10 Decision framework, thresholds, recommendation — *pending*
+
+### B.11 Limits — *pending*
+
+### B.12 Reproduction — *pending*
