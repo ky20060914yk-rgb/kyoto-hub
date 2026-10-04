@@ -134,7 +134,133 @@ Part B's prototype (if it ports one real screen) is the cheapest way to replace 
 
 ## Part A.2 — Auth cutover
 
-(in progress)
+Question: if `kyodai-info.web.app` switched from the Flutter build to a Next.js client using the Firebase
+JS SDK (same Firebase project, same origin), would signed-in users stay signed in?
+
+**Answer: yes, provided the new client uses the default app name, the same web `apiKey`, local
+(IndexedDB/localStorage) persistence and a JS SDK that reads the same record. Verified both in source and
+in a browser test against the Auth emulator, including with the real Flutter build, in both directions.**
+
+### A.2.1 Where Flutter web stores the session [verified-code]
+
+1. FlutterFire web does not have its own auth implementation. `firebase_auth_web 6.2.5` (pubspec.lock)
+   creates the Auth instance with the JS SDK's `initializeAuth`, passing persistence
+   `[indexedDBLocalPersistence, browserLocalPersistence, browserSessionPersistence]` plus
+   `browserPopupRedirectResolver` and `debugErrorMap`
+   (`~/.pub-cache/hosted/pub.dev/firebase_auth_web-6.2.5/lib/src/interop/auth.dart:22-38`).
+2. The JS SDK it loads is 12.19.0 (`firebase_core_web 3.12.0`, `firebase_sdk_version.dart:9`), fetched from
+   `www.gstatic.com/firebasejs/12.19.0/` and exposed as `window.firebase_core`, `window.firebase_auth`, …
+   (`firebase_core_web.dart:220-240`).
+3. The app is the default app: `Firebase.initializeApp(options: …)` without `name` (`lib/main.dart:21`) →
+   `[DEFAULT]` (`firebase_core_web.dart:333`).
+4. The app never calls `setPersistence` (`grep -rn setPersistence lib/` → none).
+5. In the JS SDK (`firebase 12.19.0` → `@firebase/auth 1.13.6`, installed at `tools/perf/node_modules`):
+   - record key = `firebase:authUser:<apiKey>:<appName>` (`_persistenceKeyName`, `dist/esm/index-4NFEPWkC.js:2080`);
+   - IndexedDB database `firebaseLocalStorageDb`, object store `firebaseLocalStorage`, key path `fbase_key` (`:8215-8218`);
+   - `getAuth()` — what a Next.js client normally calls — uses **exactly the same hierarchy**
+     `[indexedDBLocalPersistence, browserLocalPersistence, browserSessionPersistence]` with
+     `browserPopupRedirectResolver` (`:11262-11274`);
+   - on start, `PersistenceUserManager.create` looks for the key in *every* persistence of the hierarchy and
+     migrates a found user to the preferred one (`:2139-2199`), so even a different order would still find it.
+
+So the stored session is `IndexedDB firebaseLocalStorageDb / firebaseLocalStorage / "firebase:authUser:<web apiKey>:[DEFAULT]"`,
+on the origin `https://kyodai-info.web.app` (storage is per *app origin*; `authDomain`
+`kyodai-sns.firebaseapp.com` plays no part in where the session is kept).
+
+### A.2.2 Browser test [verified-test]
+
+Script: scratchpad `cut/cutover.mjs` (not committed; ~120 lines). Auth + Firestore emulators
+(`firebase emulators:start --only auth,firestore --project demo-spike`, open rules, scratch config),
+one local origin serving (a) the Flutter release build of a **scratch copy** of `7abb8fb` whose only changes are
+emulator wiring, demo config (`apiKey 'demo-key'`), an optional `?autologin=1` that calls Dart
+`FirebaseAuth.instance.signInWithEmailAndPassword`, and a `signed-in-frame` event fired after
+`NavigationRootScreen` builds; (b) JS-SDK test pages; (c) the CDN builds of the SDK from the npm package
+(the sandbox blocks `www.gstatic.com`, so `main.dart.js`'s SDK URL is rewritten to the same files served
+locally). Chromium 141 headless (`/opt/pw-browsers/chromium-1194`), fresh browser context per case.
+
+| # | Page 1 (signs in) | Page 2 (fresh load, same origin, same context) | Session carried? |
+|---|---|---|---|
+| 1 | JS 12.19.0, `initializeAuth` with FlutterFire's exact options | JS 12.19.0 `getAuth()` (Next-style) | **yes** |
+| 2 | JS 12.19.0 `getAuth()` | JS 12.19.0 FlutterFire-style `initializeAuth` (rollback direction) | **yes** |
+| 3 | JS 12.19.0 FlutterFire-style | JS **11.10.0** `getAuth()` (older major, from `firestore-tests/node_modules`) | **yes** |
+| 4 | JS 12.19.0 FlutterFire-style | JS 12.19.0 `getAuth()` on an app named `web` instead of `[DEFAULT]` | **no** (expected) |
+| 5 | JS 12.19.0 with `setPersistence(browserSessionPersistence)` | new tab, `getAuth()` | **no** (expected; nothing written to IndexedDB) |
+| 6 | JS 12.19.0 `getAuth()` | **real Flutter build**: `window.firebase_auth.getAuth(getApp()).currentUser` | **yes** |
+| 7 | JS 12.19.0 `getAuth()` (user has a `users/{uid}` profile) | **real Flutter build**: Dart `AppStore` reaches `NavigationRootScreen` without any login typed | **yes** |
+| 8 | **real Flutter build**, Dart sign-in (`?autologin=1`) | JS 12.19.0 `getAuth()` | **yes** |
+
+IndexedDB keys after every local-persistence sign-in, Flutter included: exactly
+`["firebase:authUser:demo-key:[DEFAULT]"]`. The only localStorage key the Flutter build left was
+`kyotohub.build` (Plan 4 cache busting) — the session is not in localStorage.
+
+Limits of this test: emulator, not production Auth; Chromium only (no Safari/iOS, where ITP storage
+eviction applies to both clients equally and was not tested); one SDK pair per direction. Case 7 needs the
+user's `users/{uid}` document — the Flutter `AppStore` only treats a user as signed in when the profile
+exists (`app_store.dart:240-252`). An earlier, lost attempt of this spike recorded a failure for the
+Next→Flutter direction; it was not reproduced here, and its cause is unknown (missing profile is one
+possibility) — **[unverified]**.
+
+### A.2.3 What could break the hand-over
+
+| Cause | Effect | Status |
+|---|---|---|
+| Different app name (`initializeApp(cfg, 'web')`) | different key → signed out | verified (case 4) |
+| Different web `apiKey` (e.g. a new Web App registered in the console) | different key → signed out | verified by key format in source; use the **same** web app config |
+| `setPersistence(browserSessionPersistence / inMemoryPersistence)` or `initializeAuth` with session-only persistence | nothing in IndexedDB → signed out on next visit | verified (case 5) |
+| Different origin (e.g. Next on `kyodai-info-next.web.app` or a custom domain) | storage is per origin → signed out; also needs Auth authorized domain | follows from browser storage rules; not tested |
+| SDK major-version change | record is the serialised `UserImpl`; 11↔12 worked (case 3); 9/10 or a future 13 not tested | partly verified |
+| `authDomain` change | does not affect stored session; affects only popup/redirect and action links | source reasoning |
+| Server-side rendering expecting the user | the session is in IndexedDB, **invisible to the server**; SSR of signed-in pages needs a cookie (JS SDK has an experimental `authTokenSyncURL` hook in `getAuth`, `:11275-11286`, or Admin-SDK session cookies) | verified that no cookie exists today |
+| Firestore offline cache | Flutter uses `persistentLocalCache` single-tab (A.1.4). The JS SDK error text says shared access needs multi-tab enabled "in all tabs" (`@firebase/firestore 4.17.2`). During cutover a still-open Flutter tab and a new Next tab may contend for the cache lease; what each app then shows was **not tested**. Cached data is a cache — losing it costs one catalog re-read, not data | [unverified] |
+
+### A.2.4 E-mail verification and e-mail-link URLs [verified-code]
+
+- Verification mail: `sendEmailVerification()` **without ActionCodeSettings** (`app_store.dart:349,460`) → the link
+  points at Firebase's default action handler on `kyodai-sns.firebaseapp.com`, not at a hosting path. The app
+  learns about it only through `checkEmailVerification()` (`reload()` + `getIdToken(true)`). **Unaffected by
+  the framework switch**, including mails sent before the cutover. (Whether a custom action URL is set in the
+  Firebase console template cannot be seen from the repo — check once in the console.)
+- E-mail-link sign-in: only the receiving branch exists and it can never succeed (no sender; stored e-mail is
+  only ever set to `''`). A Next.js port can drop it; if kept, every route must leave `?mode=…&oobCode=…`
+  intact (Plan 4 kept `/?mode=signIn&oobCode=…` serving the app).
+- Password reset: not implemented in `lib/` (no `sendPasswordResetEmail`).
+
+### A.2.5 PWA manifest and service worker [verified-code]
+
+- `web/manifest.json`: `start_url: "."`, `display: standalone`, scope implicit `/`. A Next.js export can ship the
+  same file (same URL `/manifest.json`), so installed home-screen icons keep working.
+- Flutter's `flutter_service_worker.js` (in `build/web`) is a **self-unregistering stub** (install → skipWaiting;
+  activate → `registration.unregister()` + navigate clients). Browsers that ever registered it will re-fetch it on
+  update checks. **Keep serving this exact stub at `/flutter_service_worker.js` after the cutover** (cheap); if the
+  file 404s, the old registration simply stays registered without fetch handlers. Whether an older, *caching*
+  Flutter service worker was ever deployed to real users is not knowable from the repo [unverified].
+- Today `firebase.json` sends `Cache-Control: no-cache` for everything and one day for PNGs; Plan 4 notes that
+  older deploys cached files as `immutable` for a year. Next.js hashed `/_next/static/*` names are new URLs, so
+  old cached Flutter files cannot be served for them; `index.html` revalidates.
+
+### A.2.6 Hosting options for Next.js [source reasoning; product facts not re-checked online]
+
+| Option | How | Implications |
+|---|---|---|
+| **Static export** (`output: 'export'`) on the existing Hosting site | `public: out/`; `trailingSlash: true`; client-side auth guard; dynamic routes such as `/course/[id]` either pre-generated (`generateStaticParams`, e.g. from `tools/courses.json`, ~10k pages) or one shell page + a Hosting rewrite (`/course/** → /course/_/index.html`) | no server, no new cost, same deploy as today (`firebase deploy --only hosting`); no SSR, no per-request data; the closest match to today's architecture |
+| **Server-rendered** Next.js | Firebase Hosting framework integration (deploys SSR into a Cloud Function) or Firebase App Hosting / Cloud Run behind Hosting | every dynamic request runs server code: Blaze billing per request/instance-time, cold starts, a region choice (functions here are `asia-east1`), Node runtime upgrades, a second deploy pipeline; useful only for content the server can render **without** the user's session (see A.2.3) |
+
+The project already deploys Cloud Functions (v2 `onCall` / Firestore triggers in `functions/src/index.ts`), which
+Firebase only allows on the Blaze plan, so Blaze is presumably active [inferred, not checked in the console].
+
+### A.2.7 Must be re-verified after a cutover
+
+1. Returning signed-in user lands signed in (desktop Chrome, Android Chrome, **iOS Safari**, installed PWA).
+2. Sign-up → verification mail → "verified" check → `claimWelcomeCredits` grants 3 credits; rules see `email_verified`.
+3. Logout actually signs out (today it does not — decide and test).
+4. Every callable in `asia-east1` with its error mapping (`functions/<code>` prefix in JS, verified in
+   `@firebase/functions 0.14.0`: `super(\`${FUNCTIONS_TYPE}/${code}\`)`).
+5. Uploads to `resources/` and `listings/` paths accepted by `storage.rules`; signed-URL download starts without a popup block.
+6. Chat: live window, older pages, read markers, Japanese IME Enter behaviour.
+7. Catalog cache: second visit does not re-read ~10k `courses` from the server (`meta/catalog` check).
+8. Policy notice shows once; onboarding for new users.
+9. `/about/`, `robots.txt`, `sitemap.xml`, OG image, deep paths and query strings; `/flutter_service_worker.js` stub still served.
+10. Rollback: re-deploying the Flutter build keeps sessions (case 2/7 above) — rehearse it.
 
 ## Part A.3 — Risks: migrate before vs after 2A/2B/3, cutover plan outline
 
