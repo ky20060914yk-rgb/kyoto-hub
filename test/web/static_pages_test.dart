@@ -1,5 +1,6 @@
 // Static, crawler-facing web files (Plan 4). These run on the VM with dart:io:
 // they read files in web/ and firebase.json; they never build or serve anything.
+import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
 
@@ -25,10 +26,12 @@ void main() {
     expect(index, contains('<script src="flutter_bootstrap.js" async onerror="window.kyotoHubBootFailed(\'bootstrap\')"></script>'));
   });
 
-  test('flutter_bootstrap.js template keeps the stock tokens and reports failures', () {
+  test('flutter_bootstrap.js template: stock tokens, per-build URL, asset refresh, failure reports', () {
     final boot = read('web/flutter_bootstrap.js');
     expect(boot, startsWith('{{flutter_js}}\n{{flutter_build_config}}\n'));
-    expect(boot, contains('serviceWorkerVersion: {{flutter_service_worker_version}}'));
+    expect(boot, contains('var kyotoHubBuild = {{flutter_service_worker_version}};'));
+    expect(boot, contains("b.mainJsPath += '?v=' + encodeURIComponent(build);"), reason: 'C-2: a new URL per build');
+    expect(boot, contains("fetch(path, { cache: 'reload' })"), reason: 'C-2: refresh assets cached as immutable');
     expect(boot, contains("window.kyotoHubBootFailed('engine')"));
     expect(boot, contains("window.kyotoHubBootFailed('loader')"));
   });
@@ -54,5 +57,20 @@ void main() {
     expect(bytes.sublist(0, 8), [137, 80, 78, 71, 13, 10, 26, 10]);
     final ihdr = ByteData.sublistView(Uint8List.fromList(bytes), 16, 24);
     expect([ihdr.getUint32(0), ihdr.getUint32(4)], [1200, 630]);
+  });
+
+  test('C-1: firebase.json revalidates everything except images; nothing is immutable', () {
+    final hosting = (jsonDecode(read('firebase.json')) as Map<String, dynamic>)['hosting'] as Map<String, dynamic>;
+    final rules = {
+      for (final h in (hosting['headers'] as List).cast<Map<String, dynamic>>())
+        h['source'] as String: {
+          for (final kv in (h['headers'] as List).cast<Map<String, dynamic>>()) kv['key']: kv['value'],
+        },
+    };
+    expect(rules, {
+      '**': {'Cache-Control': 'no-cache'},
+      '**/*.png': {'Cache-Control': 'public, max-age=86400'},
+    });
+    expect(read('firebase.json').contains('immutable'), isFalse);
   });
 }

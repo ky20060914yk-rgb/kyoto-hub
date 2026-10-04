@@ -30,20 +30,20 @@
     ],
     "headers": [
       {
-        "source": "**/!(index.html|flutter_bootstrap.js|flutter_service_worker.js)",
+        "source": "**",
         "headers": [
           {
             "key": "Cache-Control",
-            "value": "max-age=31536000, immutable"
+            "value": "no-cache"
           }
         ]
       },
       {
-        "source": "@(index.html|flutter_bootstrap.js|flutter_service_worker.js)",
+        "source": "**/*.png",
         "headers": [
           {
             "key": "Cache-Control",
-            "value": "max-age=0, no-cache, no-store, must-revalidate"
+            "value": "public, max-age=86400"
           }
         ]
       }

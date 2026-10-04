@@ -113,8 +113,9 @@
           var m = /_flutter\.buildConfig\s*=\s*(\{.*?\});/.exec(src);
           if (!m) return;
           var cfg = JSON.parse(m[1]);
+          var id = /kyotoHubBuild = "([^"]*)"/.exec(src); // C-2: the app loads main.dart.js?v=<build id>
           var js = (cfg.builds || []).filter(function (b) { return b.compileTarget === 'dart2js'; })[0];
-          if (js && js.mainJsPath) hint('/' + js.mainJsPath, false);
+          if (js && js.mainJsPath) hint('/' + js.mainJsPath + (id ? '?v=' + encodeURIComponent(id[1]) : ''), false);
           // Same choice as flutter.js: the "chromium" CanvasKit on Blink with
           // ImageDecoder + Intl.v8BreakIterator + Intl.Segmenter, else the full one.
           var blink = navigator.vendor === 'Google Inc.' || navigator.userAgent.indexOf('Edg/') >= 0;
