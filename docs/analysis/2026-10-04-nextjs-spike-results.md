@@ -491,7 +491,32 @@ Flutter accepts input about 1 s (mobile) / 0.4 s (desktop) after its first frame
 rAF+timeout and so lands ~50 ms *after* the first accepted tap. LCP from these runs is not reported: the browser stops
 LCP at the first input, and the probe taps from t=0 (Lighthouse LCP below).
 
-**Lighthouse 13.5 (simulated throttling)** — *pending in this checkpoint*.
+**Lighthouse 13.5 (simulated throttling; mobile = default preset incl. its mobile UA, desktop = `desktop-config`)**, login
+page `/`, 3 runs, each a fresh Chrome: cold, then warm with `disableStorageReset` (`partb/tools/lh.mjs`):
+
+| Target | Preset | Load | Score | FCP | LCP | TBT | Speed Index | TTI | Transfer | Requests |
+|---|---|---|---:|---:|---:|---:|---:|---:|---:|---:|
+| Flutter | mobile | cold | 66 (66–66) | 673 (671–867) | 814* (801–1,409) | 2,819 (2,616–2,961) | 5,691 (5,667–5,717) | 14,803 (14,490–15,234) | 3,007 KiB | 41 |
+| Flutter | mobile | warm | 71 (71–71) | 664 (658–668) | 806* (806–861) | 2,730 (2,664–2,837) | 2,455 (2,388–2,467) | 4,434 (4,269–4,437) | 4 KiB | 33 |
+| Next `getAuth` | mobile | cold | 99 (99–99) | 751 (751–753) | 2,002 (1,651–2,120) | 67 (53–67) | 751 (751–753) | 2,270 (2,002–2,368) | 189 KiB | 17 |
+| Next `getAuth` | mobile | warm | 100 | 689 (670–705) | 689 (670–738) | 0 (0–9) | 689 (670–705) | 738 (670–750) | 1 KiB | 16 |
+| Next no resolver | mobile | cold | 99 (99–99) | 751 (751–752) | 2,106 (1,951–2,108) | 60 (39–64) | 751 (751–752) | 2,106 (1,951–2,258) | 186 KiB | 16 |
+| Next no resolver | mobile | warm | 100 | 695 (688–715) | 715 (695–737) | 3 (1–6) | 695 (688–715) | 743 (726–770) | 1 KiB | 15 |
+| Flutter | desktop | cold | 77 (77–78) | 185 (182–231) | 295* (257–380) | 456 (435–461) | 1,804 (1,784–1,813) | 2,685 (2,681–2,720) | 3,007 KiB | 40 |
+| Flutter | desktop | warm | 79 (77–79) | 209 (209–217) | 284* (256–309) | 478 (478–535) | 990 (959–1,060) | 1,177 (1,168–1,255) | 4 KiB | 32 |
+| Next `getAuth` | desktop | cold | 100 | 205 (202–209) | 477 (471–479) | 0 | 205 (202–209) | 477 (471–479) | 189 KiB | 16 |
+| Next `getAuth` | desktop | warm | 100 | 194 (193–197) | 207 (206–209) | 0 | 194 (193–197) | 207 (206–209) | 1 KiB | 15 |
+| Next no resolver | desktop | cold | 100 | 203 (201–204) | 485 (484–497) | 0 | 203 (201–204) | 485 (484–497) | 186 KiB | 16 |
+| Next no resolver | desktop | warm | 100 | 197 (195–204) | 211 (209–226) | 0 | 197 (195–204) | 211 (209–226) | 1 KiB | 15 |
+
+\* Flutter's FCP/LCP time the Plan 4 HTML start screen, not the app (as in the companion doc); its TBT, Speed Index and
+TTI are the meaningful columns. Every Flutter run carried "page loaded too slowly to finish within the time limit"
+(open Firestore channel). A first Flutter series (`lh-flutter.json`) was **discarded**: the Auth emulator's
+"Running in emulator mode" banner (added to the DOM by `connectAuthEmulator` without `disableWarnings`) became the
+mobile LCP element at ~15.7 s; the rerun hides that banner with CSS in the scratch build (production has no banner;
+the Next prototype passes `disableWarnings`). Lighthouse's warm "JS bootup" values for Next were implausible (~4 s
+with ~1 KiB transferred) and are not used. The Flutter numbers reproduce the companion doc's (score 0.65, TBT 3.4 s,
+SI 6.5 s, TTI 13.8 s) within run-to-run spread for TBT/SI/TTI.
 
 ### B.4 Returning signed-in user: time to the signed-in screen with data
 
