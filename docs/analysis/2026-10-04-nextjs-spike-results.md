@@ -700,10 +700,129 @@ signs every existing user out at the cutover. `PersistenceUserManager.create` on
 given (A.2.1 item 5). The safe choice for dropping the iframe is therefore case 2's full list without the resolver,
 not "only `browserLocalPersistence`". Limits as in A.2.2 (emulator, Chromium only, no Safari/iOS ITP eviction).
 
-### B.9 Side-by-side table with comparability caveats — *pending*
+### B.9 Side-by-side table with comparability caveats
 
-### B.10 Decision framework, thresholds, recommendation — *pending*
+Lab values, this sandbox, median of 3 (ranges in B.2–B.8). Flutter = `7abb8fb` release build (emulator copy);
+Next = the B.1 prototype, static export, `getAuth()` unless noted. Mobile = slow-4G-like applied throttling + CPU ×4 + mobile UA.
 
-### B.11 Limits — *pending*
+| # | Metric | Flutter | Next.js prototype | Ratio | Comparability caveats |
+|---|---|---:|---:|---:|---|
+| 1 | Login JS, brotli (raw) | 996 KB (4.54 MB) + wasm engine 1.61 MB (5.69 MB) | 151 KB (585 KB) | 6.6× JS; ~17× incl. wasm | Flutter's bundle holds every screen + the whole Firebase SDK; Next's holds the login route only (signed-in routes are separate) |
+| 2 | Login transfer / requests, cold | 3,004 KiB / 39 | 189 KiB / 17 | 16× | Flutter fetches 434 KiB of CJK fallback fonts (14 req); Next uses system fonts (none downloaded) — real phones' Japanese system fonts not checked |
+| 3 | Mobile cold: **first input accepted** | 19,909 ms | 2,246 ms | 8.9× | different events (Flutter: tap focuses field; Next: click handler ran); Flutter first frame 18,957 ms; Next HTML (FCP) 1,372 ms and its native inputs accept typing before hydration |
+| 4 | Mobile warm: first input accepted | 6,253 ms | 1,314 ms | 4.8× | same as 3; warm = HTTP cache only (no service worker in either) |
+| 5 | Desktop cold / warm: first input accepted | 3,345 / 1,324 ms | 312 / 224 ms | 10.7× / 5.9× | same as 3 |
+| 6 | Lighthouse mobile cold: score / TBT / Speed Index / TTI | 66 / 2,819 / 5,691 / 14,803 | 99 / 67 / 751 / 2,270 | — | Flutter FCP/LCP (673/814) time its HTML start screen, not the app; Lantern simulation; Flutter runs never reached network idle |
+| 7 | Signed-in heavy screen: JS brotli / total transfer (cache cleared) | 996 KB / 3,630 KiB | 317 KB / 352 KiB | 3.1× / 10× | Next figure includes the login route (returning users land on `/`) and the Firestore SDK |
+| 8 | Returning user, mobile warm: auth ready (Next) / signed-in shell frame (Flutter) | 10,666 ms | 1,862 ms | 5.7× | closest framework-to-framework comparison of the signed-in start |
+| 9 | Returning user, mobile warm / cache-cleared: **list with data on screen** | 27,410 / 39,298 ms | 3,170 / 6,207 ms | 8.6× / 6.3× | **not like for like**: Flutter's `AppStore` opens ~13 listeners serially before the market query; the prototype opens 2. A full port with the same subscriptions would pay much of that (Firestore work, A.4.1). Emulator on localhost |
+| 10 | Returning user, desktop warm: list on screen | 5,866 ms | 479 ms | 12× | as 9 |
+| 11 | Google auth iframe on mobile (api.js answered after a 3 s stand-in delay) | first frame +3.2 s (cannot be removed without patching FlutterFire) | login +0; auth ready +3.1 s with `getAuth()`, **+0 with `initializeAuth` without resolver** | — | stand-in delay, not Google's real script cost (unmeasured: apis.google.com blocked) |
+| 12 | Session hand-over on one origin (deploy swap) | — | carried Flutter→Next and Next→Flutter (and back) | — | **fails** if Next's persistence list lacks `indexedDBLocalPersistence`; emulator, Chromium only |
+| 13 | Growth with more screens | one bundle, every page | +6.4 KB br JS per screen-equivalent; login page flat at 151 KB | — | synthetic copies of real ported screens; extrapolation |
+| 14 | Server-rendered build vs static | n/a | no earlier paint; +0.24 s cold (gzip vs brotli) | — | localhost Node; Cloud Run cold starts not measured |
 
-### B.12 Reproduction — *pending*
+### B.10 Decision framework, thresholds, recommendation
+
+**What the measurements settle.**
+1. *Technical feasibility and safety*: a Next.js client on the same origin keeps every signed-in user signed in, both
+   ways, including a rollback (B.8), as long as it keeps the default app name, the web `apiKey` and IndexedDB in its
+   persistence list. The prototype talks to the real rules and callables unchanged (B.1).
+2. *Size of the gain, in the lab*: on the throttled mobile profile the login form accepts input **~9× sooner cold
+   (19.9 → 2.2 s) and ~5× sooner warm (6.3 → 1.3 s)**; ~16× fewer bytes; a returning user's signed-in start is ~6×
+   sooner (10.7 → 1.9 s to shell/auth). Ratios are more trustworthy than the absolute seconds (companion §2).
+3. *The gain does not decay as screens are added* if routes are split (B.7): +6.4 KB br per screen, login flat.
+4. *A server is not needed* and does not help for login-gated screens (B.6): static export on the existing Hosting site.
+5. *Not framework-bound*: a large part of the signed-in "data on screen" time is the app's own Firestore start-up
+   (B.4); a port would inherit it unless `AppStore`'s subscriptions are reorganised (possible in either framework).
+
+**What the measurements cannot settle**: what real Kyoto students on real phones and networks experience (the lab's
+CPU ×4 is relative to a fast host; no iOS/Safari; no production Firebase latency), how often their loads are cold, and
+how many leave during the wait. Those decide whether ~25–90 developer-days (A.1.6) are worth spending.
+
+**Thresholds** (judgement anchored on the measured numbers; the RUM fields are listed below):
+
+| Production RUM, mobile, ≥ 2 weeks after 2A/2B/3 + Plan 4 are live | Decision |
+|---|---|
+| p75 **cold** first frame ≥ 8 s **and** cold loads ≥ 25% of mobile loads; **or** ≥ 10% of cold loads end before the first frame; **or** p75 **warm** first frame ≥ 4 s | **Migrate** (static export, after 2A/2B/3, A.3.4 plan). Basis: Flutter-side options measured so far reach only 17.7 s cold / 2.8 s warm in the lab (wasm, companion §6), the prototype 2.2 s / 1.3 s; at ≥ 8 s real cold, the lab ratio (~9×) predicts ~1 s for the Next client |
+| p75 cold first frame ≤ 5 s **and** p75 warm ≤ 2.5 s, or cold loads < 10% | **Do not migrate**; apply the cheap Flutter options (wasm build, a bundled JP font, the HTML/JS login front below) |
+| in between | do the cheap options first, re-measure the same RUM for 2 weeks, then apply this table again |
+
+Effort qualifier: at the low end of A.1.6 (~25–40 days, plausible if an agent writes most code and the cost is
+review + tests, B.7) one "migrate" row suffices; at the high end (60–90 days) require two of them, or a product decision
+to publish content (A.4), which only a DOM/Next client can serve to crawlers.
+
+**Real-user timing that is needed** (none of it exists yet; Plan 4 already emits `flutter-first-frame` and
+`performance.mark('kyotohub-first-frame')`, but only logs locally, R-1):
+1. `first_frame_ms` per load, with: cold vs warm (`transferSize` of `main.dart.js` > 0 → cold), `navigator.userAgent`
+   class (iOS Safari / Android Chrome / desktop), `navigator.connection.effectiveType`, `deviceMemory`, installed PWA or not;
+2. a beacon on `pagehide` before the first frame (start-screen abandonment rate);
+3. `signed_in_shell_ms` (the `signed-in-frame` mark used here) and time to first data on the landing tab;
+4. the auth start-up share on phones: time from `Firebase.initializeApp` start to its completion (the gapi/iframe wait, B.5);
+p50/p75/p95 per segment; Firebase Performance Monitoring or a small `web-vitals`-style beacon to a Function would do.
+
+**Recommendation that follows from the data.** Do **not** start the rewrite now and do **not** migrate *before*
+2A/2B/3 (Part A.3 still holds: the backend change ships first, with the tested Flutter client). The lab data makes a
+later migration look **technically safe and clearly faster**, but its value depends on real-user numbers that do not
+exist; collect items 1–4 for two weeks after 2A/2B/3, then apply the thresholds. Meanwhile one option is now better
+supported than before: an **HTML/JS login front in front of the Flutter app** — B.8 shows a JS-SDK sign-in and the
+Flutter app share the session on one origin, and B.3 shows such a page accepts input at ~2.2 s cold on mobile while
+Flutter could be prefetched behind it (companion §6: 8.4 s instead of 18.9 s after a 15 s dwell). That combination was
+**not measured end to end** and would be the next experiment if the RUM lands in the middle band.
+
+### B.11 Limits
+
+- **Lab only**: one sandbox host (4 vCPU), Chromium 141 headless, emulated network and CPU ×4 relative to this host;
+  localhost HTTP/1.1 server instead of Hosting's CDN/HTTP2-3; no real phone, **no iOS/Safari/WebKit**.
+- **Emulators, not production**: Auth/Firestore/Functions/Storage emulators on localhost (throttled like everything
+  else); production Firestore/Auth latency from Japan unmeasured. Firestore triggers not emulated.
+- **Google auth iframe** unmeasured in its real form (`apis.google.com` denied); B.5 uses a 3 s stand-in delay to test
+  gating only. Sandbox gstatic block → same-origin SDK stand-in for Flutter (as the companion doc).
+- **Prototype scope**: 7 of 20 screen files, partial (market: さがす tab only; course: review tab only; no review form);
+  the signed-in "data on screen" comparison is not like for like (B.4). No tests ported.
+- **Flutter scratch build** differs from production by emulator wiring, two lab events, `?tab=market`, an Auth-emulator
+  shim (B.4) and a CSS rule hiding the emulator banner; the unchanged repo tool gave the same first frame within 1%.
+- **Metric mismatch**: "first input accepted" is a handler run in Next and a focus change in Flutter (B.3); LCP was
+  taken from Lighthouse only (taps cut LCP in applied runs). Lighthouse's warm JS-bootup values for Next were discarded.
+- **Runs**: 3 per configuration; ranges are min–max of 3, not confidence intervals. Measurements ran one at a time;
+  the emulators idled in the background (< 2% CPU); load averages printed before runs reflect the preceding run.
+  The emulators were restarted once (2 h background limit) and reseeded; B.6–B.8 ran on the reseeded data.
+- **Porting time** is one AI-agent data point; it does not measure a human developer (B.7).
+- **Production contact**: see B.1 disclosure (unauthenticated pre-auth Firestore listens from 2 smoke runs + 1 probe,
+  and 1 rejected `accounts:lookup` with a fake key). No credentials, no writes, no deploys.
+
+### B.12 Reproduction
+
+Everything lives in the session scratchpad `partb/` (not committed). Versions: Node 22.22.0, firebase-tools 15.32.1,
+Flutter 3.41.9, Next 16.3.8, React 19.3.0, firebase 12.19.0, Lighthouse 13.5.0 / playwright-core 1.56.1 (from `tools/perf`).
+
+```bash
+S=<scratchpad>/partb
+# Flutter comparison build (scratch copy of 7abb8fb + emulator wiring + lab events, B.1)
+git archive 7abb8fb | tar -x -C $S/flutter-emu      # then apply the B.1 edits to lib/main.dart, navigation_root_screen.dart, market_screen.dart
+(cd $S/flutter-emu && flutter build web --release --no-web-resources-cdn)
+sed -i 's#</head>#<style>.firebase-emulator-warning{display:none!important}</style></head>#' $S/flutter-emu/build/web/index.html
+# emulators: repo rules/indexes + functions/src compiled (callables only), demo project
+(cd $S/emu && firebase emulators:start --project demo-spike) &
+node $S/tools/seed.mjs && node $S/tools/seed_course.mjs
+# Next prototype: export per auth variant, server builds
+(cd $S/app && npm install)
+$S/tools/build.sh getauth export-getauth; $S/tools/build.sh noresolver export-noresolver; $S/tools/build.sh localonly export-localonly
+$S/tools/build.sh getauth server-getauth server      # + a copy with `export const dynamic = "force-dynamic"` in app/layout.tsx -> server-dynamic
+export CHROME_HOME=$S/chromehome                     # NSS db trusting /root/.ccr/agent-proxy-ca.crt (certutil -A ... -t C,,)
+cd $S/tools
+node login.mjs --target flutter --dir $S/flutter-emu/build/web --fbjson /home/user/kyoto-hub/firebase.json --sdk --out ../results/login-flutter2.json
+node login.mjs --target next --dir $S/builds/export-getauth --fbjson $S/hosting-next.json --out ../results/login-next-getauth.json
+node signedin.mjs --target flutter --dir $S/flutter-emu/build/web --fbjson /home/user/kyoto-hub/firebase.json --sdkdir $S/sdk-emu --out ../results/signedin-flutter2.json
+node signedin.mjs --target next --dir $S/builds/export-getauth --fbjson $S/hosting-next.json --out ../results/signedin-next-getauth.json
+node signedin.mjs --target next --dir $S/builds/export-getauth --fbjson $S/hosting-next.json --profiles mobile --gapi delay:3000   # B.5
+node login.mjs --target flutter ... --profiles mobile --gapi delay:3000      # and --gapi block as the control
+node lh.mjs --dir <build> --firebase-json <firebase.json> [--sandbox-sdk]     # Lighthouse cold+warm, mobile+desktop
+(cd $S/app && SPIKE_DIST=.next-server-getauth npx next start -p 3000) & node login.mjs --target next --url http://127.0.0.1:3000
+node handover.mjs                                                             # B.8
+for n in 0 1 5 10 15; do node gen.mjs $n; ./build.sh getauth growth-$n; node route_sizes.mjs $S/builds/growth-$n / /market/; done
+node gen.mjs 15 --root && ./build.sh getauth growth-15root; node gen.mjs 0  # B.7
+node sizes.mjs ../results/login-next-getauth.json $S/builds/export-getauth jsUrlsAtAccept   # B.2 raw/gzip/brotli
+# unchanged repo tool, cross-check of the Flutter first frame:
+node /home/user/kyoto-hub/tools/perf/measure_web.mjs --dir $S/flutter-emu/build/web --sandbox-sdk
+```
