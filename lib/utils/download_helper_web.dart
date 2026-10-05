@@ -20,11 +20,3 @@ String getUriOrigin() {
 String getUriHref() {
   return html.window.location.href;
 }
-
-void saveEmailForSignIn(String email) {
-  html.window.localStorage['emailForSignIn'] = email;
-}
-
-String? getEmailForSignIn() {
-  return html.window.localStorage['emailForSignIn'];
-}

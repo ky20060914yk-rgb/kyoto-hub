@@ -49,7 +49,10 @@ class AppStore extends ChangeNotifier {
 
   /// Resolved on use, not at construction: a test (no Firebase app) can build an
   /// AppStore; `_initFirebaseSync` then fails inside its own try/catch.
-  fb_auth.FirebaseAuth get _firebaseAuth => fb_auth.FirebaseAuth.instance;
+  fb_auth.FirebaseAuth get _firebaseAuth => _authOverride ?? fb_auth.FirebaseAuth.instance;
+
+  /// Test seam only; production always uses `FirebaseAuth.instance`.
+  final fb_auth.FirebaseAuth? _authOverride;
 
   UserProfile? currentUser;
   Map<String, String> userTimetable = {};
@@ -189,7 +192,9 @@ class AppStore extends ChangeNotifier {
     FirebaseFirestore? db,
     MarketService? market,
     ChatService? chat,
+    fb_auth.FirebaseAuth? auth,
   })  : _db = db ?? FirebaseFirestore.instance,
+        _authOverride = auth,
         market = market ?? MarketService.live(db ?? FirebaseFirestore.instance),
         chat = chat ?? ChatService(db ?? FirebaseFirestore.instance) {
     // _initSampleData(); // Commented out for production release
@@ -202,44 +207,17 @@ class AppStore extends ChangeNotifier {
       // does not have to wait on a cold collection fetch.
       courses.warmUp().catchError((_) {});
 
-      final href = getUriHref();
-      if (href.isNotEmpty && _firebaseAuth.isSignInWithEmailLink(href)) {
-        final email = getEmailForSignIn();
-        if (email != null && email.isNotEmpty) {
-          try {
-            final userCredential = await _firebaseAuth.signInWithEmailLink(email: email, emailLink: href);
-            final uid = userCredential.user!.uid;
-
-            var profile = await _userRepo.getUserProfile(uid);
-            if (profile == null) {
-              final randomNum = Random().nextInt(9000) + 1000;
-              profile = UserProfile(
-                uid: uid,
-                universityId: 'kyoto_u',
-                email: email,
-                displayName: '京大生_$randomNum',
-                createdAt: DateTime.now(),
-                policyNoticeSeen: true, // brand new: there are no old points to explain
-              );
-              await _userRepo.saveUserProfile(profile);
-              _userRepo.markPolicyNoticeSeen(uid).catchError((_) {});
-
-            }
-
-            currentUser = profile;
-            saveEmailForSignIn('');
-            notifyListeners();
-          } catch (e) {
-            print('Sign in with email link error: $e');
-            lastNoticeMessage = 'サインイン用リンクの認証に失敗しました。期限切れか無効なリンクです。';
-            notifyListeners();
-          }
-        }
-      }
-
       _firebaseAuth.authStateChanges().listen((fbUser) async {
-        if (fbUser != null && fbUser.email != null) {
+        if (fbUser == null) {
+          // Signed out (logout(), or the session ended elsewhere). Idempotent: logout() has
+          // already reset, so this only acts when state is still around.
+          if (currentUser != null) _resetSessionState();
+          return;
+        }
+        if (fbUser.email != null) {
           final profile = await _userRepo.getUserProfile(fbUser.uid);
+          // A sign-out (or another account) may have landed while the profile was loading.
+          if (_firebaseAuth.currentUser?.uid != fbUser.uid) return;
           if (profile != null) {
             currentUser = profile;
             _watchCredits(fbUser.uid);
@@ -247,6 +225,7 @@ class AppStore extends ChangeNotifier {
             if (fbUser.emailVerified) _claimWelcome();
 
             final timetable = await _userRepo.getUserTimetable(fbUser.uid);
+            if (_firebaseAuth.currentUser?.uid != fbUser.uid) return;
             userTimetable = timetable;
 
             notifyListeners();
@@ -409,7 +388,8 @@ class AppStore extends ChangeNotifier {
     }
   }
 
-  void logout() {
+  /// Clears everything tied to the signed-in user (in-memory only).
+  void _resetSessionState() {
     _balanceSub?.cancel();
     _codeSub?.cancel();
     _ledgerSub?.cancel();
@@ -422,7 +402,22 @@ class AppStore extends ChangeNotifier {
     ledger = [];
     currentUser = null;
     userTimetable.clear();
+    _welcomePending = false;
+    _policyNoticeDismissed = false; // the next account on this browser gets its own one-time notice
     notifyListeners();
+  }
+
+  /// Signs out of Firebase Auth (its session is persisted, so without this a reload would restore the user)
+  /// and clears the local state. Local state goes first so the UI leaves the signed-in screens at once; a failed
+  /// sign-out is reported through [lastNoticeMessage] instead of throwing.
+  Future<void> logout() async {
+    _resetSessionState();
+    try {
+      await _firebaseAuth.signOut();
+    } catch (e) {
+      lastNoticeMessage = 'ログアウトに失敗しました。通信環境を確認して再試行してください。';
+      notifyListeners();
+    }
   }
 
   Future<bool> checkEmailVerification() async {

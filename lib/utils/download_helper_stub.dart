@@ -5,7 +5,3 @@ String getUriOrigin() {
 }
 
 String getUriHref() => '';
-
-void saveEmailForSignIn(String email) {}
-
-String? getEmailForSignIn() => null;

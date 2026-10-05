@@ -135,8 +135,9 @@ class _SignupScreenState extends State<SignupScreen> {
     }
   }
 
-  void _backToLogin() {
-    widget.store.logout();
+  void _backToLogin() async {
+    await widget.store.logout();
+    if (!mounted) return;
     setState(() {
       _isVerificationMode = false;
       _isLoginMode = true;

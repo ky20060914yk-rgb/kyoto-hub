@@ -1,3 +1,4 @@
+import 'package:firebase_auth/firebase_auth.dart' as fb_auth;
 import 'package:fake_cloud_firestore/fake_cloud_firestore.dart';
 import 'package:kyoto_exam_hub/models/user_profile.dart';
 import 'package:kyoto_exam_hub/repositories/course_repository.dart';
@@ -13,7 +14,7 @@ import 'package:kyoto_exam_hub/services/review_service.dart';
 /// is never touched (it is resolved lazily and the constructor's sync swallows
 /// its absence). Shared by the characterization and widget tests.
 class Harness {
-  Harness() {
+  Harness({fb_auth.FirebaseAuth? auth}) {
     store = AppStore(
       CourseRepository(db),
       ReviewService(db),
@@ -22,6 +23,7 @@ class Harness {
       ModerationService(db, _invoke),
       db: db,
       market: MarketService(db, _invoke),
+      auth: auth,
     );
   }
 

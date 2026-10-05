@@ -246,10 +246,11 @@ class _MyPageScreenState extends State<MyPageScreen> {
             ),
             TextButton(
               child: const Text('ログアウトする', style: TextStyle(color: Colors.redAccent, fontWeight: FontWeight.bold)),
-              onPressed: () {
-                widget.store.logout();
-                Navigator.pop(context);
-                Navigator.of(context).pushReplacement(
+              onPressed: () async {
+                final navigator = Navigator.of(context);
+                await widget.store.logout();
+                navigator.pop();
+                navigator.pushReplacement(
                   MaterialPageRoute(builder: (_) => SignupScreen(store: widget.store)),
                 );
               },
