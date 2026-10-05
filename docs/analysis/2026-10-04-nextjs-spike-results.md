@@ -622,7 +622,58 @@ server build would run on Cloud Run / Cloud Functions behind Hosting (A.2.6) —
 billing — none of which a localhost `next start` shows (**not measured**). A server would only pay off for content it
 may render without the user's session (public pages), which today does not exist (A.4.1).
 
-### B.7 Bundle growth per screen-equivalent (extrapolation) and porting one real screen — *pending*
+### B.7 Bundle growth per screen-equivalent (extrapolation) and porting one real screen
+
+**Growth curve — label: EXTRAPOLATION input, synthetic screens.** `partb/tools/gen.mjs N` adds N extra routes
+`/g/<i>/`, each a **copy of one of the three real ported screens** (cycled: market list + detail dialog, listing form,
+course detail + review tab), each with its own copy of its model module, its own collection names and its own Japanese
+strings, so every copy is a separate module graph. Static export, `getAuth()`. "First load" = the route HTML's
+`<script src>` set without the `nomodule` polyfill (for `/` this equals the network-measured login JS of B.2 byte for
+byte); dynamic `import()` chunks are not included. "All JS" = every `.js` file in the export (includes the 112,594 B
+legacy polyfill that modern browsers skip).
+
+| Extra screen-equivalents N | All JS raw / gzip / **brotli** | Login `/` first load (brotli) | `/market/` first load (brotli) | A generated route (brotli) |
+|---:|---|---:|---:|---|
+| 0 (base app) | 1,402,169 / 429,206 / **369,517** (23 files) | 150,783 | 306,252 | — |
+| 1 | 1,429,597 / 439,993 / **378,861** | 150,783 | 306,290 | `/g/1/` (market type) 306,095 |
+| 5 | 1,500,084 / 468,292 / **403,200** | 150,783 | 306,290 | `/g/5/` (form type) 160,198 |
+| 10 | 1,597,101 / 506,732 / **436,408** | 150,783 | 306,290 | `/g/10/` (market type) 306,077 |
+| 15 | 1,681,587 / 540,483 / **465,492** (38 files) | 150,783 | 306,290 | `/g/15/` (course type) 291,709 |
+| 15, all imported into the root layout (no route splitting) | 1,509,399 / 434,466 / 370,364 | **318,083** | 319,162 | 315,599 |
+
+Measured slope: **≈ 6.4 KB brotli (18.6 KB raw, 7.4 KB gzip) of JS per screen-equivalent**, near-linear
+(steps of 9.3 / 6.1 / 6.6 / 5.8 KB br per screen). With route splitting the login page stays at **150,783 B** for every N,
+and a route's own first load does not depend on N. Applied throttling confirms it: login first input accepted, mobile
+cold, N=15 split **2,222 (2,219–2,240) ms** (= base 2,246); N=15 all-in-root **3,297 (3,292–3,364) ms** (desktop
+296 vs 438 ms), because the shared bundle then carries the screens **and** the Firestore SDK (+167 KB br).
+
+Extrapolation to the full app (**estimate**): the prototype covers 7 of the 20 screen/widget files of A.1.3
+(signup, market search tab, listing form, listing detail, course detail shell, review tab, takedown). 13 more at the
+measured 6.4 KB br → **+83 KB br**; if the remaining *hard* screens port to ~2× a template copy (basis: the TS/Dart line
+ratio below applied to `course_resource_tab` 1,133 / `home_screen` 895 Dart LOC), → +~170 KB br. Whole-app JS ≈
+**450–540 KB br**, of which a visitor downloads only the login page's ~151 KB and, signed in, the visited route's
+(~160–310 KB first load incl. Firestore). Flutter's single bundle today: 996 KB br JS + 1.6 MB br wasm on every page.
+
+**Porting one real screen — a single data point, and what it does and does not replace.** Ported in this session:
+`course_detail_screen.dart` (92 LOC, tab shell) + `course_review_tab.dart` (743 LOC, a "hard" screen in A.1.3: 3 live
+streams, summary distributions, mine-pinned list, helpful-vote transaction, error states) + the read side of
+`review.dart`, `course_stats.dart`, `subject.dart`, `review_service.dart` (excluded: `review_form_sheet.dart`, the
+過去問・資料 tab, `submitReview`/`deleteReview`, `applyReview`, `toMap`/`copyWith`).
+
+| Measure | Value |
+|---|---|
+| Wall-clock, read Dart → TS written → typecheck → seeded emulator → rendered + helpful vote accepted by the real rules | **173 s** (02:35:56 → 02:38:49 UTC; `/proc/uptime` delta 173 s) |
+| Who | **an AI coding agent (this session)**, not a human developer |
+| Lines written | **359 TS/TSX** (`lib/review.ts` 114, `CourseReviewTab.tsx` 184, `CourseDetail.tsx` 56, route 5) + 2 lab scripts (seed, check) |
+| Dart → TS size ratio | screen code 835 Dart LOC → 245 TSX lines (**0.29×**); all touched Dart files 1,671 LOC → 359 TS (0.21×, part excluded) |
+| Verification done | type check; one functional run against the emulators (12 reviews, slugged `course_stats` id with '/', distributions, rakutan score 49 = hand-computed, vote 1 → 2); screenshot |
+| Not done | unit tests (the Dart side has 20 view + 54 model tests for this area), the form sheet, accessibility review, visual parity check, edge cases (stream errors were coded but not exercised) |
+
+What it replaces in A.1.6: **not** the human rate — 173 s of agent time says nothing about a person's days. It does
+replace the size assumption: TS output is ~0.2–0.3× the Dart line count, so Basis 1's "300–800 Dart LOC/day" means only
+~60–240 TS lines/day of output — the human cost is dominated by understanding behaviour and testing, not typing. If an
+agent writes the code, the coding share of the 25–90 days shrinks sharply, and what remains is review, test porting
+(192 Dart tests), device/a11y checks and the cutover work of A.3.4 — none of which this data point measured.
 
 ### B.8 Session hand-over prototype ↔ Flutter build
 
