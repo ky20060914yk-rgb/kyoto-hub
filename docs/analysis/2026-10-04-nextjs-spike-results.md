@@ -597,7 +597,30 @@ client can drop it (`initializeAuth` with `[indexedDBLocalPersistence, browserLo
 the hand-over consequence of a *narrower* persistence list is tested in B.8. Flutter cannot drop it without patching
 FlutterFire (`auth.dart:36`).
 
-### B.6 Static export vs server-rendered build — *pending*
+### B.6 Static export vs server-rendered build
+
+Same source, `getAuth()`. **Server build** = default `next build` + `next start` (Node 22, localhost:3000): Next marks
+**every route `○` static** — none of them reads request data, so the server serves prerendered HTML
+(`x-nextjs-cache: HIT`, `Cache-Control: s-maxage=31536000`), compressed with **gzip** (Next's built-in; no brotli).
+**SSR per request** = the same with `export const dynamic = "force-dynamic"` in the root layout (all routes `ƒ`;
+`Cache-Control: private, no-cache, no-store`). The export is served as in B.3 (Hosting headers, brotli).
+
+| Build | Login: first input accepted, mobile cold / warm | desktop cold / warm | Login transfer | Lighthouse mobile cold: score / FCP / LCP / TBT | Returning user, list on screen, mobile W / C | desktop W / C |
+|---|---|---|---:|---|---|---|
+| Static export (Hosting-like) | 2,246 (2,236–2,281) / 1,314 (1,196–1,317) | 312 / 224 | 189 KiB | 99 / 751 / 2,002 / 67 | 3,170 / 6,207 | 479 / 764 |
+| Server build, prerendered (`next start`) | 2,483 (2,442–2,507) / 1,206 (1,155–1,264) | 307 (305–324) / 202 (195–226) | 217 KiB | 98 / 763 / 2,376 / 77 | 3,154 (3,057–3,190) / 6,642 (6,525–6,756) | 468 (461–520) / 807 (798–826) |
+| Server build, SSR every request | 2,548 (2,526–2,561) / 1,247 (1,228–1,291) | 315 (313–321) / 212 (207–213) | 212 KiB | — | — | — |
+
+Server TTFB for `/` on localhost, unthrottled (curl ×5): prerendered 2–3 ms, SSR per request 7–14 ms.
+
+Reading: for these login-gated screens the server build gives **no earlier first paint** — FCP is the same HTML either
+way (1.37–1.40 s mobile cold), and the cold login is ~0.24 s *slower* only because Next's server sends gzip instead of
+brotli (184 vs 157 KiB at first input). SSR on every request cannot render the signed-in data, because the session lives
+in the browser's IndexedDB and the server never sees it (A.2.3); the returning-user path is the same client-side
+redirect in all three. In production the differences would be **larger than here and in the export's favour**: the
+server build would run on Cloud Run / Cloud Functions behind Hosting (A.2.6) — cold starts, a region hop, per-request
+billing — none of which a localhost `next start` shows (**not measured**). A server would only pay off for content it
+may render without the user's session (public pages), which today does not exist (A.4.1).
 
 ### B.7 Bundle growth per screen-equivalent (extrapolation) and porting one real screen — *pending*
 
