@@ -384,11 +384,31 @@ Measured numbers cited here come from the companion measurements doc (§1, lab c
 
 ## Part B — measured prototype
 
-Status: **in progress** (written in checkpoints; sections marked *pending* are not measured yet).
-Every number in Part B was measured in this session unless labelled **estimate** (with basis) or
-**cited** (from the companion doc). Numbers from earlier, lost attempts were not reused.
+Every number in Part B was measured in this session (2026-10-04/05) unless labelled **estimate** (with basis) or
+cited from the companion doc. Numbers from earlier, lost attempts were not reused; their source code was reused
+after reading.
 
-### B.0 Summary — *pending*
+### B.0 Summary
+
+Lab conditions (B.1, B.11): emulators, Chromium, applied slow-4G-like throttling + CPU ×4 for "mobile", median of 3.
+
+- **Login screen, mobile cold — first input accepted: Flutter 19.9 s vs Next.js prototype 2.2 s** (warm 6.3 vs 1.3 s;
+  desktop cold 3.3 vs 0.31 s). Not identical events (focus vs click handler; B.3). Lighthouse mobile: score 66 vs 99,
+  TBT 2.8 s vs 0.07 s, Speed Index 5.7 vs 0.75 s.
+- **Bytes**: login JS 996 KB br (+1.6 MB br wasm) vs 151 KB br; cold transfer 3.0 MB / 39 req vs 189 KiB / 17 req;
+  signed-in heavy screen 317 KB br JS, 352 KiB in total vs Flutter's 3.6 MB (B.2).
+- **Returning signed-in user, mobile warm**: auth/shell 10.7 s (Flutter) vs 1.9 s; market list with data 27.4 vs 3.2 s,
+  but that last pair is not like for like (Flutter's `AppStore` opens ~13 listeners first; B.4).
+- **Google auth iframe**: on phones it gates the first `onAuthStateChanged` — and, through FlutterFire's plugin init,
+  **Flutter's first frame** (+3.2 s for a 3 s stand-in delay). A Next client avoids it with `initializeAuth` without
+  the resolver; it must keep `indexedDBLocalPersistence` in the list or every existing user is signed out (B.5, B.8).
+- **Hand-over**: sessions carry Flutter → Next → Flutter on one origin across a deploy swap (B.8).
+- **Growth**: +6.4 KB br JS per screen-equivalent, login page flat at 151 KB with route splitting; all-in-root would
+  double the login JS and add ~1 s (B.7, extrapolation). **Server build**: no gain over static export (B.6).
+- **Porting one hard screen** (course detail + review tab): 173 s for an AI agent, 359 TS lines from 835 Dart screen
+  LOC (0.29×) — a size ratio, not a human rate (B.7).
+- **Recommendation**: no rewrite now and not before 2A/2B/3; collect the RUM in B.10 for two weeks after 2A/2B/3 and
+  migrate (static export) only if a threshold there is met; next cheap experiment: an HTML/JS login front for Flutter.
 
 ### B.1 Prototype and conditions
 
