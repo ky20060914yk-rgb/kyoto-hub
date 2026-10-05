@@ -473,21 +473,25 @@ painted, not yet hydrated). Note that before hydration the Next page's native `<
 
 | Target | Profile | Load | FCP | First frame (Flutter) / hydration mark (Next) | **First input accepted** | Transfer at input |
 |---|---|---|---:|---:|---:|---:|
-| Flutter | mobile | cold | 776 (716–812) splash | 19,083 (18,976–19,388) | **20,248 (20,023–20,483)** | 2,631 KiB |
+| Flutter | mobile | cold | 756 (700–840) splash | 18,957 (18,871–19,186) | **19,909 (19,901–20,275)** | 2,632 KiB |
 | Next `getAuth` | mobile | cold | 1,372 (1,372–1,452) | 2,303 (2,292–2,337) | **2,246 (2,236–2,281)** | 157 KiB |
 | Next no resolver | mobile | cold | 1,380 (1,376–1,416) | 2,300 (2,271–2,353) | **2,241 (2,194–2,278)** | 154 KiB |
-| Flutter | mobile | warm | 788 (676–804) | 5,269 (5,229–5,389) | **6,267 (6,231–6,449)** | 2 KiB |
+| Flutter | mobile | warm | 720 (712–764) | 5,214 (5,048–5,268) | **6,253 (6,126–6,266)** | 2 KiB |
 | Next `getAuth` | mobile | warm | 776 (768–840) | 1,376 (1,253–1,384) | **1,314 (1,196–1,317)** | 0 KiB |
 | Next no resolver | mobile | warm | 812 (792–868) | 1,339 (1,277–1,349) | **1,265 (1,206–1,277)** | 0 KiB |
-| Flutter | desktop | cold | 140 (124–144) | 2,863 (2,832–2,873) | **3,262 (3,247–3,300)** | 2,631 KiB |
+| Flutter | desktop | cold | 96 (88–144) | 2,862 (2,837–2,944) | **3,345 (3,314–3,473)** | 2,632 KiB |
 | Next `getAuth` | desktop | cold | 156 (152–160) | 324 (301–333) | **312 (304–328)** | 157 KiB |
 | Next no resolver | desktop | cold | 152 (144–156) | 310 (306–310) | **297 (288–299)** | 154 KiB |
-| Flutter | desktop | warm | 140 (124–144) | 930 (906–939) | **1,349 (1,327–1,353)** | 2 KiB |
+| Flutter | desktop | warm | 136 (108–136) | 881 (880–937) | **1,324 (1,293–1,420)** | 2 KiB |
 | Next `getAuth` | desktop | warm | 124 (120–124) | 200 (187–201) | **224 (208–228)** | 0 KiB |
 | Next no resolver | desktop | warm | 132 (128–136) | 194 (191–206) | **214 (214–236)** | 0 KiB |
 
-Flutter cold first frame (19.1 s mobile, 2.86 s desktop) reproduces the companion doc's 18.9 s / 2.83 s within 1%.
-Flutter accepts input about 1 s (mobile) / 0.4 s (desktop) after its first frame. The Next hydration mark fires after a
+Flutter rows: second series with the Auth-emulator banner hidden (see Lighthouse note below); the first series (banner
+visible, `login-flutter.json`) agreed within 2% (cold input accepted 20,248 mobile / 3,262 desktop). Flutter cold first
+frame (19.0 s mobile, 2.86 s desktop) reproduces the companion doc's 18.9 s / 2.83 s within 1%, and the unchanged repo
+tool `tools/perf/measure_web.mjs` on the same build gave 18,910 (18,811–18,916) / 2,760 (2,736–2,770) ms without the tap
+probe and without the mobile UA, so the probe does not perturb the load noticeably. Flutter accepts input about 1 s
+(mobile) / 0.5 s (desktop) after its first frame. The Next hydration mark fires after a
 rAF+timeout and so lands ~50 ms *after* the first accepted tap. LCP from these runs is not reported: the browser stops
 LCP at the first input, and the probe taps from t=0 (Lighthouse LCP below).
 
@@ -515,8 +519,9 @@ TTI are the meaningful columns. Every Flutter run carried "page loaded too slowl
 "Running in emulator mode" banner (added to the DOM by `connectAuthEmulator` without `disableWarnings`) became the
 mobile LCP element at ~15.7 s; the rerun hides that banner with CSS in the scratch build (production has no banner;
 the Next prototype passes `disableWarnings`). Lighthouse's warm "JS bootup" values for Next were implausible (~4 s
-with ~1 KiB transferred) and are not used. The Flutter numbers reproduce the companion doc's (score 0.65, TBT 3.4 s,
-SI 6.5 s, TTI 13.8 s) within run-to-run spread for TBT/SI/TTI.
+with ~1 KiB transferred) and are not used. The Flutter numbers are in the same range as the companion doc's (score 0.65, TBT 3.4 s,
+SI 6.5 s, TTI 13.8 s on the pre-Plan-4 build `b3d73db`) but outside its min–max for TBT/SI/TTI; the builds differ
+(Plan 4 start screen, `main.dart.js?v=`, emulator wiring), so exact agreement is not expected.
 
 ### B.4 Returning signed-in user: time to the signed-in screen with data
 
@@ -528,29 +533,30 @@ Firestore cache); **C** = `Network.clearBrowserCache` first (session and Firesto
 
 | Target | Profile | Case | Auth ready (Next) / signed-in shell frame (Flutter) | **List with data on screen** | Transfer | Requests |
 |---|---|---|---:|---:|---:|---:|
-| Flutter | mobile | W warm | 10,472 (10,464–10,784) | **27,248 (26,531–27,335)** | 10 KiB | 68 |
+| Flutter | mobile | W warm | 10,666 (10,625–11,033) | **27,410 (25,711–27,894)** | 10 KiB | 68 |
 | Next `getAuth` | mobile | W warm | 1,862 (1,860–1,878) | **3,170 (3,112–3,193)** | 2 KiB | 27 |
 | Next no resolver | mobile | W warm | 1,814 (1,728–1,815) | **3,086 (2,998–3,103)** | 2 KiB | 26 |
-| Flutter | mobile | C cache cleared | 23,049 (22,982–23,176) | **40,213 (39,871–40,377)** | 3,630 KiB | 70 |
+| Flutter | mobile | C cache cleared | 22,969 (22,816–23,389) | **39,298 (39,150–40,367)** | 3,630 KiB | 70 |
 | Next `getAuth` | mobile | C cache cleared | 2,956 (2,903–2,972) | **6,207 (6,181–6,276)** | 352 KiB | 28 |
 | Next no resolver | mobile | C cache cleared | 2,869 (2,855–2,887) | **6,123 (6,091–6,143)** | 349 KiB | 27 |
-| Flutter | desktop | W warm | 1,988 (1,980–2,107) | **6,372 (5,962–6,502)** | 10 KiB | 66 |
+| Flutter | desktop | W warm | 2,004 (1,982–2,019) | **5,866 (5,836–5,995)** | 10 KiB | 66 |
 | Next `getAuth` | desktop | W warm | 263 (234–282) | **479 (428–529)** | 3 KiB | 28 |
 | Next no resolver | desktop | W warm | 240 (231–260) | **456 (445–492)** | 3 KiB | 28 |
-| Flutter | desktop | C cache cleared | 3,655 (3,607–3,679) | **8,030 (7,821–8,130)** | 3,544 KiB | 67 |
+| Flutter | desktop | C cache cleared | 3,621 (3,596–3,707) | **7,742 (7,711–7,920)** | 3,544 KiB | 67 |
 | Next `getAuth` | desktop | C cache cleared | 358 (352–359) | **764 (758–772)** | 354 KiB | 29 |
 | Next no resolver | desktop | C cache cleared | 349 (347–363) | **780 (773–795)** | 351 KiB | 29 |
 
 **Comparability — read before using these numbers.** The two "data" columns do **not** measure the same amount of
-app work. In the Flutter build, most of the time between the signed-in shell (10.5 s) and the market list (27.2 s) is the
+app work. In the Flutter build, most of the time between the signed-in shell (10.7 s) and the market list (27.4 s) is the
 Dart `AppStore` start-up: a request timeline (`timeline.mjs`) shows ~13 Firestore listen-channel POSTs issued one after
 another, ~1.2–1.5 s apart at 562 ms latency (the WebChannel sends one forward POST at a time), before the market
 target is answered. The Next prototype opens 2 listeners (listings, credit balance). A port that keeps `AppStore`'s
 subscriptions (profile, credits, ledger, notifications, talk rooms, posts, catalog warm-up …) in the same order would
 pay a similar serial cost; it would be the same Firestore work in any framework (A.4.1). The framework-comparable
-points are therefore **auth ready / shell frame** (Next 1.9 s vs Flutter 10.5 s mobile warm) and the login figures in B.3;
+points are therefore **auth ready / shell frame** (Next 1.9 s vs Flutter 10.7 s mobile warm) and the login figures in B.3;
 "data on screen" is an upper bound for Flutter's disadvantage. Emulator on localhost (throttled like everything else),
-not production Firestore latency.
+not production Firestore latency. Flutter rows: series with the emulator banner hidden (`signedin-flutter2.json`; the
+first series agreed within 4%).
 
 Why Flutter needed the emulator shim: FlutterFire's `firebase_auth_web` 6.2.5 awaits `authDelegate.onWaitInitState()` **inside
 `Firebase.initializeApp`** (`lib/firebase_auth_web.dart:57-84`), so the SDK reloads the persisted user before Dart can call
