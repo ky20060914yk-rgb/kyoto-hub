@@ -390,15 +390,181 @@ Every number in Part B was measured in this session unless labelled **estimate**
 
 ### B.0 Summary — *pending*
 
-### B.1 Prototype and conditions — *pending*
+### B.1 Prototype and conditions
 
-### B.2 JS bytes and requests (login, heavy signed-in screen) — *pending*
+**Prototype** (session scratchpad `partb/app`, never in the repo tree): Next.js **16.3.8** (App Router, Turbopack,
+TypeScript, Tailwind 4.3.3), React **19.3.0**, Firebase JS SDK **12.19.0** modular (= `npm view` latest on 2026-10-05;
+the SDK version FlutterFire 3.12.0 loads, A.1.4). It reuses, after reading, the leftover source of the lost attempt
+(login, market, listing form/detail, takedown — ~700 lines) and adds this attempt's own code (auth variants, lab marks,
+the course screen port in B.7). What a real app would import, and only there:
 
-### B.3 Cold/warm load: Lighthouse and applied throttling vs Flutter — *pending*
+| Route | What it does | Firebase modules |
+|---|---|---|
+| `/` login | port of `SignupScreen`: e-mail+password login/signup, `@st.kyoto-u.ac.jp` check, referral field, verify-email state (`sendEmailVerification`, `reload` + `getIdToken(true)`), receive-side e-mail link; a returning signed-in user is sent to `/market/` | app + auth (static); Firestore only on submit (dynamic `import()`) |
+| `/market/` heavy screen | port of the さがす tab of `market_screen.dart`: **real-time** `onSnapshot` on the same query as `streamListings` (`status == active`, `expiresAt > now`, `orderBy expiresAt desc`), **pagination** by widening the live window (20 → 40 → …, "もっと見る"), type chips + free-word filter (`filterListings` port), live credit balance stream, listing detail dialog with Storage `getDownloadURL` photos, clipboard share and the **`openListingChat` callable** | + Firestore with `persistentLocalCache` (single-tab, unlimited, like `main.dart:29-32`), Storage and Functions loaded on use |
+| `/market/new/` | port of `ListingFormScreen`: validation, photo upload to `listings/<uid>/…`, `createListing` callable | Storage, Functions |
+| `/course/?id=` | port of `course_detail_screen` + `course_review_tab` (B.7): 3 live streams, transaction | Firestore |
+| `/takedown/` | `submitTakedown` callable form, reachable signed out | Functions |
 
-### B.4 Returning signed-in user: time to the signed-in screen with data — *pending*
+**Backend: emulators only** (`firebase emulators:start --project demo-spike`, firebase-tools 15.32.1): the repo's
+`firestore.rules`, `storage.rules`, `firestore.indexes.json` and the 10 **real callables** compiled from `functions/src`
+(Firestore triggers are not loaded: their registration is blocked in this sandbox, as in the lost attempt). Seed:
+1 verified KU user with profile + credit balance, a seller, **50 `textbook_listings`** (45 active, 10 with a photo in the
+Storage emulator), 1 course with 12 reviews and its `course_stats`. All reads go through the real rules (`kuDomain()`).
 
-### B.5 Google auth iframe: `getAuth()` vs `initializeAuth` without resolver — *pending*
+**Flutter comparison build** (`partb/flutter-emu`): `git archive 7abb8fb`, `flutter build web --release --no-web-resources-cdn`
+(Flutter 3.41.9), changed **only** in a scratch copy: demo-spike config + emulator wiring, `?autologin=1` (Dart sign-in),
+`?tab=market` (start on the 教科書 tab), and two lab events (`signed-in-frame` after `NavigationRootScreen` builds,
+`market-rendered` after the first frame that draws listings). Firebase SDK served same-origin (gstatic is blocked,
+`tools/perf/lib/server.mjs --sandbox-sdk` mechanism). For the returning-user case a 12-line shim around the SDK's
+`initializeAuth` connects the Auth emulator immediately (B.4 explains why); production builds do not need it.
+
+**Conditions** (same as the companion doc and `tools/perf`): Chromium 141.0.7390.37 headless
+(`/opt/pw-browsers/chromium-1194`), proxy CA trusted via a scratch NSS db (TLS verification on), sandbox host 4 vCPU.
+Served by `tools/perf/lib/server.mjs` (brotli q11/gzip -9, ETag/304) with headers from the **Hosting emulator**
+reading a `firebase.json` — the repo's for Flutter, and for Next the Part A plan's (`no-cache` everywhere,
+`public, max-age=31536000, immutable` for `/_next/static/**`, `trailingSlash: true`). Applied throttling = `tools/perf`
+`PROFILES` (mobile: 562.5 ms latency, 1474.56 kbps down, 675 up, CPU ×4, 412×823 @1.75; desktop: 40 ms, 10240 kbps, CPU ×1).
+**One addition:** the mobile context also sends Lighthouse's mobile user agent (`moto g power (2022)`, Chrome/136),
+because the Auth SDK decides from the UA whether to load the Google iframe eagerly (B.5); Playwright's `isMobile`
+alone keeps a desktop UA. Every run: fresh browser context, cold load, then a warm load in a second page of the
+same context; 3 runs; median (min–max). Runs were strictly sequential; the emulators were idle in the background
+(< 2% CPU) and nothing else was running. Harness: `partb/tools/{common,login,signedin,sizes}.mjs` on top of
+`tools/perf/lib` (unchanged).
+
+**Production contact — disclosure.** Two early smoke runs and one layout probe loaded an *unmodified* `7abb8fb`
+build, whose config points at the production project: its pre-auth Firestore listen attempts (unauthenticated,
+denied by the rules, no writes — the same traffic the companion doc's measurements made) reached
+`firestore.googleapis.com`. That build was then deleted; every number below comes from the demo-spike build.
+While debugging B.4, the Flutter build also sent one `accounts:lookup` with the fake key `demo-key` to
+`identitytoolkit.googleapis.com` (rejected with 400; no project or user data). No credentials were read; nothing
+was deployed.
+
+### B.2 JS bytes and requests (login, heavy signed-in screen)
+
+JS = exactly the script files the measured cold load fetched (URLs recorded by the harness, sizes re-read from disk:
+raw / gzip -9 / brotli q11). "Transfer" and "requests" are what the browser reported (`encodedDataLength`, all hosts).
+
+| Page (cold, mobile) | JS files | JS raw | JS gzip | JS brotli | Transfer (all) | Requests | Not JS but code |
+|---|---:|---:|---:|---:|---:|---:|---|
+| Flutter, login screen (until first input accepted) | 8 | 4,538,073 | 1,267,533 | 995,805 | 2,631 KiB at input; 3,004 KiB after 5 s | 36 at input; 39 | `canvaskit.wasm` 5,686,880 raw / 1,612,881 br; fonts 14 requests |
+| Next export `getAuth`, login screen (until first input accepted) | 9 | 585,419 | 175,018 | 150,783 | 157 KiB at input; 189 KiB after 5 s | 13 at input; 17 | CSS 1 file |
+| Next export `initializeAuth` without resolver, login | 9 | 575,741 | 171,660 | 147,973 | 154 KiB; 186 KiB | 13; 16 | |
+| Flutter, returning user → market list with data (HTTP cache cleared) | 8 (same files) | 4,538,073 | 1,267,533 | 995,805 | 3,630 KiB | 70 (37 font requests, 13 Firestore channel) | as above |
+| Next export `getAuth`, returning user `/` → `/market/` with data (HTTP cache cleared) | 14 | 1,234,764 | 369,541 | 316,814 | 352 KiB | 28 (24 same-origin) | |
+| Next export no resolver, same | 14 | 1,225,086 | 366,183 | 314,004 | 349 KiB | 27 | |
+
+Ratios (brotli JS): login **6.6×** less JS for Next (151 KB vs 996 KB, plus Flutter's 1.6 MB wasm engine);
+signed-in heavy screen **3.1×** less (317 KB vs 996 KB). Total transfer to the signed-in screen: 352 KiB vs 3,630 KiB (**10×**).
+The Next login page's JS is mostly framework: react-dom 229,156 raw / 61,215 br, Next runtime ≈ 160 KB raw / 37 KB br,
+Firebase app+auth ≈ 86 KB raw / 22 KB br. The signed-in screen adds the Firestore chunk (569,369 raw) and the route code.
+Flutter ships all screens and the whole SDK on every page; the Next signed-in total includes the login page's JS
+because returning users land on `/` and are redirected client-side (B.4).
+
+### B.3 Cold/warm load: Lighthouse and applied throttling vs Flutter
+
+**Applied throttling (`login.mjs`), login screen.** "Input accepted" is a **real** first-input time: from navigation
+start the harness taps one control every 50 ms (CDP `Input.dispatchMouseEvent`) and records the page-clock time when
+the app first reacted — Next: the React `onClick` of the login/signup toggle ran; Flutter: the tap on the e-mail
+field reached the framework, which then created its DOM text-editing `<input>`. These are **not identical metrics**
+(a handler run vs. a focus change), and neither is Flutter's first frame (engine drew the screen) or Next's FCP (HTML
+painted, not yet hydrated). Note that before hydration the Next page's native `<input>` already accepts typing
+(it is plain HTML from FCP); only the app logic (validation, submit) waits for hydration.
+
+| Target | Profile | Load | FCP | First frame (Flutter) / hydration mark (Next) | **First input accepted** | Transfer at input |
+|---|---|---|---:|---:|---:|---:|
+| Flutter | mobile | cold | 776 (716–812) splash | 19,083 (18,976–19,388) | **20,248 (20,023–20,483)** | 2,631 KiB |
+| Next `getAuth` | mobile | cold | 1,372 (1,372–1,452) | 2,303 (2,292–2,337) | **2,246 (2,236–2,281)** | 157 KiB |
+| Next no resolver | mobile | cold | 1,380 (1,376–1,416) | 2,300 (2,271–2,353) | **2,241 (2,194–2,278)** | 154 KiB |
+| Flutter | mobile | warm | 788 (676–804) | 5,269 (5,229–5,389) | **6,267 (6,231–6,449)** | 2 KiB |
+| Next `getAuth` | mobile | warm | 776 (768–840) | 1,376 (1,253–1,384) | **1,314 (1,196–1,317)** | 0 KiB |
+| Next no resolver | mobile | warm | 812 (792–868) | 1,339 (1,277–1,349) | **1,265 (1,206–1,277)** | 0 KiB |
+| Flutter | desktop | cold | 140 (124–144) | 2,863 (2,832–2,873) | **3,262 (3,247–3,300)** | 2,631 KiB |
+| Next `getAuth` | desktop | cold | 156 (152–160) | 324 (301–333) | **312 (304–328)** | 157 KiB |
+| Next no resolver | desktop | cold | 152 (144–156) | 310 (306–310) | **297 (288–299)** | 154 KiB |
+| Flutter | desktop | warm | 140 (124–144) | 930 (906–939) | **1,349 (1,327–1,353)** | 2 KiB |
+| Next `getAuth` | desktop | warm | 124 (120–124) | 200 (187–201) | **224 (208–228)** | 0 KiB |
+| Next no resolver | desktop | warm | 132 (128–136) | 194 (191–206) | **214 (214–236)** | 0 KiB |
+
+Flutter cold first frame (19.1 s mobile, 2.86 s desktop) reproduces the companion doc's 18.9 s / 2.83 s within 1%.
+Flutter accepts input about 1 s (mobile) / 0.4 s (desktop) after its first frame. The Next hydration mark fires after a
+rAF+timeout and so lands ~50 ms *after* the first accepted tap. LCP from these runs is not reported: the browser stops
+LCP at the first input, and the probe taps from t=0 (Lighthouse LCP below).
+
+**Lighthouse 13.5 (simulated throttling)** — *pending in this checkpoint*.
+
+### B.4 Returning signed-in user: time to the signed-in screen with data
+
+`signedin.mjs`: per run a fresh context signs in **unthrottled** (Next: the login form; Flutter: `?autologin=1`), the page is
+closed, the harness waits 6 s (past Firestore's 5 s primary-lease window of the closed tab), then measures a throttled load of
+the start URL until the market list **with listings** is on screen: **W** = everything warm (HTTP cache, IndexedDB session,
+Firestore cache); **C** = `Network.clearBrowserCache` first (session and Firestore cache kept). Next starts at `/` (the PWA
+`start_url`), whose client code sees the restored user and `router.replace('/market/')`; Flutter starts at `/?tab=market`.
+
+| Target | Profile | Case | Auth ready (Next) / signed-in shell frame (Flutter) | **List with data on screen** | Transfer | Requests |
+|---|---|---|---:|---:|---:|---:|
+| Flutter | mobile | W warm | 10,472 (10,464–10,784) | **27,248 (26,531–27,335)** | 10 KiB | 68 |
+| Next `getAuth` | mobile | W warm | 1,862 (1,860–1,878) | **3,170 (3,112–3,193)** | 2 KiB | 27 |
+| Next no resolver | mobile | W warm | 1,814 (1,728–1,815) | **3,086 (2,998–3,103)** | 2 KiB | 26 |
+| Flutter | mobile | C cache cleared | 23,049 (22,982–23,176) | **40,213 (39,871–40,377)** | 3,630 KiB | 70 |
+| Next `getAuth` | mobile | C cache cleared | 2,956 (2,903–2,972) | **6,207 (6,181–6,276)** | 352 KiB | 28 |
+| Next no resolver | mobile | C cache cleared | 2,869 (2,855–2,887) | **6,123 (6,091–6,143)** | 349 KiB | 27 |
+| Flutter | desktop | W warm | 1,988 (1,980–2,107) | **6,372 (5,962–6,502)** | 10 KiB | 66 |
+| Next `getAuth` | desktop | W warm | 263 (234–282) | **479 (428–529)** | 3 KiB | 28 |
+| Next no resolver | desktop | W warm | 240 (231–260) | **456 (445–492)** | 3 KiB | 28 |
+| Flutter | desktop | C cache cleared | 3,655 (3,607–3,679) | **8,030 (7,821–8,130)** | 3,544 KiB | 67 |
+| Next `getAuth` | desktop | C cache cleared | 358 (352–359) | **764 (758–772)** | 354 KiB | 29 |
+| Next no resolver | desktop | C cache cleared | 349 (347–363) | **780 (773–795)** | 351 KiB | 29 |
+
+**Comparability — read before using these numbers.** The two "data" columns do **not** measure the same amount of
+app work. In the Flutter build, most of the time between the signed-in shell (10.5 s) and the market list (27.2 s) is the
+Dart `AppStore` start-up: a request timeline (`timeline.mjs`) shows ~13 Firestore listen-channel POSTs issued one after
+another, ~1.2–1.5 s apart at 562 ms latency (the WebChannel sends one forward POST at a time), before the market
+target is answered. The Next prototype opens 2 listeners (listings, credit balance). A port that keeps `AppStore`'s
+subscriptions (profile, credits, ledger, notifications, talk rooms, posts, catalog warm-up …) in the same order would
+pay a similar serial cost; it would be the same Firestore work in any framework (A.4.1). The framework-comparable
+points are therefore **auth ready / shell frame** (Next 1.9 s vs Flutter 10.5 s mobile warm) and the login figures in B.3;
+"data on screen" is an upper bound for Flutter's disadvantage. Emulator on localhost (throttled like everything else),
+not production Firestore latency.
+
+Why Flutter needed the emulator shim: FlutterFire's `firebase_auth_web` 6.2.5 awaits `authDelegate.onWaitInitState()` **inside
+`Firebase.initializeApp`** (`lib/firebase_auth_web.dart:57-84`), so the SDK reloads the persisted user before Dart can call
+`useAuthEmulator`; without the shim that reload went to production `identitytoolkit` and the emulator session was cleared
+(observed). It also means that, in production, **Flutter's first frame waits for Auth initialisation** — see B.5.
+
+### B.5 Google auth iframe: `getAuth()` vs `initializeAuth` without resolver
+
+Code facts [verified-code, `@firebase/auth` 1.13.6 `dist/esm/index-4NFEPWkC.js`]: with `browserPopupRedirectResolver`
+(what `getAuth()` and FlutterFire use) on a **mobile UA, Safari or iOS** (`_shouldInitProactively`, `:10833-10836`),
+`_initializeWithPersistence` **awaits** the resolver's `_initialize` (load `https://apis.google.com/js/api.js` →
+`gapi.load('gapi.iframes')` → open the `authDomain/__/auth/iframe` and ping it, 5 s ping timeout) **before**
+`initializeCurrentUser` (`:2716-2728`). So the first `onAuthStateChanged` callback waits for that chain; on desktop
+Chrome it does not run at start. In the sandbox `apis.google.com` is denied by the proxy, so the chain fails at once.
+
+Measured (mobile profile with mobile UA):
+
+| Scenario | `getAuth()` (resolver) | `initializeAuth`, no resolver | Difference |
+|---|---:|---:|---:|
+| Next login: first input accepted, cold (B.3) | 2,246 (2,236–2,281) | 2,241 (2,194–2,278) | none: hydration does not wait for auth |
+| Next returning user, auth ready, warm — api.js fails at once (sandbox) | 1,862 (1,860–1,878) | 1,814 (1,728–1,815) | ≈ 50 ms |
+| Next returning user, list on screen, warm — same | 3,170 (3,112–3,193) | 3,086 (2,998–3,103) | ≈ 85 ms |
+| Next returning user, auth ready, **api.js answered after 3,000 ms** (stand-in, cache cleared) | 5,962 (5,904–5,981) | 2,870 (2,829–2,887) | **+3.09 s** |
+| Next returning user, list on screen, same | 9,281 (9,248–9,322) | 6,239 (6,163–6,259) | **+3.04 s** |
+| **Flutter login: first frame**, api.js answered after 3,000 ms vs answered at once (both with request routing on) | 22,206 (21,987–22,240) vs 19,006 (18,938–19,034) | n/a (FlutterFire hard-codes the resolver) | **+3.20 s** |
+| Bundle | 150,783 B br login JS | 147,973 | −2.8 KB br |
+
+The "3,000 ms" is a **stand-in, not a measurement of Google's script**: Playwright answers the `apis.google.com` request
+with a 404 after 3 s, to test whether startup waits for it. It does, in both apps, one-for-one. What production costs on a
+real phone is **unmeasured** here (the chain is two cross-origin hosts and ≥ 3 sequential requests; at the lab's 562 ms
+RTT a new HTTPS connection alone is ~3–4 RTT ≈ 1.7–2.3 s — **estimate** from the throttling parameters). Request routing
+disables Playwright's HTTP cache, so only cache-cleared cases are compared in those rows.
+
+Finding: for a password-only app the resolver brings nothing at start and, on phones, delays (a) **Flutter's first
+frame** — because FlutterFire's plugin init awaits Auth init inside `Firebase.initializeApp` (B.4) — and (b) any
+Next.js screen that waits for `onAuthStateChanged` (the returning-user redirect), not the login form. A Next.js
+client can drop it (`initializeAuth` with `[indexedDBLocalPersistence, browserLocalPersistence, browserSessionPersistence]`);
+the hand-over consequence of a *narrower* persistence list is tested in B.8. Flutter cannot drop it without patching
+FlutterFire (`auth.dart:36`).
 
 ### B.6 Static export vs server-rendered build — *pending*
 
