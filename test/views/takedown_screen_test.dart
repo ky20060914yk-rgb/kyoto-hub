@@ -67,9 +67,16 @@ void main() {
     expect(find.textContaining('お問い合わせ画面'), findsNothing);
   });
 
-  testWidgets('daily pool exhausted: with NO address (the shipped default) the error points to the contact screen', (tester) async {
-    expect(kOperatorContactEmail, ''); // the constant is never invented; the owner sets it before the release build
+  testWidgets('daily pool exhausted: the shipped default shows the owner address', (tester) async {
+    expect(kOperatorContactEmail, 'y.kuwahara14@gmail.com'); // supplied by the owner on 2026-10-04; never invented
     await exhaust(tester);
+    expect(find.textContaining('明日以降'), findsOneWidget);
+    expect(find.byWidgetPredicate((w) => w is SelectableText && (w.data ?? '').contains('y.kuwahara14@gmail.com')), findsOneWidget);
+    expect(find.text('お問い合わせ画面からご連絡ください'), findsNothing);
+  });
+
+  testWidgets('daily pool exhausted: with NO address the error points to the contact screen', (tester) async {
+    await exhaust(tester, operatorEmail: '');
     expect(find.textContaining('明日以降'), findsOneWidget);
     expect(find.text('お問い合わせ画面からご連絡ください'), findsOneWidget);
     expect(find.textContaining('こちらのメールから'), findsNothing);
