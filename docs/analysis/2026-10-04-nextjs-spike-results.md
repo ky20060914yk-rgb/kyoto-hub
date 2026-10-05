@@ -601,7 +601,30 @@ FlutterFire (`auth.dart:36`).
 
 ### B.7 Bundle growth per screen-equivalent (extrapolation) and porting one real screen — *pending*
 
-### B.8 Session hand-over prototype ↔ Flutter build — *pending*
+### B.8 Session hand-over prototype ↔ Flutter build
+
+`partb/tools/handover.mjs` (successor of Part A's `cut/cutover.mjs`, which tested JS pages against the Flutter build):
+**one origin**, and the served build is **swapped in place** between steps, the way a Hosting deploy replaces the site
+(`tools/perf/lib/server.mjs` `swap`). Sign-in happens inside the real app (Flutter: Dart `signInWithEmailAndPassword` via
+`?autologin=1`; Next: typing into the login form). "Carried" = after the deploy swap the **app itself** shows the
+signed-in market list with data, no login typed (Flutter: `AppStore` reached `NavigationRootScreen` and the list
+rendered). Auth + Firestore + Functions emulators, real rules, Chromium desktop profile, unthrottled, fresh context per case.
+
+| # | Signed in with | Then deployed and opened | Session record after sign-in | Result |
+|---|---|---|---|---|
+| 1 | Flutter | Next `getAuth()` | IndexedDB `firebase:authUser:demo-key:[DEFAULT]` | **carried** |
+| 2 | Flutter | Next `initializeAuth([indexedDB, local, session])`, no resolver | same | **carried** |
+| 3 | Flutter | Next `initializeAuth(browserLocalPersistence)` only | same | **not carried** (signed out) |
+| 4 | Next `getAuth()` | Flutter (rollback) | IndexedDB, same key | **carried** |
+| 5 | Next no resolver | Flutter (rollback) | IndexedDB, same key | **carried** |
+| 6 | Next local-only | Flutter (rollback) | **localStorage** `firebase:authUser:demo-key:[DEFAULT]` (no IndexedDB db) | **carried**; Flutter's SDK found it and moved it to IndexedDB |
+| 7 | Flutter | Next `getAuth()`, then Flutter again | IndexedDB | **carried** at both steps (cutover + rollback) |
+
+So the Part A result holds against the prototype in both directions, with one new constraint from case 3: a persistence
+list **without `indexedDBLocalPersistence`** does not look in IndexedDB, where every Flutter user's session is, and
+signs every existing user out at the cutover. `PersistenceUserManager.create` only searches the persistences it was
+given (A.2.1 item 5). The safe choice for dropping the iframe is therefore case 2's full list without the resolver,
+not "only `browserLocalPersistence`". Limits as in A.2.2 (emulator, Chromium only, no Safari/iOS ITP eviction).
 
 ### B.9 Side-by-side table with comparability caveats — *pending*
 
