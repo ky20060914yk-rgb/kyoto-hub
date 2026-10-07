@@ -1,0 +1,9 @@
+rules_version = '2';
+service firebase.storage {
+  match /b/{bucket}/o {
+    // Locked down by default; M4 opens the upload paths it needs.
+    match /{allPaths=**} {
+      allow read, write: if false;
+    }
+  }
+}
