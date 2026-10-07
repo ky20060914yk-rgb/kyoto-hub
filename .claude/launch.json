@@ -1,0 +1,11 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "site",
+      "runtimeExecutable": "cmd",
+      "runtimeArgs": ["/c", "set NEXT_PUBLIC_USE_EMULATORS=1&& set FIREBASE_AUTH_EMULATOR_HOST=127.0.0.1:9099&& set FIRESTORE_EMULATOR_HOST=127.0.0.1:8080&& set FIREBASE_STORAGE_EMULATOR_HOST=127.0.0.1:9199&& cd site && npx next dev -p 3000"],
+      "port": 3000
+    }
+  ]
+}

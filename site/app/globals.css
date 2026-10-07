@@ -130,6 +130,7 @@
 @utility size-tap { min-width: 44px; min-height: 44px; }
 @utility h-tabbar { height: 64px; }
 @utility pb-tabbar { padding-bottom: calc(64px + env(safe-area-inset-bottom)); }
+@utility pb-safe { padding-bottom: env(safe-area-inset-bottom); }
 @utility tabular { font-variant-numeric: tabular-nums; }
 
 @keyframes pop {

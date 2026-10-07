@@ -1,0 +1,13 @@
+# Firebase App Hosting (backend root directory: site/, region asia-east1).
+# The backend itself is created by the owner in the console / CLI:
+#   firebase apphosting:backends:create --project kyodai-sns --location asia-east1
+runConfig:
+  minInstances: 0
+  maxInstances: 2
+  concurrency: 80
+  cpu: 1
+  memoryMiB: 512
+env:
+  - variable: NEXT_PUBLIC_SITE_URL
+    value: https://kyodai-info.web.app
+    availability: [BUILD, RUNTIME]
