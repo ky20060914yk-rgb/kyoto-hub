@@ -1,12 +1,14 @@
 'use client';
 
 import { useState } from 'react';
+import { useSearchParams } from 'next/navigation';
 import { ResourceSection } from './ResourceSection';
 
 /** レビュー / 過去問・資料 tabs (redesign spec §4.1). Reviews are the default. */
 export function CourseTabs({ reviews, resourceCount, courseId, courseKey }:
   { reviews: React.ReactNode; resourceCount: number; courseId: string; courseKey: string }) {
-  const [tab, setTab] = useState<'reviews' | 'resources'>('reviews');
+  const initial = useSearchParams().get('tab') === 'resources' ? 'resources' : 'reviews';
+  const [tab, setTab] = useState<'reviews' | 'resources'>(initial);
   const tabs = [
     { key: 'reviews' as const, label: 'レビュー' },
     { key: 'resources' as const, label: `過去問・資料${resourceCount ? `（${resourceCount}）` : ''}` },

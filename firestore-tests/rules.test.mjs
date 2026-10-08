@@ -366,12 +366,6 @@ test('anonymous cannot read posts', async () => {
   await assertFails(getDoc(doc(asAnon(), 'posts/seed_u1')));
 });
 
-test('verified KU user can create a post they author', async () => {
-  await assertSucceeds(setDoc(doc(asKu(), 'posts/p1'), {
-    authorId: 'u1', university_id: 'kyoto_u', subjectId: 'c_1', title: 't', category: 'past_exam',
-  }));
-});
-
 test('unverified user cannot create a post', async () => {
   const db = env.authenticatedContext('u2', KU_UNVERIFIED).firestore();
   await assertFails(setDoc(doc(db, 'posts/p2'), { authorId: 'u2', university_id: 'kyoto_u' }));
@@ -392,29 +386,8 @@ test('address whose real domain only ends with the KU domain cannot create a pos
   await assertFails(setDoc(doc(db, 'posts/p_spoof2'), { authorId: 'u5', university_id: 'kyoto_u' }));
 });
 
-test('an upper-cased KU address is still a KU address (M1)', async () => {
-  const db = env.authenticatedContext('u6', KU_UPPERCASE).firestore();
-  await assertSucceeds(setDoc(doc(db, 'posts/p_upper'), {
-    authorId: 'u6', university_id: 'kyoto_u', title: 't',
-  }));
-});
-
 test('cannot create a post attributed to someone else', async () => {
   await assertFails(setDoc(doc(asKu(), 'posts/p4'), { authorId: 'u2', university_id: 'kyoto_u' }));
-});
-
-test('author can update and delete their own post', async () => {
-  const db = asKu();
-  await assertSucceeds(updateDoc(doc(db, 'posts/seed_u1'), { title: 'edited' }));
-  await assertSucceeds(deleteDoc(doc(db, 'posts/seed_u1')));
-});
-
-test('non-author may only touch the reports field of a post', async () => {
-  const db = asKu2();
-  await assertSucceeds(updateDoc(doc(db, 'posts/seed_u1'), { reports: ['u2'] }));
-  await assertFails(updateDoc(doc(db, 'posts/seed_u1'), { title: 'vandalised' }));
-  await assertFails(updateDoc(doc(db, 'posts/seed_u1'), { reports: ['u2'], title: 'vandalised' }));
-  await assertFails(deleteDoc(doc(db, 'posts/seed_u1')));
 });
 
 // --- posts: the reports flag is append-only, one per account (I7) ------------
@@ -422,10 +395,6 @@ test('non-author may only touch the reports field of a post', async () => {
 // The carve-out that lets a non-author write `reports` used to accept any value
 // for the field, so a single verified account could write three reports in one
 // update and then satisfy the >= 3 auto-delete rule by itself.
-
-test('a non-author may append exactly one report — their own uid (I7)', async () => {
-  await assertSucceeds(updateDoc(doc(asKu2(), 'posts/flagged_u1'), { reports: ['ra', 'u2'] }));
-});
 
 test('a non-author cannot write several reports at once (I7)', async () => {
   await assertFails(updateDoc(doc(asKu2(), 'posts/seed_u1'), { reports: ['a', 'b', 'c'] }));
@@ -445,22 +414,6 @@ test('a non-author cannot drop or replace existing reports (I7)', async () => {
   await assertFails(updateDoc(doc(db, 'posts/flagged_u1'), { reports: ['u2'] }));
 });
 
-test('the same account cannot report a post twice (I7)', async () => {
-  const db = asKu2();
-  await assertSucceeds(updateDoc(doc(db, 'posts/seed_u1'), { reports: ['u2'] }));
-  // u2 is already in `reports`, so it may not add a further entry — this is what
-  // keeps the auto-delete threshold at three *distinct* accounts.
-  await assertFails(updateDoc(doc(db, 'posts/seed_u1'), { reports: ['u2', 'x'] }));
-});
-
-test('an author cannot clear the reports on their own post (I7)', async () => {
-  const db = asKu();
-  await assertFails(updateDoc(doc(db, 'posts/flagged_u1'), { reports: [] }));
-  await assertFails(updateDoc(doc(db, 'posts/reported_u1'), { reports: [] }));
-  // ...but an ordinary edit that leaves `reports` alone still works.
-  await assertSucceeds(updateDoc(doc(db, 'posts/flagged_u1'), { description: 'x' }));
-});
-
 test('an author cannot rewrite a post out of its stream or reassign it (M5)', async () => {
   const db = asKu();
   await assertFails(updateDoc(doc(db, 'posts/seed_u1'), { authorId: 'u2' }));
@@ -474,20 +427,10 @@ test('only a verified KU user may flag a post (I4)', async () => {
   await assertFails(updateDoc(doc(outsider, 'posts/seed_u1'), { reports: ['u3'] }));
 });
 
-test('a post with 3+ reports can be auto-deleted by a verified KU non-author (I2)', async () => {
-  await assertSucceeds(deleteDoc(doc(asKu2(), 'posts/reported_u1')));
-});
-
 test('a non-author cannot delete a post below the report threshold (I2)', async () => {
   await assertFails(deleteDoc(doc(asKu2(), 'posts/seed_u1')));
   const outsider = env.authenticatedContext('u3', OUTSIDER).firestore();
   await assertFails(deleteDoc(doc(outsider, 'posts/reported_u1')));
-});
-
-test('a downloader may increment downloadCount by exactly one (I5)', async () => {
-  await assertSucceeds(updateDoc(doc(asKu2(), 'posts/dl_u1'), {
-    downloadCount: 5, is5DownloadsRewarded: true, is10DownloadsRewarded: false,
-  }));
 });
 
 test('a downloader cannot jump downloadCount (I5)', async () => {
@@ -510,32 +453,6 @@ test('the download-counter carve-out does not smuggle other fields (I5)', async 
 
 // --- requests ----------------------------------------------------------------
 
-test('requests: verified author only for create, author only for update/delete', async () => {
-  const mine = asKu();
-  await assertSucceeds(setDoc(doc(mine, 'requests/req_new'), {
-    authorId: 'u1', university_id: 'kyoto_u', title: 'need notes',
-  }));
-  await assertFails(setDoc(doc(mine, 'requests/req_other'), {
-    authorId: 'u2', university_id: 'kyoto_u',
-  }));
-  await assertSucceeds(updateDoc(doc(mine, 'requests/req_u1'), { title: 'edited' }));
-  await assertFails(updateDoc(doc(asKu2(), 'requests/req_u1'), { title: 'vandalised' }));
-  await assertFails(deleteDoc(doc(asKu2(), 'requests/req_u1')));
-  await assertSucceeds(deleteDoc(doc(mine, 'requests/req_u1')));
-});
-
-test('a fulfiller may mark a request solved and nothing else (I3)', async () => {
-  const db = asKu2();
-  await assertSucceeds(updateDoc(doc(db, 'requests/req_u1'), {
-    isFulfilled: true, fulfilledPostId: 'p_new',
-  }));
-  await assertFails(updateDoc(doc(db, 'requests/req_u1'), {
-    isFulfilled: true, fulfilledPostId: 'p_new', title: 'vandalised',
-  }));
-  const outsider = env.authenticatedContext('u3', OUTSIDER).firestore();
-  await assertFails(updateDoc(doc(outsider, 'requests/req_u1'), { isFulfilled: true }));
-});
-
 // --- requests: the *real* fulfilment write is a full-document set (I4) -------
 //
 // `app_store.addPost()` marks a request solved through
@@ -545,20 +462,9 @@ test('a fulfiller may mark a request solved and nothing else (I3)', async () => 
 // whose other fields are byte-identical is still allowed — these tests pin that
 // down against the exact document shape the client sends.
 
-test('a fulfiller may re-set the WHOLE request document with only the fulfilment fields changed (I4)', async () => {
-  await assertSucceeds(setDoc(doc(asKu2(), 'requests/req_full'),
-    fullRequest({ isFulfilled: true, fulfilledPostId: 'post_123' })));
-});
-
 test('a full-document fulfilment write that also edits the title is rejected (I4)', async () => {
   await assertFails(setDoc(doc(asKu2(), 'requests/req_full'),
     fullRequest({ isFulfilled: true, fulfilledPostId: 'post_123', title: 'vandalised' })));
-});
-
-test('an unchanged full-document re-set by a non-author is allowed, a changed one is not (I4)', async () => {
-  await assertSucceeds(setDoc(doc(asKu2(), 'requests/req_full'), fullRequest()));
-  await assertFails(setDoc(doc(asKu2(), 'requests/req_full'),
-    fullRequest({ rewardPoints: 9999 })));
 });
 
 test('an outsider cannot land the full-document fulfilment write (I4)', async () => {
@@ -762,6 +668,28 @@ test('notifications: recipient reads and marks read; nothing else', async () => 
   await assertFails(updateDoc(doc(asKu2(), 'notifications/n1'), { read: true }));
   await assertSucceeds(updateDoc(doc(asKu(), 'notifications/n1'), { read: true }));
   await assertFails(setDoc(doc(asKu(), 'notifications/n2'), { uid: 'u1', read: false }));
+});
+
+test('posts and requests: clients only read; every write goes through the server', async () => {
+  await env.withSecurityRulesDisabled(async (ctx) => {
+    await setDoc(doc(ctx.firestore(), 'posts/p1'), { authorId: 'u1', university_id: 'kyoto_u', reports: [], downloadCount: 0 });
+    await setDoc(doc(ctx.firestore(), 'requests/r1'), { authorId: 'u1', university_id: 'kyoto_u', isFulfilled: false });
+  });
+  await assertSucceeds(getDoc(doc(asKu2(), 'posts/p1')));
+  await assertSucceeds(getDoc(doc(asKu2(), 'requests/r1')));
+  await assertFails(getDoc(doc(asOutsider(), 'posts/p1')));
+  await assertFails(setDoc(doc(asKu(), 'posts/p2'), { authorId: 'u1', university_id: 'kyoto_u' }));
+  await assertFails(updateDoc(doc(asKu(), 'posts/p1'), { title: 'edited' }));
+  await assertFails(updateDoc(doc(asKu2(), 'posts/p1'), { downloadCount: 1 }));
+  await assertFails(deleteDoc(doc(asKu(), 'posts/p1')));
+  await assertFails(setDoc(doc(asKu(), 'requests/r2'), { authorId: 'u1', university_id: 'kyoto_u' }));
+  await assertFails(updateDoc(doc(asKu2(), 'requests/r1'), { isFulfilled: true }));
+});
+
+test('an upper-cased KU address is still a KU address (M1)', async () => {
+  const upper = env.authenticatedContext('u6', KU_UPPERCASE).firestore();
+  await assertSucceeds(getDoc(doc(upper, 'courses/any')));
+  await assertSucceeds(setDoc(doc(upper, 'user_timetables/u6'), { timetable: {} }));
 });
 
 // --- queries -----------------------------------------------------------------

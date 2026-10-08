@@ -105,45 +105,17 @@ service cloud.firestore {
     // an author could clear the flags on their own post and dodge the
     // auto-moderation threshold. Reports are only ever cleared by removing the
     // whole document through the moderation delete path below.
+    // Past exams / materials and the request board are written only by the
+    // Next.js server (/api/resources, /api/requests, /api/reports), which
+    // validates files, keeps the counters and grants credits (spec 2026-10-08 §6.2).
     match /posts/{id} {
       allow read: if kuDomain();
-      allow create: if kuVerified() && request.resource.data.authorId == request.auth.uid;
-      allow update: if signedIn()
-        && ((resource.data.authorId == request.auth.uid
-             && request.resource.data.authorId == resource.data.authorId
-             && request.resource.data.university_id == resource.data.university_id
-             && !request.resource.data.diff(resource.data).affectedKeys().hasAny(['reports']))
-            || (kuVerified()
-                && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['reports'])
-                && request.resource.data.reports.size()
-                     == resource.data.get('reports', []).size() + 1
-                && request.resource.data.reports.hasAll(resource.data.get('reports', []))
-                && request.resource.data.reports.hasAny([request.auth.uid])
-                && !resource.data.get('reports', []).hasAny([request.auth.uid]))
-            || (kuVerified()
-                && request.resource.data.diff(resource.data).affectedKeys()
-                     .hasOnly(['downloadCount', 'is5DownloadsRewarded', 'is10DownloadsRewarded'])
-                && request.resource.data.downloadCount == resource.data.get('downloadCount', 0) + 1
-                && (resource.data.get('is5DownloadsRewarded', false) == false
-                    || request.resource.data.is5DownloadsRewarded == true)
-                && (resource.data.get('is10DownloadsRewarded', false) == false
-                    || request.resource.data.is10DownloadsRewarded == true)));
-      allow delete: if signedIn()
-        && (resource.data.authorId == request.auth.uid
-            || (kuVerified() && resource.data.get('reports', []).size() >= 3));
+      allow write: if false;
     }
 
-    // The author owns the request; a *fulfiller* (anyone verified) may mark it
-    // solved, and nothing else — mirrors the `posts.reports` carve-out (I3).
     match /requests/{id} {
       allow read: if kuDomain();
-      allow create: if kuVerified() && request.resource.data.authorId == request.auth.uid;
-      allow update: if signedIn()
-        && (resource.data.authorId == request.auth.uid
-            || (kuVerified()
-                && request.resource.data.diff(resource.data).affectedKeys()
-                     .hasOnly(['isFulfilled', 'fulfilledPostId'])));
-      allow delete: if signedIn() && resource.data.authorId == request.auth.uid;
+      allow write: if false;
     }
 
     match /textbook_requests/{id} {

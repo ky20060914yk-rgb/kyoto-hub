@@ -1,7 +1,31 @@
 rules_version = '2';
 service firebase.storage {
   match /b/{bucket}/o {
-    // Locked down by default; M4 opens the upload paths it needs.
+    // Past exams / materials: the user uploads to their own pending folder;
+    // POST /api/resources validates and moves the files to resources/, which
+    // only the server (Admin SDK) can read. Downloads go through the server.
+    match /uploads/{uid}/pending/{uploadId}/{file} {
+      allow create: if request.auth != null
+        && request.auth.uid == uid
+        && request.auth.token.email_verified == true
+        && request.auth.token.email.lower().matches('^[^@]+@st[.]kyoto-u[.]ac[.]jp$')
+        && request.resource.size <= 20 * 1024 * 1024
+        && request.resource.contentType.matches('application/pdf|image/(jpeg|png|webp|heic)');
+      allow read, update, delete: if false;
+    }
+
+    // Textbook listing photos: public read, owner write, images up to 5MB.
+    match /textbook_photos/{uid}/{file} {
+      allow read: if true;
+      allow create: if request.auth != null
+        && request.auth.uid == uid
+        && request.auth.token.email_verified == true
+        && request.auth.token.email.lower().matches('^[^@]+@st[.]kyoto-u[.]ac[.]jp$')
+        && request.resource.size <= 5 * 1024 * 1024
+        && request.resource.contentType.matches('image/(jpeg|png|webp)');
+      allow delete: if request.auth != null && request.auth.uid == uid;
+    }
+
     match /{allPaths=**} {
       allow read, write: if false;
     }

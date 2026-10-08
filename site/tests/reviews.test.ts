@@ -3,7 +3,7 @@ import { adminDb } from '@/lib/server/admin';
 import { upsertReview, deleteReview, toggleHelpful } from '@/lib/server/reviews';
 import { balanceRef } from '@/lib/server/credits';
 import type { ReviewInput } from '@/lib/domain/review';
-import { clearEmulators } from './emu';
+import { clearEmulators, seedCourse } from './emu';
 
 const taro = { uid: 'taro', email: 'taro@st.kyoto-u.ac.jp' };
 const hana = { uid: 'hana', email: 'hana@st.kyoto-u.ac.jp' };
@@ -11,13 +11,6 @@ const input: ReviewInput = {
   rating: 5, rakutan: 'raku', attendance: 'none', grading: 'exam_only', pastExam: 'as_is', bringIn: 'no',
   comment: 'おすすめ', termTaken: '2025前期', gradeTaken: 'A',
 };
-
-export async function seedCourse(id = 'c_1', courseKey = 'bisekibun|yamada') {
-  await adminDb.collection('courses').doc(id).set({
-    id, courseKey, name: '微分積分学A', lecturer: '山田太郎', faculty: '全学共通', category: '全学共通科目',
-    dayOfWeek: 'Mon', period: 2, university_id: 'kyoto_u',
-  });
-}
 
 const stats = async () => (await adminDb.collection('course_stats').doc('bisekibun|yamada').get()).data();
 

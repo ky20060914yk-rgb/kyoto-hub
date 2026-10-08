@@ -1,5 +1,5 @@
 // Helpers for emulator-backed tests. Run through tools/test_site.sh.
-import { adminAuth } from '@/lib/server/admin';
+import { adminAuth, adminDb } from '@/lib/server/admin';
 
 const PROJECT = process.env.GCLOUD_PROJECT ?? 'demo-site-test';
 const AUTH_HOST = process.env.FIREBASE_AUTH_EMULATOR_HOST ?? '127.0.0.1:9099';
@@ -32,3 +32,11 @@ export const req = (token?: string, body?: unknown, method = 'POST') =>
     headers: { ...(token ? { Authorization: `Bearer ${token}` } : {}), 'Content-Type': 'application/json' },
     body: body === undefined ? undefined : JSON.stringify(body),
   });
+
+export async function seedCourse(id = 'c_1', courseKey = 'bisekibun|yamada') {
+  await adminDb.collection('courses').doc(id).set({
+    id, courseKey, name: '微分積分学A', lecturer: '山田太郎', faculty: '全学共通', category: '全学共通科目',
+    dayOfWeek: 'Mon', period: 2, university_id: 'kyoto_u',
+  });
+}
+
