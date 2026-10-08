@@ -163,6 +163,9 @@
 @utility animate-rise { animation: rise 400ms var(--ease-out-cubic) both; }
 @utility animate-grow { animation: grow 260ms var(--ease-out-cubic) both; }
 @utility grid-cols-timetable { grid-template-columns: 2.5rem repeat(5, minmax(0, 1fr)); }
+@utility grid-cols-dl { grid-template-columns: 6rem 1fr; }
+/* chat page: viewport minus app bar (and the tab bar on mobile) */
+@utility min-h-chat { min-height: calc(100dvh - 3.5rem - 64px); @media (width >= 48rem) { min-height: calc(100dvh - 3.5rem); } }
 @utility grid-cols-dist { grid-template-columns: 7rem 1fr 2.5rem; }
 @utility animate-shimmer { animation: shimmer 1.2s ease-in-out infinite; }
 @utility animate-sheet-up { animation: sheet-up 260ms var(--ease-out-cubic) both; }

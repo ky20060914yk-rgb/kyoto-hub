@@ -215,6 +215,46 @@ service cloud.firestore {
       allow create, delete: if false;
     }
 
+    // Textbook marketplace (redesign spec §4.4). Listings, chats, ratings and
+    // rating aggregates are written by the server; chat members send messages
+    // directly (real-time) and may bump the chat preview, nothing else.
+    match /textbook_listings/{id} {
+      allow read: if kuDomain();
+      allow write: if false;
+    }
+
+    match /chats/{chatId} {
+      allow read: if signedIn() && request.auth.uid in resource.data.members;
+      allow update: if kuVerified() && request.auth.uid in resource.data.members
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['lastMessage', 'lastAt'])
+        && request.resource.data.lastMessage is string
+        && request.resource.data.lastMessage.size() <= 1000;
+      allow create, delete: if false;
+
+      match /messages/{msgId} {
+        allow read: if signedIn()
+          && request.auth.uid in get(/databases/$(database)/documents/chats/$(chatId)).data.members;
+        allow create: if kuVerified()
+          && request.auth.uid in get(/databases/$(database)/documents/chats/$(chatId)).data.members
+          && request.resource.data.senderId == request.auth.uid
+          && request.resource.data.text is string
+          && request.resource.data.text.size() > 0
+          && request.resource.data.text.size() <= 1000
+          && request.resource.data.keys().hasOnly(['senderId', 'text', 'createdAt']);
+        allow update, delete: if false;
+      }
+    }
+
+    match /trade_ratings/{id} {
+      allow read: if kuDomain();
+      allow write: if false;
+    }
+
+    match /user_stats/{uid} {
+      allow read: if kuDomain();
+      allow write: if false;
+    }
+
     match /{document=**} {
       allow read, write: if false;
     }

@@ -692,6 +692,30 @@ test('an upper-cased KU address is still a KU address (M1)', async () => {
   await assertSucceeds(setDoc(doc(upper, 'user_timetables/u6'), { timetable: {} }));
 });
 
+test('chats: members read and post as themselves; outsiders and forged senders are refused', async () => {
+  await env.withSecurityRulesDisabled(async (ctx) => {
+    await setDoc(doc(ctx.firestore(), 'chats/l1_u2'), { members: ['u1', 'u2'], lastMessage: '', lastAt: '', status: 'open' });
+  });
+  const KU3 = env.authenticatedContext('u7', { sub: 'u7', email: 'z@st.kyoto-u.ac.jp', email_verified: true }).firestore();
+  await assertSucceeds(getDoc(doc(asKu(), 'chats/l1_u2')));
+  await assertFails(getDoc(doc(KU3, 'chats/l1_u2')));
+  await assertSucceeds(setDoc(doc(asKu(), 'chats/l1_u2/messages/m1'), { senderId: 'u1', text: 'こんにちは', createdAt: 'x' }));
+  await assertFails(setDoc(doc(asKu(), 'chats/l1_u2/messages/m2'), { senderId: 'u2', text: 'なりすまし', createdAt: 'x' }));
+  await assertFails(setDoc(doc(KU3, 'chats/l1_u2/messages/m3'), { senderId: 'u7', text: '割り込み', createdAt: 'x' }));
+  await assertFails(setDoc(doc(asKu(), 'chats/l1_u2/messages/m4'), { senderId: 'u1', text: '', createdAt: 'x' }));
+  await assertSucceeds(getDocs(collection(asKu2(), 'chats/l1_u2/messages')));
+  await assertSucceeds(updateDoc(doc(asKu(), 'chats/l1_u2'), { lastMessage: 'こんにちは', lastAt: 'y' }));
+  await assertFails(updateDoc(doc(asKu(), 'chats/l1_u2'), { status: 'done' }));
+  await assertFails(setDoc(doc(asKu(), 'chats/l9_u1'), { members: ['u1', 'u2'] }));
+});
+
+test('textbook listings, ratings and user_stats are server-only writes', async () => {
+  await assertSucceeds(getDoc(doc(asKu(), 'textbook_listings/x')));
+  await assertFails(setDoc(doc(asKu(), 'textbook_listings/x'), { sellerId: 'u1' }));
+  await assertFails(setDoc(doc(asKu(), 'trade_ratings/x'), { from: 'u1', stars: 5 }));
+  await assertFails(setDoc(doc(asKu(), 'user_stats/u1'), { tradeRatingSum: 99 }));
+});
+
 // --- queries -----------------------------------------------------------------
 // Rules gate queries, they do not filter them: a listen is allowed only when the
 // rule can be satisfied for every document the query could return. These mirror

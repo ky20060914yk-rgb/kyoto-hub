@@ -33,8 +33,8 @@ export async function loadCatalog(): Promise<CatalogCourse[]> {
   return snap.docs.map((d) => toCatalog(d.id, d.data())).filter((c) => c.courseKey && c.name);
 }
 
-/** Lower-cased NFKC without spaces: 「ﾋﾞｾｷﾌﾞﾝ Ａ」 and 「ビセキブン a」 compare equal. */
-export const norm = (s: string) => s.normalize('NFKC').toLowerCase().replace(/\s+/g, '');
+export { norm } from '@/lib/norm';
+import { norm } from '@/lib/norm';
 
 export function searchCatalog(
   catalog: CatalogCourse[], q: string, filter: { day?: string | null; period?: number | null } = {}, limit = 30,
