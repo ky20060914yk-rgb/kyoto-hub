@@ -208,72 +208,39 @@ service cloud.firestore {
     // catch-all deny). `courseSlug` is the client-side escape ('/' -> '%2F',
     // '%' -> '%25', see `Review.slug`); rules cannot compute it, so it is stored
     // on the document and pinned on edit alongside `courseKey`.
+    // Reviews and their per-course aggregate are written ONLY by the Next.js
+    // server (Admin SDK, POST /api/reviews), which keeps them in one
+    // transaction and grants the review credits. Clients only read. The
+    // aggregate is shown on public pages, so a client must not be able to
+    // forge it (spec 2026-10-08 §6.2).
     match /reviews/{reviewId} {
       allow read: if kuDomain();
-      allow create: if kuVerified()
-        && reviewId == request.resource.data.courseSlug + '_' + request.auth.uid
-        && request.resource.data.authorId == request.auth.uid
-        && request.resource.data.university_id == 'kyoto_u'
-        && request.resource.data.rating is int
-        && request.resource.data.rating >= 1 && request.resource.data.rating <= 5
-        && request.resource.data.helpfulBy == [];
-      allow update: if signedIn()
-        && ((resource.data.authorId == request.auth.uid
-             && request.resource.data.authorId == resource.data.authorId
-             && request.resource.data.courseKey == resource.data.courseKey
-             // C1: pinned alongside courseKey — the doc id is derived from the
-             // slug, so letting it drift would divorce the id from its field.
-             // `.get()` on both sides so a document written before C1 (which
-             // carries neither) is still editable rather than erroring out.
-             && request.resource.data.get('courseSlug', '')
-                  == resource.data.get('courseSlug', '')
-             && request.resource.data.university_id == resource.data.university_id
-             && request.resource.data.rating is int
-             && request.resource.data.rating >= 1 && request.resource.data.rating <= 5
-             && !request.resource.data.diff(resource.data).affectedKeys().hasAny(['helpfulBy']))
-            || (kuVerified()
-                // I3: the author may not vote for their own review. `helpfulBy`
-                // feeds the マイページ 貢献 badge, so a self-vote is a user
-                // inflating their own score; unlike `posts.reports` (a cost the
-                // author may legitimately pay against themselves) there is no
-                // honest reason to allow it. The UI disables the button too, but
-                // this is the half that actually holds.
-                && resource.data.authorId != request.auth.uid
-                && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['helpfulBy'])
-                && request.resource.data.helpfulBy.size()
-                     == resource.data.get('helpfulBy', []).size() + 1
-                && request.resource.data.helpfulBy.hasAll(resource.data.get('helpfulBy', []))
-                && request.resource.data.helpfulBy.hasAny([request.auth.uid])
-                && !resource.data.get('helpfulBy', []).hasAny([request.auth.uid])));
-      allow delete: if signedIn() && resource.data.authorId == request.auth.uid;
+      allow write: if false;
     }
 
-    // Per-course roll-up maintained client-side in the same transaction as a
-    // review write (Phase 1 has no Cloud Functions). Trust-based: any verified KU
-    // account may create or update any course's aggregate, so the counters are
-    // only as honest as the client that wrote them — Phase 2 replaces this with a
-    // Function-authored aggregate. What the rule *does* enforce is a shape floor:
-    // the doc stays on `kyoto_u` and its two scalar counters stay non-negative
-    // ints, so a crafted write cannot poison a reader with a negative or
-    // non-numeric count. Deletion is forbidden outright — unlike a review, an
-    // aggregate has no owner who could legitimately remove it, and dropping it
-    // would silently zero a course's history. (This is *not* the `transactions`
-    // tier: `transactions` forbids update as well as delete; here update is the
-    // whole point of the collection.)
-    // Both create and update allow counter-only writes (e.g., bumpPostCount with
-    // merge: true) that omit review fields, using .get() defaults for absent fields.
-    // The document id is `Review.slug(courseKey)` (C1), not the raw courseKey —
-    // the wildcard is unused in the body, so no rule change follows from that,
-    // but the name should not claim otherwise.
     match /course_stats/{statsId} {
       allow read: if kuDomain();
-      allow create, update: if kuVerified()
-        && request.resource.data.university_id == 'kyoto_u'
-        && request.resource.data.get('reviewCount', 0) is int
-        && request.resource.data.get('reviewCount', 0) >= 0
-        && request.resource.data.get('ratingSum', 0) is int
-        && request.resource.data.get('ratingSum', 0) >= 0;
-      allow delete: if false;
+      allow write: if false;
+    }
+
+    // Credits (2A plan P2-1): server-only writes, own-doc reads.
+    match /credit_balances/{uid} {
+      allow read: if owns(uid);
+      allow write: if false;
+    }
+
+    match /credits_ledger/{id} {
+      allow read: if signedIn() && resource.data.uid == request.auth.uid;
+      allow write: if false;
+    }
+
+    // Notifications are created by the server; the recipient may only flip `read`.
+    match /notifications/{id} {
+      allow read: if signedIn() && resource.data.uid == request.auth.uid;
+      allow update: if signedIn() && resource.data.uid == request.auth.uid
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['read'])
+        && request.resource.data.read == true;
+      allow create, delete: if false;
     }
 
     match /{document=**} {

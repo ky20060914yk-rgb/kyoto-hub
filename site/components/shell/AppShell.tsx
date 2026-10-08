@@ -2,7 +2,7 @@
 
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
-import { useEffect } from 'react';
+import { Suspense, useEffect } from 'react';
 import { useAuth } from '@/components/auth/AuthProvider';
 import { Logo } from '@/components/brand/Logo';
 import { Icon } from '@/components/ui/Icon';
@@ -10,32 +10,47 @@ import { Skeleton } from '@/components/ui/Skeleton';
 import { NAV, isActive } from './nav';
 import { useUnreadCount } from './useUnreadCount';
 
-/** Signed-in frame: sidebar on desktop, bottom tabs on mobile. Redirects signed-out / unverified users. */
+/**
+ * App frame: sidebar on desktop, bottom tabs on mobile. With `requireAuth`,
+ * signed-out / unverified users are redirected. Everything that reads the URL
+ * sits inside <Suspense> so pages keep a prerendered static shell.
+ */
 export function AppShell({ children, requireAuth = true }: { children: React.ReactNode; requireAuth?: boolean }) {
-  const { user, loading, verified } = useAuth();
-  const router = useRouter();
-  const pathname = usePathname();
-
-  useEffect(() => {
-    if (!requireAuth || loading) return;
-    if (!user) router.replace(`/login?next=${encodeURIComponent(pathname)}`);
-    else if (!verified) router.replace('/verify');
-  }, [requireAuth, loading, user, verified, router, pathname]);
-
-  const ready = !requireAuth || (!loading && verified);
-
   return (
     <div className="min-h-dvh md:flex">
-      <Sidebar pathname={pathname} />
+      <Suspense fallback={<aside className="hidden w-sidebar shrink-0 border-r border-line bg-surface md:block" />}>
+        <Sidebar />
+      </Suspense>
       <div className="min-w-0 flex-1 pb-tabbar md:pb-0">
-        {ready ? children : <ShellSkeleton />}
+        {requireAuth ? (
+          <Suspense fallback={<ShellSkeleton />}>
+            <AuthGate>{children}</AuthGate>
+          </Suspense>
+        ) : (
+          children
+        )}
       </div>
-      <BottomTabs pathname={pathname} />
+      <Suspense fallback={null}>
+        <BottomTabs />
+      </Suspense>
     </div>
   );
 }
 
-function Sidebar({ pathname }: { pathname: string }) {
+function AuthGate({ children }: { children: React.ReactNode }) {
+  const { user, loading, verified } = useAuth();
+  const router = useRouter();
+  const pathname = usePathname();
+  useEffect(() => {
+    if (loading) return;
+    if (!user) router.replace(`/login?next=${encodeURIComponent(pathname)}`);
+    else if (!verified) router.replace('/verify');
+  }, [loading, user, verified, router, pathname]);
+  return !loading && verified ? children : <ShellSkeleton />;
+}
+
+function Sidebar() {
+  const pathname = usePathname();
   const unread = useUnreadCount();
   return (
     <aside className="sticky top-0 hidden h-dvh w-sidebar shrink-0 flex-col border-r border-line bg-surface px-3 py-5 md:flex">
@@ -64,7 +79,8 @@ function Sidebar({ pathname }: { pathname: string }) {
   );
 }
 
-function BottomTabs({ pathname }: { pathname: string }) {
+function BottomTabs() {
+  const pathname = usePathname();
   return (
     <nav aria-label="メイン"
       className="fixed inset-x-0 bottom-0 z-20 border-t border-line bg-surface pb-safe md:hidden">

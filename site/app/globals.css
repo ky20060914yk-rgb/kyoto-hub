@@ -146,6 +146,10 @@
   from { opacity: 0; transform: translateY(16px); }
   to { opacity: 1; transform: none; }
 }
+@keyframes grow {
+  from { transform: scaleX(0); }
+  to { transform: none; }
+}
 @keyframes shimmer {
   0%, 100% { opacity: 1; }
   50% { opacity: 0.55; }
@@ -157,6 +161,8 @@
 @utility animate-pop { animation: pop 180ms var(--ease-out-cubic); }
 @utility animate-fade-in { animation: fade-in 180ms var(--ease-out-cubic) both; }
 @utility animate-rise { animation: rise 400ms var(--ease-out-cubic) both; }
+@utility animate-grow { animation: grow 260ms var(--ease-out-cubic) both; }
+@utility grid-cols-dist { grid-template-columns: 7rem 1fr 2.5rem; }
 @utility animate-shimmer { animation: shimmer 1.2s ease-in-out infinite; }
 @utility animate-sheet-up { animation: sheet-up 260ms var(--ease-out-cubic) both; }
 

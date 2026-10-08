@@ -1,12 +1,9 @@
 import 'server-only';
 import { adminAuth } from './admin';
 import { isKuEmail } from '@/lib/ku';
+import { HttpError } from '@/lib/http-error';
 
-export class HttpError extends Error {
-  constructor(public status: number, message: string) {
-    super(message);
-  }
-}
+export { HttpError };
 
 export type KuUser = { uid: string; email: string };
 
