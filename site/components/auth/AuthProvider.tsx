@@ -18,6 +18,20 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       ),
     [],
   );
+  // First verified session: claim the welcome credits + invitation code (idempotent server-side).
+  const uid = state.verified ? state.user?.uid : undefined;
+  useEffect(() => {
+    if (!uid) return;
+    const key = `welcome:${uid}`;
+    try {
+      if (sessionStorage.getItem(key)) return;
+      sessionStorage.setItem(key, '1');
+    } catch {
+      /* storage blocked: the server call is idempotent anyway */
+    }
+    authedFetch('/api/welcome', { method: 'POST' }).catch(() => {});
+  }, [uid]);
+
   return <AuthContext.Provider value={state}>{children}</AuthContext.Provider>;
 }
 

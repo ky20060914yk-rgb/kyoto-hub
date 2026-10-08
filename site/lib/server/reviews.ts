@@ -3,6 +3,7 @@ import { FieldValue } from 'firebase-admin/firestore';
 import { adminDb } from './admin';
 import { grantReviewBonuses, type ReviewBonus } from './credits';
 import type { KuUser } from './auth';
+import { notify } from './notify';
 import { HttpError } from '@/lib/http-error';
 import {
   applyReview, reviewDocId, slug, statsFromDoc, type CourseStats, type Review, type ReviewInput,
@@ -90,6 +91,10 @@ export async function toggleHelpful(user: KuUser, reviewId: string) {
     const by = Array.isArray(r.helpfulBy) ? r.helpfulBy : [];
     const helpful = !by.includes(user.uid);
     tx.update(ref, { helpfulBy: helpful ? FieldValue.arrayUnion(user.uid) : FieldValue.arrayRemove(user.uid) });
+    if (helpful) {
+      notify({ uid: r.authorId, kind: 'review_helpful', title: `「${r.courseName}」のレビューが役に立ったと言われました`,
+        href: `/mypage#reviews` }, tx);
+    }
     return { helpful, count: by.length + (helpful ? 1 : -1), courseKey: r.courseKey };
   });
 }
