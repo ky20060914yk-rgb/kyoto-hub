@@ -11,7 +11,7 @@ export const metadata: Metadata = {
   description: '京大生だけの授業レビュー、楽単ランキング、過去問・資料、教科書の売買。履修と試験の判断を、先輩の情報で。',
 };
 
-export default function RootLayout({ children }: LayoutProps<'/'>) {
+export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="ja" className={`${noto.variable} h-full antialiased`}>
       <body className="min-h-full">

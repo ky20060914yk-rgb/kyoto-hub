@@ -1,6 +1,6 @@
 import 'server-only';
 import { cacheLife, cacheTag } from 'next/cache';
-import { loadCatalog, fetchPublicCourse, fetchRankings, fetchIndexableCourses } from './public';
+import { loadCatalog, fetchPublicCourse, fetchRankings, fetchIndexableCourses, fetchSiteStats } from './public';
 
 // Cached entry points for pages and Route Handlers. Writes call
 // revalidateTag('course:<id>' | 'rankings' | 'catalog', 'max').
@@ -31,4 +31,11 @@ export async function getIndexableCourses() {
   cacheLife('hours');
   cacheTag('rankings');
   return fetchIndexableCourses(await getCatalog());
+}
+
+export async function getSiteStats() {
+  'use cache';
+  cacheLife('hours');
+  cacheTag('rankings');
+  return fetchSiteStats(await getCatalog());
 }

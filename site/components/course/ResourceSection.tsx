@@ -198,6 +198,7 @@ export function ResourceSection({ courseId, courseKey }: { courseId: string; cou
                         </Button>
                       ))}
                       <span className="ml-auto text-caption text-ink-2 tabular">{p.downloadCount}回ダウンロード</span>
+                      <span className="w-full text-label text-ink-disabled">資料ID: {p.id}</span>
                     </div>
                   </li>
                 );

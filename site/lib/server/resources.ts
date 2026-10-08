@@ -190,16 +190,17 @@ export async function reportPost(user: KuUser, postId: string, reason: string) {
 
 /** Rights-holder takedown: hide immediately, queue with priority (spec A3). Credits are never clawed back. */
 export async function requestTakedown(input: { postId: string; name: string; email: string; affiliation: string; detail: string }) {
-  const ref = posts().doc(input.postId);
-  const snap = await ref.get();
+  // A rights holder may not know the id; the request is queued either way.
+  const ref = input.postId ? posts().doc(input.postId) : null;
+  const snap = ref ? await ref.get() : null;
   await adminDb.runTransaction(async (tx) => {
-    if (snap.exists) tx.update(ref, { hidden: true });
+    if (ref && snap?.exists) tx.update(ref, { hidden: true });
     tx.create(adminDb.collection('moderation_queue').doc(), {
-      kind: 'takedown', postId: input.postId, postFound: snap.exists, name: input.name, email: input.email,
+      kind: 'takedown', postId: input.postId || null, postFound: !!snap?.exists, name: input.name, email: input.email,
       affiliation: input.affiliation, detail: input.detail, priority: true, createdAt: new Date().toISOString(), status: 'open',
     });
   });
-  if (snap.exists) {
+  if (snap?.exists) {
     const p = snap.data()!;
     await notify({ uid: p.authorId, kind: 'resource_removed', title: `「${p.title}」が権利者の申し立てにより非公開になりました`,
       body: '獲得したクレジットはそのままです。' });

@@ -161,6 +161,9 @@
 @utility animate-pop { animation: pop 180ms var(--ease-out-cubic); }
 @utility animate-fade-in { animation: fade-in 180ms var(--ease-out-cubic) both; }
 @utility animate-rise { animation: rise 400ms var(--ease-out-cubic) both; }
+@utility delay-60 { animation-delay: 60ms; }
+@utility delay-120 { animation-delay: 120ms; }
+@utility delay-180 { animation-delay: 180ms; }
 @utility animate-grow { animation: grow 260ms var(--ease-out-cubic) both; }
 @utility grid-cols-timetable { grid-template-columns: 2.5rem repeat(5, minmax(0, 1fr)); }
 @utility grid-cols-dl { grid-template-columns: 6rem 1fr; }

@@ -117,3 +117,9 @@ export async function fetchIndexableCourses(catalog: CatalogCourse[]): Promise<{
     return id ? [{ id, lastReviewAt: typeof d.data().lastReviewAt === 'string' ? d.data().lastReviewAt : null }] : [];
   });
 }
+
+/** Numbers for the landing page: course count and total reviews. */
+export async function fetchSiteStats(catalog: CatalogCourse[]) {
+  const reviews = await adminDb.collection('reviews').count().get();
+  return { courses: new Set(catalog.map((c) => c.courseKey)).size, reviews: reviews.data().count };
+}

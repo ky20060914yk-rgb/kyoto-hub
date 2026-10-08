@@ -276,39 +276,16 @@ Phase 1 では**ライトのみ**。ただし色は必ずトークン経由で�
 
 ## 8. 実装ルール
 
-### 8.1 Flutter（アプリ）
-- 色・文字・余白・角丸・時間は **`lib/theme/` にまとめる**（`app_colors.dart` / `app_text.dart` / `app_tokens.dart` / `app_theme.dart`）
-- 画面コードに `Color(0xFF...)`、`Colors.xxx`、直書きの `fontSize:`、`BorderRadius.circular(数字)` を**書かない**。必ずトークンを使う
-  - 例外：`Colors.transparent` と `Colors.white`（`brand` 上の文字）のみ
-- `ThemeData` に `colorScheme`、`textTheme`、`appBarTheme`、`navigationBarTheme`、`filledButtonTheme`、`outlinedButtonTheme`、`inputDecorationTheme`、`chipTheme`、`dividerTheme` を設定し、各画面は**既定のウィジェットをそのまま使えば正しい見た目になる**状態にする
-- フォントは `google_fonts` パッケージで Noto Sans JP（400/500/700）
-- アニメーションは Flutter 標準（`AnimatedContainer`、`AnimatedSwitcher`、`TweenAnimationBuilder`）で足りる。アニメーション用パッケージは追加しない
-
-```dart
-// lib/theme/app_colors.dart（抜粋）
-abstract final class AppColors {
-  static const brand = Color(0xFF0F4C81);
-  static const brandPressed = Color(0xFF0B3A63);
-  static const brandSubtle = Color(0xFFE8F0F8);
-  static const bg = Color(0xFFF9F7F6);
-  static const surface = Color(0xFFFFFFFF);
-  static const surfaceMuted = Color(0xFFF2EFEC);
-  static const border = Color(0xFFE7E3DE);
-  static const borderStrong = Color(0xFFD6D1CA);
-  static const textPrimary = Color(0xFF25221E);
-  static const textSecondary = Color(0xFF6B6660);
-  static const textDisabled = Color(0xFFA39E96);
-  static const star = Color(0xFFC98500);
-  // success / warning / danger / 時間割 8 色は 2.1 の表どおり
-}
-
-// lib/theme/app_tokens.dart（抜粋）
-abstract final class AppMotion {
-  static const instant = Duration(milliseconds: 100);
-  static const fast = Duration(milliseconds: 180);
-  static const normal = Duration(milliseconds: 260);
-}
-```
+### 8.1 Next.js（アプリ・LP 共通。`site/`）
+- トークンは **`site/app/globals.css` の `@theme` だけ** に定義する。Tailwind のユーティリティ名はトークン名に対応する：
+  - 色：`bg-brand` `bg-brand-subtle` `bg-canvas`（=bg）`bg-surface` `bg-surface-muted` `border-line`（=border）`border-line-strong` `text-ink`（=textPrimary）`text-ink-2`（=textSecondary）`text-ink-disabled` `text-success` / `bg-success-bg` など、時間割は `bg-course-blue text-course-blue-fg` など
+  - 文字：`text-display` `text-title` `text-heading` `text-body` `text-caption` `text-label`、LP は `text-hero` `md:text-hero-lg` `text-h2` `text-lead` `text-stat` など
+  - 角丸：`rounded-s|m|l|xl|full`、影：`shadow-float` `shadow-mock`、時間：`duration-instant|fast|normal|slow`、`ease-out-cubic`
+  - アニメーション：`animate-pop`（★・役に立った）`animate-fade-in` `animate-rise`（LP）`animate-sheet-up` `animate-grow`（分布バー）`animate-shimmer`（スケルトン）
+- `app/` と `components/` に **`#hex`・`rgb()`・`text-[13px]` のような任意値を書かない**。`site/tests/tokens.test.ts` が検出して失敗する。新しい値が必要なら `globals.css` に追加してから使う
+- 部品は `site/components/` にある既存のものを使う：`ui/Button`（primary / secondary / text / danger）、`ui/TextField`、`ui/Sheet`（ボトムシート）、`ui/Skeleton` と `EmptyState`、`course/bits`（`Stars` `Chip` `RakutanChip` `CourseRow` `DistributionBars`）、`shell/AppShell` と `AppBar`
+- フォントは `next/font/google` の Noto Sans JP（400/500/700）。アニメーションライブラリは入れない（CSS とトランジション、`IntersectionObserver` だけ）
+- 「視差効果を減らす」設定は `globals.css` の `prefers-reduced-motion` で一括して止めている。個別に JS で動かすもの（`CountUp`）も同じ設定を確認する
 
 ### 8.2 LP（HTML/CSS）
 ```css
