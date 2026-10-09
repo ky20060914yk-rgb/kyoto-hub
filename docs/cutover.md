@@ -12,7 +12,7 @@
 1. ★ Firebase プロジェクト `kyodai-sns` を **Blaze プラン**にする（App Hosting に必要。この規模なら無料枠内の見込み）。
 2. ★ App Hosting のバックエンドを作る：
    ```bash
-   firebase apphosting:backends:create --project kyodai-sns --location asia-east1
+   firebase apphosting:backends:create --project kyodai-sns --primary-region asia-east1 --root-dir site
    ```
    - リポジトリ：GitHub の本リポジトリ、ルートディレクトリ：`site`、本番ブランチ：まずは `nextjs-migration`
 3. ★ App Hosting のサービスアカウントに Firestore / Storage / Auth（トークン検証）の権限があることを確認（既定で付与される。署名付き URL は使っていないので `signBlob` 権限は不要）。
