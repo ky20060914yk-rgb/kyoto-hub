@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { assignColors, slotKey, todaySchedule, currentPeriod, colorFor } from '@/lib/timetable';
+import { assignColors, slotKey, todaySchedule, currentPeriod, colorFor, shortCourseName } from '@/lib/timetable';
 
 describe('assignColors', () => {
   it('gives neighbours different colors and a multi-slot course one color', () => {
@@ -42,5 +42,14 @@ describe('todaySchedule', () => {
 
   it('colorFor is stable', () => {
     expect(colorFor('微分積分学')).toBe(colorFor('微分積分学'));
+  });
+});
+
+describe('shortCourseName', () => {
+  it('drops bracketed qualifiers', () => {
+    expect(shortCourseName('微分積分学(講義・演義)A1A3')).toBe('微分積分学 A1A3');
+    expect(shortCourseName('心理学 (演習) (心理演習)')).toBe('心理学');
+    expect(shortCourseName('(講義)')).toBe('(講義)');
+    expect(shortCourseName('英語リーディング')).toBe('英語リーディング');
   });
 });

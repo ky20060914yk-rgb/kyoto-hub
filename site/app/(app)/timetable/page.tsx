@@ -12,7 +12,7 @@ import { Icon } from '@/components/ui/Icon';
 import { Skeleton } from '@/components/ui/Skeleton';
 import { SearchBox } from '@/components/search/SearchBox';
 import { DAYS, DAY_LABEL, type CatalogCourse, type Day } from '@/lib/public-types';
-import { ACCENT_CLASS, COLOR_CLASS, PERIODS, PERIOD_TIME, assignColors, currentPeriod, slotKey, todaySchedule, type CourseColor } from '@/lib/timetable';
+import { COLOR_CLASS, PERIODS, PERIOD_TIME, assignColors, currentPeriod, shortCourseName, slotKey, todaySchedule, type CourseColor } from '@/lib/timetable';
 import { HeroBand } from '@/components/shell/HeroBand';
 import { useNow } from '@/lib/use-now';
 
@@ -105,12 +105,14 @@ export default function TimetablePage() {
         {timetable === null ? (
           <Skeleton className="h-96" />
         ) : (
-          <div className="grid grid-cols-timetable gap-1" role="grid" aria-label="時間割">
+          <div className="grid grid-cols-timetable gap-1.5 rounded-xl bg-surface p-2 shadow-float md:gap-2 md:p-3" role="grid" aria-label="時間割">
             <div />
             {DAYS.map((d) => (
-              <div key={d} role="columnheader"
-                className={`rounded-s py-1.5 text-center text-label ${d === today ? 'bg-brand font-bold text-on-brand' : 'text-ink-2'}`}>
-                {DAY_LABEL[d]}{d === today ? <span className="sr-only">（今日）</span> : null}
+              <div key={d} role="columnheader" className="flex justify-center py-1">
+                <span className={`grid size-7 place-items-center rounded-full text-label ${d === today ? 'bg-brand font-bold text-on-brand' : 'text-ink-2'}`}>
+                  {DAY_LABEL[d]}
+                </span>
+                {d === today ? <span className="sr-only">（今日）</span> : null}
               </div>
             ))}
             {PERIODS.map((p) => (
@@ -124,9 +126,9 @@ export default function TimetablePage() {
                   if (!id) {
                     return (
                       <button key={key} onClick={() => setPicking({ day: d, period: p })} aria-label={`${DAY_LABEL[d]}曜${p}限に科目を登録`}
-                        className={`grid min-h-24 place-items-center rounded-s border border-dashed text-ink-disabled transition-colors duration-instant hover:border-brand hover:text-brand md:min-h-28 ${
-                          isToday ? 'border-brand/40 bg-brand-subtle' : 'border-line-strong bg-surface'}`}>
-                        <Icon name="plus" className="size-5" />
+                        className={`group grid min-h-24 place-items-center rounded-l transition-colors duration-fast md:min-h-28 ${
+                          isToday ? 'bg-brand-subtle hover:bg-brand-subtle' : 'bg-canvas hover:bg-surface-muted'}`}>
+                        <Icon name="plus" className="size-4 text-line-strong transition-colors duration-fast group-hover:text-brand group-active:text-brand" />
                       </button>
                     );
                   }
@@ -134,11 +136,11 @@ export default function TimetablePage() {
                   return (
                     <button key={key} onClick={() => setSelected({ day: d, period: p })}
                       aria-current={isNow ? 'time' : undefined}
-                      className={`relative flex min-h-24 flex-col items-start overflow-hidden rounded-s border-l-4 p-1.5 text-left transition-transform duration-instant active:scale-95 md:min-h-28 md:p-2 ${COLOR_CLASS[color]} ${ACCENT_CLASS[color]} ${
-                        isNow ? 'ring-2 ring-brand ring-offset-1' : ''} ${justAdded === key ? 'animate-fade-in' : ''}`}>
-                      {isNow ? <span className="mb-0.5 rounded-s bg-brand px-1 text-label text-on-brand">授業中</span> : null}
-                      <span className="line-clamp-3 text-label font-bold">{c?.name ?? '…'}</span>
-                      <span className="mt-auto line-clamp-1 text-label opacity-80">{c?.lecturer}</span>
+                      className={`relative flex min-h-24 flex-col items-start overflow-hidden rounded-l p-2 text-left transition-transform duration-instant active:scale-95 md:min-h-28 md:p-2.5 ${COLOR_CLASS[color]} ${
+                        isNow ? 'ring-2 ring-brand ring-offset-2' : ''} ${justAdded === key ? 'animate-fade-in' : ''}`}>
+                      {isNow ? <span className="mb-1 rounded-full bg-brand px-1.5 text-label text-on-brand">授業中</span> : null}
+                      <span className="line-clamp-3 text-label font-bold">{c ? shortCourseName(c.name) : '…'}</span>
+                      <span className="mt-auto w-full truncate text-label opacity-80">{c?.lecturer}</span>
                     </button>
                   );
                 })}
@@ -179,7 +181,7 @@ export default function TimetablePage() {
 function Row({ period, now, children }: { period: number; now?: boolean; children: React.ReactNode }) {
   return (
     <>
-      <div className={`flex flex-col items-center justify-center rounded-s ${now ? 'text-brand' : 'text-ink-2'}`} role="rowheader">
+      <div className={`flex flex-col items-center justify-center ${now ? 'text-brand' : 'text-ink-2'}`} role="rowheader">
         <span className="text-heading tabular">{period}</span>
         <span className="text-label tabular">{PERIOD_TIME[period]}</span>
       </div>

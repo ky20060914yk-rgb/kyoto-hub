@@ -100,3 +100,12 @@ export function currentPeriod(now: Date | null = new Date()): { day: Day; period
   const p = PERIODS.find((x) => t >= minutes(PERIOD_TIME[x]) && t < minutes(PERIOD_END[x]));
   return p ? { day, period: p } : null;
 }
+
+/**
+ * Short name for a timetable cell: drops bracketed qualifiers such as
+ * 「(講義・演義)」 so the subject itself fits. Falls back to the full name.
+ */
+export function shortCourseName(name: string): string {
+  const s = name.normalize('NFKC').replace(/\s*[(（【\[][^)）】\]]*[)）】\]]\s*/g, ' ').replace(/\s+/g, ' ').trim();
+  return s || name;
+}
