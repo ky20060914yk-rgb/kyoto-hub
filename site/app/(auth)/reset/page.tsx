@@ -34,7 +34,7 @@ export default function ResetPage() {
         </p>
       ) : (
         <form onSubmit={submit} className="mt-6 flex flex-col gap-4">
-          <TextField label="京大メールアドレス" type="email" autoComplete="email" value={email} onChange={(e) => setEmail(e.target.value)} required />
+          <TextField label="京大メールアドレス" type="email" name="username" autoComplete="username" value={email} onChange={(e) => setEmail(e.target.value)} required />
           {error ? <p role="alert" className="text-caption text-danger">{error}</p> : null}
           <Button type="submit" loading={busy} disabled={!email}>再設定メールを送る</Button>
         </form>

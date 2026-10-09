@@ -6,6 +6,7 @@ import { useRouter, useSearchParams } from 'next/navigation';
 import { Button } from '@/components/ui/Button';
 import { TextField } from '@/components/ui/TextField';
 import { signIn, authErrorMessage } from '@/lib/firebase/auth-actions';
+import { offerToSavePassword } from '@/lib/firebase/save-password';
 
 function LoginForm() {
   const router = useRouter();
@@ -21,6 +22,7 @@ function LoginForm() {
     setBusy(true);
     try {
       const user = await signIn(email, password);
+      await offerToSavePassword(email, password);
       // Only same-origin paths, never "//evil.com".
       const target = next?.startsWith('/') && !next.startsWith('//') ? next : '/search';
       router.replace(user.emailVerified ? target : '/verify');
@@ -32,8 +34,8 @@ function LoginForm() {
 
   return (
     <form onSubmit={submit} className="mt-6 flex flex-col gap-4">
-      <TextField label="京大メールアドレス" type="email" autoComplete="email" value={email} onChange={(e) => setEmail(e.target.value)} required />
-      <TextField label="パスワード" type="password" autoComplete="current-password" value={password} onChange={(e) => setPassword(e.target.value)} required />
+      <TextField label="京大メールアドレス" type="email" name="username" autoComplete="username" value={email} onChange={(e) => setEmail(e.target.value)} required />
+      <TextField label="パスワード" type="password" name="password" autoComplete="current-password" value={password} onChange={(e) => setPassword(e.target.value)} required />
       {error ? <p role="alert" className="rounded-m bg-danger-bg px-3 py-2 text-caption text-danger">{error}</p> : null}
       <Button type="submit" loading={busy} disabled={!email || !password}>ログイン</Button>
       <Link href="/reset" className="text-center text-caption text-brand hover:underline">パスワードを忘れた</Link>
