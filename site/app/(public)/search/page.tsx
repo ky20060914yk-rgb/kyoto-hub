@@ -6,6 +6,7 @@ import { AppBar } from '@/components/shell/AppShell';
 import { Skeleton } from '@/components/ui/Skeleton';
 import { SearchBox } from '@/components/search/SearchBox';
 import { RankingTabs } from '@/components/search/RankingTabs';
+import { MyCourses } from '@/components/search/MyCourses';
 
 export const metadata: Metadata = {
   title: '京大の楽単・授業ランキングと科目検索',
@@ -16,16 +17,18 @@ export const metadata: Metadata = {
 export default function SearchPage() {
   return (
     <>
-      <AppBar title="さがす" />
-      <main className="mx-auto max-w-page px-4 py-6 md:px-8">
-        <SearchBox />
-        <section className="mt-10" aria-labelledby="rank-h">
-          <h2 id="rank-h" className="text-title">ランキング</h2>
-          <p className="mt-1 text-caption text-ink-2">京大生のレビューから毎時更新しています。</p>
-          <Suspense fallback={<Skeleton className="mt-4 h-96" />}>
-            <Rankings />
-          </Suspense>
-        </section>
+      <AppBar title="さがす" tone="brand" />
+      <main>
+        <SearchBox hero>
+          <MyCourses />
+          <section className="mt-8" aria-labelledby="rank-h">
+            <h2 id="rank-h" className="flex items-center gap-2 text-title"><span className="text-star">★</span>ランキング</h2>
+            <p className="mt-1 text-caption text-ink-2">京大生のレビューから毎時更新しています。</p>
+            <Suspense fallback={<Skeleton className="mt-4 h-96" />}>
+              <Rankings />
+            </Suspense>
+          </section>
+        </SearchBox>
       </main>
     </>
   );

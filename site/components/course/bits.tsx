@@ -1,5 +1,6 @@
 import Link from 'next/link';
 import { DAY_LABEL, type Day } from '@/lib/public-types';
+import { COLOR_CLASS, colorFor } from '@/lib/timetable';
 
 /** ★ display: 5 stars + number + count (design.md §6.4). Stars never stand alone. */
 export function Stars({ value, count, size = 'sm', showValue = true }: { value: number; count?: number; size?: 'sm' | 'lg'; showValue?: boolean }) {
@@ -57,6 +58,16 @@ export function RakutanChip({ score, reviewCount }: { score: number; reviewCount
 
 export const slotLabel = (dayOfWeek: Day, period: number) => `${DAY_LABEL[dayOfWeek]}${period}`;
 
+/** Colored rounded square with the course's first character — gives lists color and makes courses easy to tell apart. */
+export function CourseIcon({ name, size = 'md' }: { name: string; size?: 'sm' | 'md' }) {
+  const ch = name.replace(/^[\s(（【\[]+/, '').charAt(0) || '・';
+  return (
+    <span aria-hidden className={`grid shrink-0 place-items-center rounded-m font-bold ${COLOR_CLASS[colorFor(name)]} ${size === 'sm' ? 'size-8 text-label' : 'size-10 text-heading'}`}>
+      {ch}
+    </span>
+  );
+}
+
 /** Penmark-style course row (design.md §6.3). */
 export function CourseRow({ href, name, lecturer, dayOfWeek, period, avgRating, reviewCount, score, leading, trailing }: {
   leading?: React.ReactNode; href: string; name: string; lecturer: string; dayOfWeek: Day; period: number;
@@ -65,7 +76,9 @@ export function CourseRow({ href, name, lecturer, dayOfWeek, period, avgRating, 
   return (
     <li className="flex items-center gap-3 border-b border-line last:border-b-0">
       {leading}
-      <Link href={href} className="flex min-h-18 min-w-0 flex-1 flex-col justify-center gap-0.5 py-3 transition-colors duration-instant hover:bg-surface-muted md:px-2">
+      <Link href={href} className="flex min-h-18 min-w-0 flex-1 items-center gap-3 py-3 transition-colors duration-instant hover:bg-surface-muted md:px-2">
+        <CourseIcon name={name} />
+        <span className="flex min-w-0 flex-1 flex-col justify-center gap-0.5">
         <span className="truncate text-heading text-ink">{name}</span>
         <span className="truncate text-caption text-ink-2">{slotLabel(dayOfWeek, period)}・{lecturer}</span>
         {reviewCount !== undefined ? (
@@ -75,6 +88,7 @@ export function CourseRow({ href, name, lecturer, dayOfWeek, period, avgRating, 
             {reviewCount > 0 && reviewCount < 5 ? <Chip tone="warning">レビュー募集中</Chip> : null}
           </span>
         ) : null}
+        </span>
       </Link>
       {trailing}
     </li>

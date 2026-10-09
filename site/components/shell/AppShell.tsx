@@ -117,18 +117,19 @@ function ShellSkeleton() {
 }
 
 /** Top bar: page title + bell (mobile). Sticky. */
-export function AppBar({ title, back, actions }: { title: string; back?: string; actions?: React.ReactNode }) {
+export function AppBar({ title, back, actions, tone = 'plain' }: { title: string; back?: string; actions?: React.ReactNode; tone?: 'plain' | 'brand' }) {
   const unread = useUnreadCount();
+  const brand = tone === 'brand';
   return (
-    <header className="sticky top-0 z-10 flex h-14 items-center gap-2 border-b border-line bg-surface px-4 md:px-8">
+    <header className={`sticky top-0 z-10 flex h-14 items-center gap-2 px-4 md:px-8 ${brand ? 'bg-brand text-on-brand' : 'border-b border-line bg-surface text-ink'}`}>
       {back ? (
-        <Link href={back} className="-ml-2 grid size-tap place-items-center rounded-full text-ink hover:bg-surface-muted" aria-label="戻る">
+        <Link href={back} className={`-ml-2 grid size-tap place-items-center rounded-full ${brand ? 'hover:bg-brand-pressed' : 'hover:bg-surface-muted'}`} aria-label="戻る">
           <Icon name="chevronLeft" />
         </Link>
       ) : null}
       <h1 className="min-w-0 flex-1 truncate text-title">{title}</h1>
       {actions}
-      <Link href="/notifications" className="relative grid size-tap place-items-center rounded-full text-ink hover:bg-surface-muted md:hidden"
+      <Link href="/notifications" className={`relative grid size-tap place-items-center rounded-full md:hidden ${brand ? 'hover:bg-brand-pressed' : 'hover:bg-surface-muted'}`}
         aria-label={unread > 0 ? `通知 ${unread}件の未読` : '通知'}>
         <Icon name="bell" />
         {unread > 0 ? <span className="absolute right-2.5 top-2.5 size-2 rounded-full bg-danger" /> : null}

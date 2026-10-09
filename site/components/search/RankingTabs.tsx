@@ -4,6 +4,7 @@ import { useState } from 'react';
 import { CourseRow } from '@/components/course/bits';
 import { EmptyState } from '@/components/ui/Skeleton';
 import { Icon } from '@/components/ui/Icon';
+import { ButtonLink } from '@/components/ui/Button';
 import type { PublicRankRow, RankingKind } from '@/lib/public-types';
 
 const KINDS: { key: RankingKind; label: string; empty: string }[] = [
@@ -14,7 +15,18 @@ const KINDS: { key: RankingKind; label: string; empty: string }[] = [
 ];
 
 export function RankingTabs({ data }: { data: Record<RankingKind, PublicRankRow[]> }) {
-  const [kind, setKind] = useState<RankingKind>('rakutan');
+  // Open the first ranking that has data; an empty tab is a dead end.
+  const [kind, setKind] = useState<RankingKind>(() => KINDS.find((k) => data[k.key].length)?.key ?? 'rakutan');
+  if (KINDS.every((k) => data[k.key].length === 0)) {
+    return (
+      <div className="mt-4 rounded-l border border-dashed border-line-strong bg-surface p-6 text-center">
+        <Icon name="star" className="mx-auto size-8 text-star" />
+        <p className="mt-2 text-heading">最初のランキングを作りませんか？</p>
+        <p className="mt-1 text-caption text-ink-2">履修した授業のレビューが集まると、楽単ランキングがここに出ます。最初の3件はそれぞれ2クレジットもらえます。</p>
+        <ButtonLink href="/timetable" size="sm" className="mt-4">時間割からレビューを書く</ButtonLink>
+      </div>
+    );
+  }
   const rows = data[kind];
   const meta = KINDS.find((k) => k.key === kind)!;
   return (
