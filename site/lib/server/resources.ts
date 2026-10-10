@@ -190,20 +190,14 @@ export async function reportPost(user: KuUser, postId: string, reason: string) {
 
 /** Rights-holder takedown: hide immediately, queue with priority (spec A3). Credits are never clawed back. */
 export async function requestTakedown(input: { postId: string; name: string; email: string; affiliation: string; detail: string }) {
-  // A rights holder may not know the id; the request is queued either way.
-  const ref = input.postId ? posts().doc(input.postId) : null;
-  const snap = ref ? await ref.get() : null;
-  await adminDb.runTransaction(async (tx) => {
-    if (ref && snap?.exists) tx.update(ref, { hidden: true });
-    tx.create(adminDb.collection('moderation_queue').doc(), {
-      kind: 'takedown', postId: input.postId || null, postFound: !!snap?.exists, name: input.name, email: input.email,
-      affiliation: input.affiliation, detail: input.detail, priority: true, createdAt: new Date().toISOString(), status: 'open',
-    });
+  // Queued only (owner decision 2026-10-10): the form is public, so it must not
+  // let anyone hide a resource. The owner checks the request and sets
+  // posts/{id}.hidden = true (docs/cutover.md). A rights holder may not know the id.
+  const snap = input.postId ? await posts().doc(input.postId).get() : null;
+  await adminDb.collection('moderation_queue').add({
+    kind: 'takedown', postId: input.postId || null, postFound: !!snap?.exists, postTitle: snap?.data()?.title ?? null,
+    name: input.name, email: input.email, affiliation: input.affiliation, detail: input.detail,
+    priority: true, createdAt: new Date().toISOString(), status: 'open',
   });
-  if (snap?.exists) {
-    const p = snap.data()!;
-    await notify({ uid: p.authorId, kind: 'resource_removed', title: `「${p.title}」が権利者の申し立てにより非公開になりました`,
-      body: '獲得したクレジットはそのままです。' });
-  }
   return { ok: true };
 }

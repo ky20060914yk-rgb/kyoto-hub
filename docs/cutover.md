@@ -47,7 +47,7 @@
 ## 3. 切り替え後
 - メールリンクで登録していた既存ユーザーは、ログイン画面の案内どおり「パスワードを忘れた」から設定してもらう（約20人。個別に連絡してもよい）。
 - 2週間問題がなければ、Flutter のコード（`lib/` `android/` `ios/` `web/` `test/` `pubspec.*` `analysis_options.yaml` `.metadata` `kyoto_exam_hub.iml`）と旧ストレージの `posts/` 配下のファイルを削除。
-- `moderation_queue` は当面 Firebase コンソールで確認（`priority: true` が権利者からの削除依頼）。
+- `moderation_queue` は当面 Firebase コンソールで確認する。`priority: true` が権利者からの削除依頼で、**フォームは受け付けるだけ（自動では非公開にしない）**。確認して認める場合は `posts/{postId}` の `hidden` を `true` にし、キューの `status` を `done` にする。通報 3 件の自動非公開は従来どおり。
 
 ## 既知の制約・あとでやること
 - 教員名の表示修正（2026-10-10、`tools/build_courses.py#display_lecturer`）は `tools/courses.json` に反映済み。**本番への再シードは未実行**：★ `cd tools && node seed_courses.mjs --project kyodai-sns`（科目ID・courseKey は不変なので Flutter 版のうちに実行しても安全）。シラバスの別項目しか入っていなかった 184 科目は「担当教員不明」表示。本当の教員名は各シラバスページの再スクレイプが必要。
