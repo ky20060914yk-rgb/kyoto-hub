@@ -16,8 +16,8 @@
    ```
    - リポジトリ：GitHub の本リポジトリ、ルートディレクトリ：`site`、本番ブランチ：まずは `nextjs-migration`
 3. ★ App Hosting のサービスアカウントに Firestore / Storage / Auth（トークン検証）の権限があることを確認（既定で付与される。署名付き URL は使っていないので `signBlob` 権限は不要）。
-4. ★ 独自ドメインを取得して App Hosting に割り当てる（例：`kyodai-info.jp`）。`site/apphosting.yaml` の `NEXT_PUBLIC_SITE_URL` をそのドメインに変更。
-5. ★ `app/legal/terms`・`app/legal/privacy` の文面を確認・修正（運営者名、連絡先など。下書きです）。
+4. アドレス：**独自ドメインは使わない**（2026-10-10 決定）。入口は従来の `kyodai-info.web.app` のまま、切り替え当日から Next.js 版（`https://kyodai-info--kyodai-sns.asia-east1.hosted.app`）へ 301 転送する。ビラ・SNS には `kyodai-info.web.app` を載せる。canonical / sitemap は転送先を指す（`site/apphosting.yaml` の `NEXT_PUBLIC_SITE_URL`）。
+5. 利用規約・プライバシーポリシー：運営者名・連絡先を記入済み（`site/lib/operator.ts`）。
 6. 新しい複合インデックスを先に作っておく（既存のアプリには影響なし）：
    ```bash
    firebase deploy --only firestore:indexes --project kyodai-sns
@@ -32,17 +32,13 @@
    cd tools && node migrate_to_next.mjs --project kyodai-sns --apply    # 書き込み
    ```
    出力の `unresolved`（科目が見つからない投稿）と `missingFiles` を確認。
-3. ルールを切り替える：
+3. App Hosting の本番ブランチを確認（`nextjs-migration` のままでよい。main に統合するなら App Hosting の本番ブランチも main に変更）。
+4. ルールの切り替えと `kyodai-info.web.app` の転送を **1 コマンドで**行う（設定は `firebase.cutover.json`。パスとクエリを保ったまま 301 転送。エミュレータで確認済み）：
    ```bash
-   firebase deploy --only firestore:rules,storage --project kyodai-sns
+   firebase deploy --config firebase.cutover.json --only hosting,firestore:rules,storage --project kyodai-sns
    ```
-4. App Hosting で本番ロールアウト（`nextjs-migration` を main にマージ → 自動デプロイ）。
-5. 旧 URL から新ドメインへ転送：`firebase.json` の `hosting` を次のように置き換えて `firebase deploy --only hosting`
-   ```json
-   "hosting": { "site": "kyodai-info", "public": "public-redirect", "redirects": [{ "source": "**", "destination": "https://<新ドメイン>/", "type": 301 }] }
-   ```
-   （`public-redirect/` は空の index.html だけのフォルダ）
-6. 動作確認：登録 → メール確認 → レビュー投稿 → 別アカウントで閲覧・役に立った → 過去問アップロード → 別アカウントでダウンロード（クレジット −1）→ 教科書出品 → 申し込み → チャット。
+   この時点で Flutter 版は見られなくなる。戻すときは通常の `firebase deploy --only hosting` で Flutter のビルドを再デプロイ（ルールも戻す場合は切り替え前のコミットの `firestore.rules` / `storage.rules`）。
+5. 動作確認：`https://kyodai-info.web.app/search` が Next.js 版の /search に飛ぶこと。続けて 登録 → メール確認 → レビュー投稿 → 別アカウントで閲覧・役に立った → 過去問アップロード → 別アカウントでダウンロード（クレジット −1）→ 教科書出品 → 申し込み → チャット。
 
 ## 3. 切り替え後
 - メールリンクで登録していた既存ユーザーは、ログイン画面の案内どおり「パスワードを忘れた」から設定してもらう（約20人。個別に連絡してもよい）。

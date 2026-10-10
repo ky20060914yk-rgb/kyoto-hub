@@ -1,0 +1,20 @@
+{
+  "hosting": {
+    "site": "kyodai-info",
+    "public": "public-redirect",
+    "redirects": [
+      {
+        "regex": "^/(.*)$",
+        "destination": "https://kyodai-info--kyodai-sns.asia-east1.hosted.app/:1",
+        "type": 301
+      }
+    ]
+  },
+  "firestore": {
+    "rules": "firestore.rules",
+    "indexes": "firestore.indexes.json"
+  },
+  "storage": {
+    "rules": "storage.rules"
+  }
+}
