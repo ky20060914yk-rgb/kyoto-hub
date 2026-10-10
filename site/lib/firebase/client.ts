@@ -15,6 +15,7 @@ const config = {
 
 export const firebaseApp = getApps()[0] ?? initializeApp(config);
 export const auth = getAuth(firebaseApp);
+auth.languageCode = 'ja'; // verification / reset emails in Firebase's Japanese template
 export const db = getFirestore(firebaseApp);
 export const storage = getStorage(firebaseApp);
 
