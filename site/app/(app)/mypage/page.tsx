@@ -148,7 +148,7 @@ export default function MyPage() {
         </section>
 
         <nav className="overflow-hidden rounded-l border border-line bg-surface" aria-label="その他">
-          <MenuLink href="/mypage/contact" icon="mail" label="お問い合わせ・不具合の報告" />
+          <MenuLink href="/mypage/contact" icon="mail" label="お問い合わせ・不具合の報告・広告掲載" />
           <MenuLink href="/legal/terms" icon="file" label="利用規約" />
           <MenuLink href="/legal/privacy" icon="shield" label="プライバシーポリシー" />
           <button onClick={() => signOutUser().then(() => router.replace('/'))}

@@ -10,7 +10,7 @@ import { TextArea, TextField } from '@/components/ui/TextField';
 import { Icon } from '@/components/ui/Icon';
 
 // Same category keys as the Flutter app (lib/models/inquiry.dart).
-const CATEGORIES = { other: 'ご意見・ご質問', report: '不具合・不適切な投稿の報告', circle_ad: 'サークル・団体の掲載について' } as const;
+const CATEGORIES = { other: 'ご意見・ご質問', report: '不具合・不適切な投稿の報告', circle_ad: 'サークル・団体の広告掲載' } as const;
 type Category = keyof typeof CATEGORIES;
 
 export default function ContactPage() {
@@ -50,6 +50,12 @@ export default function ContactPage() {
             <p className="mt-1 text-caption text-ink-2">内容を確認し、必要に応じてご連絡します。</p>
           </div>
         ) : (
+          <>
+          <div className="mb-4 rounded-l border border-line bg-brand-subtle p-4">
+            <p className="text-heading">サークル・団体の広告を掲載できます</p>
+            <p className="mt-1 text-caption text-ink-2">新歓やイベントの告知を京大生に届けたい方は、種類で「{CATEGORIES.circle_ad}」を選んで、団体名と告知したい内容を送ってください。掲載場所・期間・料金をご案内します。</p>
+            <Button type="button" variant="secondary" size="sm" className="mt-3" onClick={() => setCategory('circle_ad')}>広告掲載について問い合わせる</Button>
+          </div>
           <form onSubmit={submit} className="flex flex-col gap-5 rounded-l border border-line bg-surface p-5">
             <fieldset>
               <legend className="mb-1.5 text-label">種類</legend>
@@ -72,6 +78,7 @@ export default function ContactPage() {
             {error ? <p role="alert" className="text-caption text-danger">{error}</p> : null}
             <Button type="submit" loading={busy} disabled={content.trim().length < 5}>送信する</Button>
           </form>
+          </>
         )}
       </main>
     </>
