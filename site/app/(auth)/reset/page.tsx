@@ -31,6 +31,7 @@ export default function ResetPage() {
       {sent ? (
         <p role="status" className="mt-4 text-body text-ink-2">
           登録済みのアドレスであれば、再設定用のメールを送りました。メール内のリンクから新しいパスワードを設定してください。
+          <span className="mt-2 block text-caption">転送先（Gmail など）には届かないことがあります。<span className="font-medium text-ink">KUMOI を直接開いて</span>、迷惑メールフォルダも確認してください。</span>
         </p>
       ) : (
         <form onSubmit={submit} className="mt-6 flex flex-col gap-4">

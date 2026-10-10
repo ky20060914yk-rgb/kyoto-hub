@@ -53,7 +53,7 @@ export default function VerifyPage() {
       <p className="mt-2 text-body text-ink-2">
         <span className="font-medium text-ink">{user?.email}</span> に確認メールを送りました。メール内のリンクを開くと、自動で次に進みます。
       </p>
-      <p className="mt-2 text-caption text-ink-2">届かないときは迷惑メールフォルダも確認してください。</p>
+      <p className="mt-2 text-caption text-ink-2">転送先（Gmail など）には届かないことがあります。<span className="font-medium text-ink">KUMOI を直接開いて</span>、迷惑メールフォルダも確認してください。</p>
       {msg ? <p role="status" className="mt-4 text-caption text-ink">{msg}</p> : null}
       <div className="mt-6 flex flex-col gap-2">
         <Button variant="secondary" onClick={resend} disabled={left > 0}>
