@@ -166,6 +166,8 @@
 @utility delay-180 { animation-delay: 180ms; }
 @utility animate-grow { animation: grow 260ms var(--ease-out-cubic) both; }
 @utility grid-cols-timetable { grid-template-columns: 2.5rem repeat(5, minmax(0, 1fr)); }
+/* course page: main column + summary side card */
+@utility grid-cols-course { grid-template-columns: minmax(0, 1fr) 22rem; }
 @utility grid-cols-dl { grid-template-columns: 6rem 1fr; }
 /* chat page: viewport minus app bar (and the tab bar on mobile) */
 @utility min-h-chat { min-height: calc(100dvh - 3.5rem - 64px); @media (width >= 48rem) { min-height: calc(100dvh - 3.5rem); } }

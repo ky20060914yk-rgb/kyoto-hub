@@ -59,10 +59,10 @@ export function RakutanChip({ score, reviewCount }: { score: number; reviewCount
 export const slotLabel = (dayOfWeek: Day, period: number) => `${DAY_LABEL[dayOfWeek]}${period}`;
 
 /** Colored rounded square with the course's first character — gives lists color and makes courses easy to tell apart. */
-export function CourseIcon({ name, size = 'md' }: { name: string; size?: 'sm' | 'md' }) {
+export function CourseIcon({ name, size = 'md' }: { name: string; size?: 'sm' | 'md' | 'lg' }) {
   const ch = name.replace(/^[\s(（【\[]+/, '').charAt(0) || '・';
   return (
-    <span aria-hidden className={`grid shrink-0 place-items-center rounded-m font-bold ${COLOR_CLASS[colorFor(name)]} ${size === 'sm' ? 'size-8 text-label' : 'size-10 text-heading'}`}>
+    <span aria-hidden className={`grid shrink-0 place-items-center rounded-m font-bold ${COLOR_CLASS[colorFor(name)]} ${size === 'sm' ? 'size-8 text-label' : size === 'lg' ? 'size-16 rounded-l text-display' : 'size-10 text-heading'}`}>
       {ch}
     </span>
   );

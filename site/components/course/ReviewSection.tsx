@@ -11,6 +11,7 @@ import { Sheet } from '@/components/ui/Sheet';
 import { EmptyState, Skeleton } from '@/components/ui/Skeleton';
 import { Chip, StarGlyph } from './bits';
 import { ReviewForm } from './ReviewForm';
+import { OPEN_REVIEW_FORM } from './CourseActions';
 import {
   RAKUTAN, ATTENDANCE, GRADING, PAST_EXAM, BRING_IN, type Review, type ReviewInput,
 } from '@/lib/domain/review';
@@ -28,6 +29,15 @@ export function ReviewSection({ courseId, courseKey, courseName }: { courseId: s
     const q = query(collection(db, 'reviews'), where('courseKey', '==', courseKey), orderBy('updatedAt', 'desc'), limit(50));
     return onSnapshot(q, (s) => setReviews(s.docs.map((d) => d.data() as Review)), () => setReviews([]));
   }, [user, verified, courseKey]);
+
+  useEffect(() => {
+    const openForm = () => {
+      setOpen(true);
+      document.getElementById('reviews-h')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    };
+    window.addEventListener(OPEN_REVIEW_FORM, openForm);
+    return () => window.removeEventListener(OPEN_REVIEW_FORM, openForm);
+  }, []);
 
   useEffect(() => {
     if (!toast) return;
