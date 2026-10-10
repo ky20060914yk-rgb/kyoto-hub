@@ -13,14 +13,15 @@ import { EmptyState, Skeleton } from '@/components/ui/Skeleton';
 import { TextArea, TextField } from '@/components/ui/TextField';
 import { Chip } from './bits';
 import { timeAgo } from '@/lib/format';
+import { makePreview } from '@/lib/preview';
 import {
-  ALLOWED_TYPES, EXAM_TYPE, MAX_FILES, MAX_FILE_BYTES, RESOURCE_CATEGORY, isPastExam, type ExamType, type ResourceCategory,
+  ALLOWED_TYPES, EXAM_TYPE, MAX_FILES, MAX_FILE_BYTES, PREVIEW_NAME, RESOURCE_CATEGORY, isPastExam, type ExamType, type ResourceCategory,
 } from '@/lib/domain/resource';
 
 type Post = {
   id: string; category: string; year: number | null; examType: ExamType | null; title: string; description: string;
   fileNames: string[]; filePaths?: string[]; downloadCount: number; authorId: string; authorName: string;
-  createdAt: string; hidden?: boolean; requestId?: string | null;
+  createdAt: string; hidden?: boolean; requestId?: string | null; previewPath?: string | null;
 };
 type Req = { id: string; category: string; year: number | null; title: string; description: string; authorId: string; isFulfilled: boolean; createdAt: string };
 type View = 'past_exam' | 'test_prep' | 'requests';
@@ -35,6 +36,7 @@ export function ResourceSection({ courseId, courseKey }: { courseId: string; cou
   const [upload, setUpload] = useState<{ open: boolean; requestId?: string; category?: ResourceCategory; year?: number | null }>({ open: false });
   const [askOpen, setAskOpen] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
+  const [previews, setPreviews] = useState<Record<string, string | 'loading' | 'none'>>({});
 
   useEffect(() => {
     if (!user || !verified) return;
@@ -88,7 +90,18 @@ export function ResourceSection({ courseId, courseKey }: { courseId: string; cou
     { key: 'requests', label: 'リクエスト', n: openReqs.length },
   ];
 
-  async function download(p: Post, i: number) {
+  async function togglePreview(p: Post) {
+    const cur = previews[p.id];
+    if (cur && cur !== 'loading') return setPreviews(({ [p.id]: _, ...rest }) => rest);
+    setPreviews((v) => ({ ...v, [p.id]: 'loading' }));
+    const res = await authedFetch(`/api/resources/preview?postId=${encodeURIComponent(p.id)}`);
+    const url = res.ok ? URL.createObjectURL(await res.blob()) : 'none';
+    setPreviews((v) => ({ ...v, [p.id]: url }));
+  }
+
+  async function download(p: Post, i: number, paid: boolean) {
+    if (!paid && !confirm(`1クレジット使って「${p.title}」をダウンロードしますか？
+（いまの残り：${balance ?? 0}クレジット。一度払えば、次からは無料です）`)) return;
     const res = await authedFetch('/api/resources/download', { method: 'POST', body: JSON.stringify({ postId: p.id, fileIndex: i }) });
     if (!res.ok) {
       setToast(((await res.json().catch(() => ({}))) as { error?: string }).error ?? 'ダウンロードできませんでした。');
@@ -158,7 +171,7 @@ export function ResourceSection({ courseId, courseKey }: { courseId: string; cou
       ) : (
         <div className="mt-4">
           <div className="flex items-center justify-between gap-3">
-            <p className="text-caption text-ink-2">アップロードすると3クレジットもらえます（同じ年度・種類の重複は対象外）。</p>
+            <p className="text-caption text-ink-2">アップロードすると3クレジットもらえます。過去問は1つの年度につき1件までです。</p>
             <Button size="sm" className="shrink-0" onClick={() => setUpload({ open: true, category: view })}>
               <Icon name="upload" className="size-4" />アップロード
             </Button>
@@ -190,9 +203,19 @@ export function ResourceSection({ courseId, courseKey }: { courseId: string; cou
                         </button>
                       ) : null}
                     </div>
+                    {previews[p.id] && previews[p.id] !== 'loading' ? (
+                      previews[p.id] === 'none'
+                        ? <p className="mt-3 text-caption text-ink-2">プレビューを読み込めませんでした。</p>
+                        : <img src={previews[p.id]} alt={`${p.title}のプレビュー（上部以外はモザイク）`} className="mt-3 max-h-96 w-full rounded-m border border-line object-contain object-top" />
+                    ) : null}
                     <div className="mt-3 flex flex-wrap items-center gap-2">
+                      {p.previewPath ? (
+                        <Button size="sm" variant="secondary" loading={previews[p.id] === 'loading'} onClick={() => togglePreview(p)}>
+                          {previews[p.id] && previews[p.id] !== 'loading' ? 'プレビューを閉じる' : 'プレビュー（無料）'}
+                        </Button>
+                      ) : null}
                       {p.fileNames.map((name, i) => (
-                        <Button key={i} size="sm" variant={paid ? 'secondary' : 'primary'} onClick={() => download(p, i)}>
+                        <Button key={i} size="sm" variant={paid ? 'secondary' : 'primary'} onClick={() => download(p, i, paid)}>
                           <Icon name="download" className="size-4" />
                           <span className="max-w-40 truncate">{p.fileNames.length > 1 ? name : paid ? 'ダウンロード' : 'ダウンロード（1クレジット）'}</span>
                         </Button>
@@ -210,7 +233,8 @@ export function ResourceSection({ courseId, courseKey }: { courseId: string; cou
 
       <Sheet open={upload.open} onClose={() => setUpload({ open: false })} title={upload.requestId ? 'リクエストに応える' : '過去問・資料をアップロード'}>
         {upload.open ? (
-          <UploadForm courseId={courseId} uid={user.uid} requestId={upload.requestId} initialCategory={upload.category ?? 'past_exam'} initialYear={upload.year ?? null}
+          <UploadForm courseId={courseId} uid={user.uid}
+            takenYears={new Set((posts ?? []).filter((p) => isPastExam(p.category) && p.year).map((p) => p.year!))} requestId={upload.requestId} initialCategory={upload.category ?? 'past_exam'} initialYear={upload.year ?? null}
             onDone={(granted) => { setUpload({ open: false }); setToast(granted ? `アップロードしました。${granted}クレジットもらえました！` : 'アップロードしました。'); }} />
         ) : null}
       </Sheet>
@@ -226,23 +250,23 @@ export function ResourceSection({ courseId, courseKey }: { courseId: string; cou
 
 const years = () => Array.from({ length: 12 }, (_, i) => new Date().getFullYear() - i);
 
-function Select<T extends string>({ label, value, onChange, options }: { label: string; value: T; onChange: (v: T) => void; options: [T, string][] }) {
+function Select<T extends string>({ label, value, onChange, options, disabled }: { label: string; value: T; onChange: (v: T) => void; options: [T, string][]; disabled?: (v: T) => boolean }) {
   return (
     <label className="block">
       <span className="mb-1 block text-label">{label}</span>
       <select value={value} onChange={(e) => onChange(e.target.value as T)}
         className="h-12 w-full rounded-m bg-surface-muted px-3 text-body text-ink outline-none ring-brand focus:ring-2">
-        {options.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
+        {options.map(([v, l]) => <option key={v} value={v} disabled={disabled?.(v)}>{l}</option>)}
       </select>
     </label>
   );
 }
 
-function UploadForm({ courseId, uid, requestId, initialCategory, initialYear, onDone }: {
-  courseId: string; uid: string; requestId?: string; initialCategory: ResourceCategory | 'requests'; initialYear: number | null; onDone: (granted: number) => void;
+function UploadForm({ courseId, uid, takenYears, requestId, initialCategory, initialYear, onDone }: {
+  courseId: string; uid: string; takenYears: Set<number>; requestId?: string; initialCategory: ResourceCategory | 'requests'; initialYear: number | null; onDone: (granted: number) => void;
 }) {
   const [category, setCategory] = useState<ResourceCategory>(initialCategory === 'requests' ? 'past_exam' : initialCategory);
-  const [year, setYear] = useState(String(initialYear ?? new Date().getFullYear() - 1));
+  const [year, setYear] = useState(String(initialYear ?? years().slice(1).find((y) => !takenYears.has(y)) ?? ''));
   const [examType, setExamType] = useState<ExamType | ''>('final');
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
@@ -250,6 +274,7 @@ function UploadForm({ courseId, uid, requestId, initialCategory, initialYear, on
   const [progress, setProgress] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
 
+  const yearTaken = (y: string) => category === 'past_exam' && !!y && takenYears.has(Number(y));
   const autoTitle = `${year ? `${year}年度 ` : ''}${category === 'past_exam' && examType ? EXAM_TYPE[examType] : RESOURCE_CATEGORY[category]}`;
 
   function pick(list: FileList | null) {
@@ -264,13 +289,18 @@ function UploadForm({ courseId, uid, requestId, initialCategory, initialYear, on
   async function submit(e: React.FormEvent) {
     e.preventDefault();
     if (!files.length) return setError('ファイルを選んでください。');
+    if (yearTaken(year)) return setError(`${year}年度の過去問はすでに投稿されています。`);
+    if (!confirm(`「${title.trim() || autoTitle}」をアップロードしますか？
+氏名・学籍番号が写っていないか、もう一度確認してください。`)) return;
     setError(null);
     const uploadId = crypto.randomUUID().replaceAll('-', '');
     const total = files.reduce((n, f) => n + f.size, 0);
     const done = new Map<number, number>();
     try {
       setProgress(0);
-      await Promise.all(files.map((f, i) => new Promise<void>((resolve, reject) => {
+      const preview = await makePreview(files[0]);
+      const all = preview ? [...files, new File([preview], PREVIEW_NAME, { type: 'image/jpeg' })] : files;
+      await Promise.all(all.map((f, i) => new Promise<void>((resolve, reject) => {
         const task = uploadBytesResumable(storageRef(storage, `uploads/${uid}/pending/${uploadId}/${f.name.replaceAll('/', '_')}`), f, { contentType: f.type });
         task.on('state_changed', (s) => { done.set(i, s.bytesTransferred); setProgress(Math.round(([...done.values()].reduce((a, b) => a + b, 0) / total) * 100)); }, reject, () => resolve());
       })));
@@ -289,8 +319,10 @@ function UploadForm({ courseId, uid, requestId, initialCategory, initialYear, on
     <form onSubmit={submit} className="flex flex-col gap-4">
       <div className="grid grid-cols-2 gap-3">
         <Select label="種類" value={category} onChange={setCategory} options={Object.entries(RESOURCE_CATEGORY) as [ResourceCategory, string][]} />
-        <Select label="年度" value={year} onChange={setYear} options={[['', '不明'], ...years().map((y) => [String(y), `${y}年度`] as [string, string])]} />
+        <Select label="年度" value={year} onChange={setYear} disabled={yearTaken}
+          options={[['', '不明'], ...years().map((y) => [String(y), `${y}年度${yearTaken(String(y)) ? '（投稿済み）' : ''}`] as [string, string])]} />
       </div>
+      {yearTaken(year) ? <p role="alert" className="text-caption text-danger">{year}年度の過去問はすでに投稿されています。別の年度を選んでください。</p> : null}
       {category === 'past_exam' ? (
         <Select label="試験" value={examType} onChange={setExamType} options={[...(Object.entries(EXAM_TYPE) as [ExamType, string][]), ['', '不明']]} />
       ) : null}
@@ -308,7 +340,7 @@ function UploadForm({ courseId, uid, requestId, initialCategory, initialYear, on
           <div className="h-full bg-brand transition-all duration-fast" style={{ width: `${progress}%` }} />
         </div>
       ) : null}
-      <Button type="submit" loading={progress !== null} disabled={!files.length}>アップロードする</Button>
+      <Button type="submit" loading={progress !== null} disabled={!files.length || yearTaken(year)}>アップロードする</Button>
     </form>
   );
 }

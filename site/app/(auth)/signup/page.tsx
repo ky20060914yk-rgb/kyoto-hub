@@ -38,6 +38,9 @@ export default function SignupPage() {
     <>
       <h1 className="text-title">京大メールで無料登録</h1>
       <p className="mt-1 text-caption text-ink-2">京大生だけが使えるサービスです。確認メールをお送りします。</p>
+      <p className="mt-3 rounded-m bg-brand-subtle px-3 py-2 text-caption text-ink-2">
+        確認メールは転送先（Gmail など）には届かないことがあります。<span className="font-medium text-ink">KUMOI を直接開いて</span>確認してください。
+      </p>
       <form onSubmit={submit} className="mt-6 flex flex-col gap-4" noValidate>
         <TextField label="京大メールアドレス" type="email" name="username" autoComplete="username" placeholder="example@st.kyoto-u.ac.jp"
           value={email} onChange={(e) => setEmail(e.target.value)} onBlur={() => setTouched(true)} error={emailError} required />

@@ -8,7 +8,7 @@ import type { KuUser } from './auth';
 import { HttpError } from '@/lib/http-error';
 import { slug } from '@/lib/domain/review';
 import {
-  ALLOWED_TYPES, MAX_FILES, MAX_FILE_BYTES, REPORT_THRESHOLD, dedupKey, isPastExam, safeFileName,
+  ALLOWED_TYPES, MAX_FILES, MAX_FILE_BYTES, MAX_PREVIEW_BYTES, PREVIEW_NAME, REPORT_THRESHOLD, dedupKey, isPastExam, safeFileName,
   type RequestInput, type ResourceInput,
 } from '@/lib/domain/resource';
 
@@ -54,18 +54,26 @@ async function authorName(uid: string) {
  */
 export async function createResource(user: KuUser, input: ResourceInput, files: Files = bucketFiles, now = new Date()) {
   const course = await getCourseOr404(input.courseId);
-  const uploaded = await files.list(pendingPrefix(user.uid, input.uploadId));
+  const all = await files.list(pendingPrefix(user.uid, input.uploadId));
+  const preview = all.find((f) => f.path.endsWith(`/${PREVIEW_NAME}`));
+  const uploaded = all.filter((f) => f !== preview);
   if (uploaded.length === 0) throw new HttpError(400, 'ファイルが見つかりません。もう一度アップロードしてください。');
   if (uploaded.length > MAX_FILES) throw new HttpError(400, `ファイルは${MAX_FILES}個までです。`);
   for (const f of uploaded) {
     if (f.size > MAX_FILE_BYTES) throw new HttpError(400, 'ファイルは1つ20MBまでです。');
     if (!ALLOWED_TYPES.includes(f.contentType)) throw new HttpError(400, 'PDFか画像ファイルを選んでください。');
   }
+  const yearQ = sameYearExam(course.courseKey, input);
+  const yearTaken = new HttpError(409, `${input.year}年度の過去問はすでに投稿されています。`);
+  if (yearQ && !(await yearQ.get()).empty) throw yearTaken;
+  const okPreview = !!preview && preview.contentType === 'image/jpeg' && preview.size <= MAX_PREVIEW_BYTES;
 
   const ref = posts().doc();
   const fileNames = uploaded.map((f) => safeFileName(f.path.split('/').pop() ?? 'file'));
   const filePaths = fileNames.map((n, i) => `resources/${ref.id}/${i}_${n}`);
   for (let i = 0; i < uploaded.length; i++) await files.move(uploaded[i].path, filePaths[i]);
+  const previewPath = okPreview ? `resources/${ref.id}/${PREVIEW_NAME}` : null;
+  if (preview) await (okPreview ? files.move(preview.path, previewPath!) : files.remove(preview.path));
 
   const key = dedupKey(course.courseKey, input);
   const name = await authorName(user.uid);
@@ -74,6 +82,8 @@ export async function createResource(user: KuUser, input: ResourceInput, files: 
   const result = await adminDb.runTransaction(async (tx) => {
     // ---- reads
     const dup = !(await tx.get(posts().where('dedupKey', '==', key).limit(1))).empty;
+    // Re-checked inside the transaction: two uploads of the same year racing.
+    if (yearQ && !(await tx.get(yearQ)).empty) throw yearTaken;
     const reqSnap = input.requestId ? await tx.get(requests().doc(input.requestId)) : null;
     const uploadLed = await tx.get(ledgerRef(`upload_${ref.id}`));
     const fulfilLed = input.requestId ? await tx.get(ledgerRef(`fulfill_${input.requestId}`)) : null;
@@ -87,7 +97,7 @@ export async function createResource(user: KuUser, input: ResourceInput, files: 
       id: ref.id, university_id: 'kyoto_u', courseId: course.id, subjectId: course.id, courseKey: course.courseKey,
       subjectName: course.name, authorId: user.uid, authorName: name, category: input.category, year: input.year,
       examType: input.examType, title: input.title, description: input.description, filePaths, fileNames,
-      fileUrls: [], downloadCost: CREDITS.downloadCost, downloadCount: 0, createdAt: iso,
+      fileUrls: [], previewPath, downloadCost: CREDITS.downloadCost, downloadCount: 0, createdAt: iso,
       requestId: fulfils ? input.requestId : null, reports: [], hidden: false, dedupKey: key,
     });
     tx.set(statsRef(course.courseKey), {
@@ -118,6 +128,24 @@ export async function createResource(user: KuUser, input: ResourceInput, files: 
     return { postId: ref.id, granted, duplicate: dup, capped, fulfilled: fulfils };
   });
   return { ...result, courseId: course.id };
+}
+
+/**
+ * One past exam per course and year (owner decision 2026-10-10: stops credit
+ * farming by re-uploading the same exam). Hidden posts don't block. Year
+ * unknown is not blocked; the dedupKey rule still pays it only once.
+ */
+function sameYearExam(courseKey: string, input: Pick<ResourceInput, 'category' | 'year'>) {
+  if (!isPastExam(input.category) || input.year === null) return null;
+  return posts().where('courseKey', '==', courseKey).where('category', '==', 'past_exam')
+    .where('year', '==', input.year).where('hidden', '==', false).limit(1);
+}
+
+/** Free blurred preview of a post's first page, for verified students. */
+export async function previewResource(postId: string, files: Files = bucketFiles) {
+  const post = (await posts().doc(postId).get()).data();
+  if (!post || post.hidden || !post.previewPath) throw new HttpError(404, 'プレビューはありません。');
+  return files.read(String(post.previewPath));
 }
 
 /**

@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import { adminDb } from '@/lib/server/admin';
-import { createResource, downloadResource, createRequest, reportPost, requestTakedown, type Files } from '@/lib/server/resources';
+import { createResource, downloadResource, previewResource, createRequest, reportPost, requestTakedown, type Files } from '@/lib/server/resources';
 import { balanceRef } from '@/lib/server/credits';
 import { parseResourceInput, safeFileName } from '@/lib/domain/resource';
 import { clearEmulators, seedCourse } from './emu';
@@ -49,10 +49,36 @@ describe('resources', () => {
     expect([...files.store.keys()]).toEqual([`resources/${r.postId}/0_exam.pdf`]);
     expect((await stats())?.pastExamPostCount).toBe(1);
 
-    files.store.set('uploads/taro/pending/up2/again.pdf', { size: 10, contentType: 'application/pdf' });
-    const dup = await createResource(taro, input({ uploadId: 'up2' }), files);
+    files.store.set('uploads/taro/pending/up2/notes.pdf', { size: 10, contentType: 'application/pdf' });
+    await createResource(taro, input({ uploadId: 'up2', category: 'test_prep', examType: null }), files);
+    files.store.set('uploads/taro/pending/up3/again.pdf', { size: 10, contentType: 'application/pdf' });
+    const dup = await createResource(taro, input({ uploadId: 'up3', category: 'test_prep', examType: null }), files);
     expect(dup).toMatchObject({ duplicate: true, granted: 0 });
-    expect(await bal('taro')).toBe(3);
+    expect(await bal('taro')).toBe(6);
+  });
+
+  it('allows one past exam per course and year; a hidden one no longer blocks', async () => {
+    const files = fakeFiles({ 'uploads/taro/pending/up1/exam.pdf': {}, 'uploads/hana/pending/up2/exam.pdf': {} });
+    const first = await createResource(taro, input(), files);
+    await expect(createResource(hana, input({ uploadId: 'up2', examType: 'midterm' }), files)).rejects.toMatchObject({ status: 409 });
+    files.store.set('uploads/hana/pending/up3/exam.pdf', { size: 1, contentType: 'application/pdf' });
+    await createResource(hana, input({ uploadId: 'up3', year: 2023 }), files);
+    await adminDb.collection('posts').doc(first.postId).update({ hidden: true });
+    await expect(createResource(hana, input({ uploadId: 'up2' }), files)).resolves.toMatchObject({ postId: expect.any(String) });
+  });
+
+  it('keeps a small JPEG preview apart from the files and serves it', async () => {
+    const files = fakeFiles({ 'uploads/taro/pending/up1/exam.pdf': {}, 'uploads/taro/pending/up1/__preview.jpg': { size: 5000, contentType: 'image/jpeg' } });
+    const r = await createResource(taro, input(), files);
+    const post = (await adminDb.collection('posts').doc(r.postId).get()).data();
+    expect(post).toMatchObject({ fileNames: ['exam.pdf'], previewPath: `resources/${r.postId}/__preview.jpg` });
+    expect(String(await previewResource(r.postId, files))).toContain('__preview.jpg');
+
+    const bad = fakeFiles({ 'uploads/taro/pending/up2/exam.pdf': {}, 'uploads/taro/pending/up2/__preview.jpg': { size: 5 * 1024 * 1024, contentType: 'image/jpeg' } });
+    const r2 = await createResource(taro, input({ uploadId: 'up2', year: 2020 }), bad);
+    expect((await adminDb.collection('posts').doc(r2.postId).get()).data()?.previewPath).toBeNull();
+    expect([...bad.store.keys()]).toEqual([`resources/${r2.postId}/0_exam.pdf`]);
+    await expect(previewResource(r2.postId, bad)).rejects.toMatchObject({ status: 404 });
   });
 
   it('rejects missing, oversized or non-PDF/image files', async () => {

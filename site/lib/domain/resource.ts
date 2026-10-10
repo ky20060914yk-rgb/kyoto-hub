@@ -12,6 +12,9 @@ export const MAX_FILES = 5;
 export const MAX_FILE_BYTES = 20 * 1024 * 1024;
 export const ALLOWED_TYPES = ['application/pdf', 'image/jpeg', 'image/png', 'image/webp', 'image/heic'];
 export const REPORT_THRESHOLD = 3;
+/** Blurred first-page preview the browser makes at upload (see ResourceSection); not counted as a file. */
+export const PREVIEW_NAME = '__preview.jpg';
+export const MAX_PREVIEW_BYTES = 1024 * 1024;
 
 export const isPastExam = (category: unknown) => category === 'past_exam';
 
