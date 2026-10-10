@@ -15,18 +15,8 @@ const KINDS: { key: RankingKind; label: string; empty: string }[] = [
 ];
 
 export function RankingTabs({ data }: { data: Record<RankingKind, PublicRankRow[]> }) {
-  // Open the first ranking that has data; an empty tab is a dead end.
+  // Tabs always show; open the first ranking that has data.
   const [kind, setKind] = useState<RankingKind>(() => KINDS.find((k) => data[k.key].length)?.key ?? 'rakutan');
-  if (KINDS.every((k) => data[k.key].length === 0)) {
-    return (
-      <div className="mt-4 rounded-l border border-dashed border-line-strong bg-surface p-6 text-center">
-        <Icon name="star" className="mx-auto size-8 text-star" />
-        <p className="mt-2 text-heading">最初のランキングを作りませんか？</p>
-        <p className="mt-1 text-caption text-ink-2">履修した授業のレビューが集まると、楽単ランキングがここに出ます。最初の3件はそれぞれ2クレジットもらえます。</p>
-        <ButtonLink href="/timetable" size="sm" className="mt-4">時間割からレビューを書く</ButtonLink>
-      </div>
-    );
-  }
   const rows = data[kind];
   const meta = KINDS.find((k) => k.key === kind)!;
   return (
@@ -41,7 +31,13 @@ export function RankingTabs({ data }: { data: Record<RankingKind, PublicRankRow[
         ))}
       </div>
       {rows.length === 0 ? (
-        <EmptyState icon={<Icon name="star" className="size-10" />} title="ランキングはまだありません" body={meta.empty} />
+        <div key={kind} className="mt-4 animate-fade-in rounded-l border border-dashed border-line-strong bg-surface">
+          <EmptyState icon={<Icon name="star" className="size-10 text-star" />} title={`「${meta.label}」ランキングはまだありません`}
+            body={kind === 'mostPastExams'
+              ? `${meta.empty} 科目ページの「過去問・資料」からアップロードすると、ここに並びます（1件につき3クレジット）。`
+              : `${meta.empty} 履修した授業のレビューを書くと、ここに並びます（最初の3件はそれぞれ2クレジット）。`}
+            action={<ButtonLink href="/timetable" size="sm">{kind === 'mostPastExams' ? '時間割から科目を開く' : '時間割からレビューを書く'}</ButtonLink>} />
+        </div>
       ) : (
         <ol key={kind} className="mt-4 animate-fade-in rounded-l border border-line bg-surface px-4">
           {rows.map((r, i) => (
