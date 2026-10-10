@@ -56,6 +56,22 @@ def _clean_lecturer(raw: str) -> str:
     return v
 
 
+# Some scraped rows put other syllabus fields in the lecturer column
+# ("(配当学年)1回生以上(開講年度・開講期)2026・後期"); others append the
+# katakana reading ("稲富 宏之 (イナドミ ヒロユキ)").
+_METADATA = re.compile(r"^\((配当学年|単位数|開講年度)")
+_KANA_READING = re.compile(r"\s*[(（][゠-ヿ\s・ー]+[)）]$")
+
+
+def display_lecturer(lecturer: str) -> str:
+    """What to show for a lecturer. Only the display changes: courseKey (and so
+    every document id) is still computed from the stored value, so reviews and
+    timetables that point at these courses keep working."""
+    if _METADATA.match(lecturer):
+        return UNKNOWN_LECTURER
+    return _KANA_READING.sub("", lecturer).strip() or UNKNOWN_LECTURER
+
+
 def _clean_period(raw) -> int:
     m = re.search(r"\d+", str(raw or ""))
     if not m:
@@ -89,7 +105,7 @@ def build(rows: list[dict]) -> list[dict]:
             "courseKey": ck,
             "name": name,
             "faculty": faculty,
-            "lecturer": lecturer,
+            "lecturer": display_lecturer(lecturer),
             "dayOfWeek": day,
             "period": period,
             "category": category,

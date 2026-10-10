@@ -50,6 +50,6 @@
 - `moderation_queue` は当面 Firebase コンソールで確認（`priority: true` が権利者からの削除依頼）。
 
 ## 既知の制約・あとでやること
-- 科目データの一部で教員名の欄に「(配当学年)…(開講年度・開講期)…」などシラバスの別項目が入っている（`tools/build_courses.py` のスクレイプ由来）。検索結果にそのまま出るので、公開前にビルドスクリプトの修正と再シードを推奨。
+- 教員名の表示修正（2026-10-10、`tools/build_courses.py#display_lecturer`）は `tools/courses.json` に反映済み。**本番への再シードは未実行**：★ `cd tools && node seed_courses.mjs --project kyodai-sns`（科目ID・courseKey は不変なので Flutter 版のうちに実行しても安全）。シラバスの別項目しか入っていなかった 184 科目は「担当教員不明」表示。本当の教員名は各シラバスページの再スクレイプが必要。
 - 時間割のマスごとの「新着」バッジ、出品の「まだ有効？」通知は未実装（M3・M5 のメモ参照）。
 - E2E は自動化せず、エミュレータ上の手動確認のみ（Playwright を入れるなら上の 2-6 の流れを 3 本に）。

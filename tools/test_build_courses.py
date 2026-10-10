@@ -73,3 +73,22 @@ def test_generated_catalog_carries_a_category_for_every_course():
     assert all(c.get("id") and c.get("courseKey") for c in courses)
     assert all(isinstance(c.get("period"), int) and 1 <= c["period"] <= 5 for c in courses)
     assert all(c.get("dayOfWeek") in {"Mon", "Tue", "Wed", "Thu", "Fri"} for c in courses)
+
+
+def test_display_lecturer_drops_syllabus_metadata_and_kana_readings():
+    from build_courses import display_lecturer
+    assert display_lecturer("(配当学年)1回生以上(開講年度・開講期)2026・後期") == "担当教員不明"
+    assert display_lecturer("(単位数)2単位(開講年度・開講期)2026・前期") == "担当教員不明"
+    assert display_lecturer("稲富 宏之 (イナドミ ヒロユキ)") == "稲富 宏之"
+    assert display_lecturer("Alireza Naghavi(アリレザ ナガヴィ)") == "Alireza Naghavi"
+    assert display_lecturer("理学研究科") == "理学研究科"
+    assert display_lecturer("戸田 剛文") == "戸田 剛文"
+
+
+def test_display_fix_keeps_course_ids_stable():
+    row = {"name": "生徒指導論", "faculty": "全学共通", "dayOfWeek": "Wed", "period": 4,
+           "lecturer": "(配当学年)1回生以上(開講年度・開講期)2026・後期", "category": "全学共通科目"}
+    out = build([row])[0]
+    # the key (and so the document id) is still computed from the stored value
+    assert out["courseKey"] == course_key("生徒指導論", "(配当学年)1回生以上(開講年度・開講期)2026・後期")
+    assert out["lecturer"] == "担当教員不明"
