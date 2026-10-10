@@ -3,11 +3,12 @@ import type { Metadata } from 'next';
 import Link from 'next/link';
 import { connection } from 'next/server';
 import { Logo } from '@/components/brand/Logo';
-import { ButtonLink } from '@/components/ui/Button';
+import { ButtonLink, buttonClass } from '@/components/ui/Button';
 import { Icon, type IconName } from '@/components/ui/Icon';
 import { Chip, DistributionBars, Stars, StarGlyph } from '@/components/course/bits';
 import { CountUp, Reveal } from '@/components/lp/Reveal';
 import { getSiteStats } from '@/lib/server/cached';
+import { OPERATOR } from '@/lib/operator';
 
 export const metadata: Metadata = {
   title: { absolute: '京大InfoHub — 京大生のための授業レビュー・過去問・教科書' },
@@ -26,6 +27,7 @@ export default function Landing() {
         </Suspense>
         <Features />
         <Trust />
+        <ForCircles />
         <FinalCta />
       </main>
       <Footer />
@@ -199,6 +201,25 @@ function Trust() {
           ))}
         </div>
       </div>
+    </section>
+  );
+}
+
+function ForCircles() {
+  const mailto = `mailto:${OPERATOR.email}?subject=${encodeURIComponent('【京大InfoHub】広告掲載のお問い合わせ')}`;
+  return (
+    <section aria-labelledby="circles-h" className="mx-auto max-w-page px-4 pt-16 md:px-6 md:pt-24">
+      <Reveal>
+        <div className="flex flex-col gap-6 rounded-xl border border-line bg-surface p-6 md:flex-row md:items-center md:p-10">
+          <div className="grid size-12 shrink-0 place-items-center rounded-full bg-brand-subtle text-brand"><Icon name="mail" /></div>
+          <div className="flex-1">
+            <p className="text-caption font-medium text-brand">サークル・団体の方へ</p>
+            <h2 id="circles-h" className="mt-1 text-h3 md:text-h3-lg">新歓やイベントの告知を、京大生に届けませんか。</h2>
+            <p className="mt-2 text-body text-ink-2">京大InfoHubでは、サークル・学生団体の広告を掲載できます。掲載場所や期間、料金はお気軽にお問い合わせください。</p>
+          </div>
+          <a href={mailto} className={buttonClass('secondary', 'md', 'shrink-0')}>広告について問い合わせる</a>
+        </div>
+      </Reveal>
     </section>
   );
 }
