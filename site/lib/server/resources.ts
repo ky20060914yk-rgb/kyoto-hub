@@ -4,6 +4,7 @@ import { adminDb, adminBucket } from './admin';
 import { CREDITS, jstDay, ledgerRef, readBalance, writeCredit } from './credits';
 import { getCourseOr404 } from './reviews';
 import { notify } from './notify';
+import { alertOwner } from './alert';
 import type { KuUser } from './auth';
 import { HttpError } from '@/lib/http-error';
 import { slug } from '@/lib/domain/review';
@@ -217,7 +218,7 @@ export async function reportPost(user: KuUser, postId: string, reason: string) {
 }
 
 /** Rights-holder takedown: hide immediately, queue with priority (spec A3). Credits are never clawed back. */
-export async function requestTakedown(input: { postId: string; name: string; email: string; affiliation: string; detail: string }) {
+export async function requestTakedown(input: { postId: string; name: string; email: string; affiliation: string; detail: string }, alert = alertOwner) {
   // Queued only (owner decision 2026-10-10): the form is public, so it must not
   // let anyone hide a resource. The owner checks the request and sets
   // posts/{id}.hidden = true (docs/cutover.md). A rights holder may not know the id.
@@ -227,5 +228,20 @@ export async function requestTakedown(input: { postId: string; name: string; ema
     name: input.name, email: input.email, affiliation: input.affiliation, detail: input.detail,
     priority: true, createdAt: new Date().toISOString(), status: 'open',
   });
+  const title = snap?.data()?.title as string | undefined;
+  await alert(`【京大InfoHub】削除依頼が届きました${title ? `：${title}` : ''}`, [
+    '教員・権利者から削除依頼が届きました。内容を確認し、認める場合は posts/{資料ID} の hidden を true、',
+    'moderation_queue の status を done にしてください（docs/cutover.md）。',
+    '',
+    `資料ID：${input.postId || '（未記入）'}${input.postId && !snap?.exists ? '（見つかりません）' : ''}`,
+    `資料名：${title ?? '—'}`,
+    `お名前：${input.name}`,
+    `ご所属：${input.affiliation}`,
+    `連絡先：${input.email}`,
+    '',
+    input.detail,
+    '',
+    'moderation_queue：https://console.firebase.google.com/project/kyodai-sns/firestore/databases/-default-/data/~2Fmoderation_queue',
+  ].join('\n'));
   return { ok: true };
 }

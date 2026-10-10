@@ -131,11 +131,29 @@ describe('resources', () => {
     await expect(reportPost(taro, postId, 'x')).rejects.toMatchObject({ status: 403 });
 
     const other = await createResource(taro, input({ uploadId: 'up9', year: 2019 }), fakeFiles({ 'uploads/taro/pending/up9/a.pdf': {} }));
-    await requestTakedown({ postId: other.postId, name: '山田', email: 'y@kyoto-u.ac.jp', affiliation: '理学研究科', detail: '著作権' });
+    const alerts: string[] = [];
+    await requestTakedown({ postId: other.postId, name: '山田', email: 'y@kyoto-u.ac.jp', affiliation: '理学研究科', detail: '著作権' }, async (subject, text) => { alerts.push(`${subject}
+${text}`); return true; });
     // The owner decides after checking it (a public form must not let anyone hide anything).
     expect((await adminDb.collection('posts').doc(other.postId).get()).data()?.hidden).toBe(false);
     const q = await adminDb.collection('moderation_queue').where('kind', '==', 'takedown').get();
     expect(q.docs.map((d) => d.data())).toEqual([expect.objectContaining({ postId: other.postId, priority: true, status: 'open', postFound: true })]);
     expect((await adminDb.collection('notifications').where('uid', '==', 'taro').where('kind', '==', 'resource_removed').get()).size).toBe(0);
+    expect(alerts).toHaveLength(1);
+    expect(alerts[0]).toContain(other.postId);
+    expect(alerts[0]).toContain('y@kyoto-u.ac.jp');
+  });
+
+  it('alertOwner posts to Resend only when a key is set, and never throws', async () => {
+    const { alertOwner } = await import('@/lib/server/alert');
+    const calls: RequestInit[] = [];
+    const ok = (async (_u: unknown, init?: RequestInit) => { calls.push(init!); return new Response('{}'); }) as typeof fetch;
+    delete process.env.RESEND_API_KEY;
+    expect(await alertOwner('s', 't', ok)).toBe(false);
+    process.env.RESEND_API_KEY = 'test-key';
+    expect(await alertOwner('s', 't', ok)).toBe(true);
+    expect(JSON.parse(String(calls[0].body))).toMatchObject({ to: ['y.kuwahara14@gmail.com'], subject: 's' });
+    expect(await alertOwner('s', 't', (async () => { throw new Error('down'); }) as typeof fetch)).toBe(false);
+    delete process.env.RESEND_API_KEY;
   });
 });
