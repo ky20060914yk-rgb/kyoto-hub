@@ -42,7 +42,7 @@
 
 ## 3. 切り替え後
 - メールリンクで登録していた既存ユーザーは、ログイン画面の案内どおり「パスワードを忘れた」から設定してもらう（約20人。個別に連絡してもよい）。
-- 2週間問題がなければ、Flutter のコード（`lib/` `android/` `ios/` `web/` `test/` `pubspec.*` `analysis_options.yaml` `.metadata` `kyoto_exam_hub.iml`）と旧ストレージの `posts/` 配下のファイルを削除。
+- 2週間問題がなければ、Flutter のコード（`lib/` `android/` `ios/` `web/` `test/` `pubspec.*` `analysis_options.yaml` `.metadata` `kyoto_exam_hub.iml`）を削除。**バケット直下の旧投稿ファイル 5 つ（`IMG_9365.jpeg` など）は消さない**：2026-10-10 の移行は gcloud なしで行ったためコピーせず、`posts/{id}.filePaths` が元の場所を直接指している。
 - `moderation_queue` は当面 Firebase コンソールで確認する。`priority: true` が権利者からの削除依頼で、**フォームは受け付けるだけ（自動では非公開にしない）**。確認して認める場合は `posts/{postId}` の `hidden` を `true` にし、キューの `status` を `done` にする。通報 3 件の自動非公開は従来どおり。
 
 ## 既知の制約・あとでやること
