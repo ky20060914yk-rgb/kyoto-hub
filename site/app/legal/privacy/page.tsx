@@ -1,13 +1,13 @@
 import type { Metadata } from 'next';
 import { Prose } from '@/components/legal/Prose';
+import { OPERATOR } from '@/lib/operator';
 
 export const metadata: Metadata = { title: 'プライバシーポリシー' };
 
-// Draft for the operator to review before launch (see docs/cutover.md).
 export default function PrivacyPage() {
   return (
-    <Prose title="プライバシーポリシー" updated="2026年10月8日">
-      <p>京大InfoHub運営者（以下「運営者」）は、「京大InfoHub」（以下「本サービス」）における利用者の情報を、以下のとおり取り扱います。</p>
+    <Prose title="プライバシーポリシー" updated="2026年10月10日">
+      <p>{OPERATOR.name}（以下「運営者」）は、「京大InfoHub」（以下「本サービス」）における利用者の情報を、以下のとおり取り扱います。</p>
 
       <h2>1. 取得する情報</h2>
       <ul>
@@ -36,10 +36,13 @@ export default function PrivacyPage() {
       <p>データへのアクセスはセキュリティルールとサーバー側の確認で制限しています。過去問・資料のファイルは非公開の場所に保存し、認証された利用者のダウンロードのときだけ取り出します。</p>
 
       <h2>6. 開示・訂正・削除</h2>
-      <p>ご自身の情報の開示・訂正・削除、アカウントの削除をご希望の場合は、お問い合わせフォームからご連絡ください。</p>
+      <p>ご自身の情報の開示・訂正・削除、アカウントの削除をご希望の場合は、お問い合わせフォームまたは下記の連絡先からご連絡ください。</p>
 
       <h2>7. 改定</h2>
       <p>本ポリシーを改定する場合は、本サービス上で告知します。</p>
+
+      <h2>8. 運営者・お問い合わせ先</h2>
+      <p>{OPERATOR.name}<br />連絡先：<a href={`mailto:${OPERATOR.email}`} className="text-brand underline">{OPERATOR.email}</a></p>
     </Prose>
   );
 }

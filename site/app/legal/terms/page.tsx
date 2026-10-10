@@ -1,14 +1,14 @@
 import type { Metadata } from 'next';
 import Link from 'next/link';
 import { Prose } from '@/components/legal/Prose';
+import { OPERATOR } from '@/lib/operator';
 
 export const metadata: Metadata = { title: '利用規約' };
 
-// Draft for the operator to review before launch (see docs/cutover.md).
 export default function TermsPage() {
   return (
-    <Prose title="利用規約" updated="2026年10月8日">
-      <p>この利用規約（以下「本規約」）は、京大InfoHub運営者（以下「運営者」）が提供する「京大InfoHub」（以下「本サービス」）の利用条件を定めるものです。本サービスを利用した時点で、本規約に同意したものとみなします。本サービスは京都大学の公式サービスではありません。</p>
+    <Prose title="利用規約" updated="2026年10月10日">
+      <p>この利用規約（以下「本規約」）は、{OPERATOR.name}（以下「運営者」）が提供する「京大InfoHub」（以下「本サービス」）の利用条件を定めるものです。本サービスを利用した時点で、本規約に同意したものとみなします。本サービスは京都大学の公式サービスではありません。</p>
 
       <h2>第1条（利用資格）</h2>
       <ol>
@@ -57,7 +57,10 @@ export default function TermsPage() {
       <p>運営者は、必要に応じて本規約を変更できます。重要な変更は本サービス上で告知します。</p>
 
       <h2>お問い合わせ</h2>
-      <p>本規約に関するお問い合わせは、ログイン後の<Link href="/mypage/contact" className="text-brand underline">お問い合わせフォーム</Link>からお願いします。</p>
+      <p>本規約に関するお問い合わせは、ログイン後の<Link href="/mypage/contact" className="text-brand underline">お問い合わせフォーム</Link>、または下記の連絡先までお願いします。</p>
+
+      <h2>運営者</h2>
+      <p>{OPERATOR.name}<br />連絡先：<a href={`mailto:${OPERATOR.email}`} className="text-brand underline">{OPERATOR.email}</a></p>
     </Prose>
   );
 }
