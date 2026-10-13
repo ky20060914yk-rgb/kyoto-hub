@@ -4,7 +4,7 @@
     "public": "public-redirect",
     "redirects": [
       {
-        "regex": "^/(.*)$",
+        "regex": "^/((?:(?:[^/f][^/]*)?|f(?:[^/l][^/]*)?|fl(?:[^/u][^/]*)?|flu(?:[^/t][^/]*)?|flut(?:[^/t][^/]*)?|flutt(?:[^/e][^/]*)?|flutte(?:[^/r][^/]*)?|flutter(?:[^/_][^/]*)?|flutter_(?:[^/s][^/]*)?|flutter_s(?:[^/e][^/]*)?|flutter_se(?:[^/r][^/]*)?|flutter_ser(?:[^/v][^/]*)?|flutter_serv(?:[^/i][^/]*)?|flutter_servi(?:[^/c][^/]*)?|flutter_servic(?:[^/e][^/]*)?|flutter_service(?:[^/_][^/]*)?|flutter_service_(?:[^/w][^/]*)?|flutter_service_w(?:[^/o][^/]*)?|flutter_service_wo(?:[^/r][^/]*)?|flutter_service_wor(?:[^/k][^/]*)?|flutter_service_work(?:[^/e][^/]*)?|flutter_service_worke(?:[^/r][^/]*)?|flutter_service_worker(?:[^/.][^/]*)?|flutter_service_worker\\.(?:[^/j][^/]*)?|flutter_service_worker\\.j(?:[^/s][^/]*)?|flutter_service_worker\\.js[^/]+)(?:/.*)?)$",
         "destination": "https://kyodai-info--kyodai-sns.asia-east1.hosted.app/:1",
         "type": 301
       }

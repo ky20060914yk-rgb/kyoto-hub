@@ -62,7 +62,7 @@ export function SearchBox({ initialDay = null, initialPeriod = null, trailing, h
       <Icon name="search" className="pointer-events-none absolute left-4 top-1/2 size-5 -translate-y-1/2 text-ink-2" />
       <input type="search" value={q} onChange={(e) => setQ(e.target.value)} placeholder="科目名・教員名で検索"
         className={`w-full rounded-m pl-12 pr-4 text-body text-ink outline-none ring-brand placeholder:text-ink-disabled focus:ring-2 ${
-          hero ? 'h-14 bg-surface shadow-float' : 'h-12 bg-surface-muted'}`} />
+          hero ? 'h-12 bg-surface shadow-float md:h-14' : 'h-12 bg-surface-muted'}`} />
     </label>
   );
 
@@ -113,15 +113,17 @@ export function SearchBox({ initialDay = null, initialPeriod = null, trailing, h
         {input}
         {searching ? dayChips : (
           <>
-            <div className="mt-3 flex flex-wrap gap-2" aria-label="よく検索される科目">
+            {/* phones: one sideways-scrolling row; md+: popular words, then the weekdays on their own line */}
+            <div className="no-scrollbar -mx-4 mt-3 flex gap-2 overflow-x-auto px-4 md:mx-0 md:flex-wrap md:px-0" aria-label="よく検索される科目と曜日">
               {today ? (
                 <FilterChip on={false} onBrand onClick={() => setDay(today)}>
                   <Icon name="calendar" className="mr-1 inline size-3.5 -mt-0.5" />今日（{DAY_LABEL[today]}）の授業
                 </FilterChip>
               ) : null}
               {POPULAR.map((w) => <FilterChip key={w} on={false} onBrand onClick={() => setQ(w)}>{w}</FilterChip>)}
+              <span className="hidden md:block md:basis-full" aria-hidden />
+              {DAYS.map((d) => <FilterChip key={d} on={false} onBrand onClick={() => setDay(d)}>{DAY_LABEL[d]}</FilterChip>)}
             </div>
-            {dayChips}
           </>
         )}
       </HeroBand>
@@ -145,7 +147,7 @@ function FilterChip({ on, onBrand = false, onClick, children }: { on: boolean; o
     : on ? 'border-brand bg-brand-subtle font-medium text-brand' : 'border-line-strong bg-surface text-ink hover:bg-surface-muted';
   return (
     <button type="button" aria-pressed={on} onClick={onClick}
-      className={`h-8 min-w-10 rounded-full border px-3 text-caption transition-colors duration-fast ${look}`}>
+      className={`h-8 min-w-10 shrink-0 whitespace-nowrap rounded-full border px-3 text-caption transition-colors duration-fast ${look}`}>
       {children}
     </button>
   );

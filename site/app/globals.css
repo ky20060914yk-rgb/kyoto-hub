@@ -132,6 +132,7 @@
 @utility pb-tabbar { padding-bottom: calc(64px + env(safe-area-inset-bottom)); }
 @utility pb-safe { padding-bottom: env(safe-area-inset-bottom); }
 @utility tabular { font-variant-numeric: tabular-nums; }
+@utility no-scrollbar { scrollbar-width: none; &::-webkit-scrollbar { display: none; } }
 
 @keyframes pop {
   0% { transform: scale(1); }

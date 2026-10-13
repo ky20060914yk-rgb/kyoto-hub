@@ -45,6 +45,8 @@
 - 2週間問題がなければ、Flutter のコード（`lib/` `android/` `ios/` `web/` `test/` `pubspec.*` `analysis_options.yaml` `.metadata` `kyoto_exam_hub.iml`）を削除。**バケット直下の旧投稿ファイル 5 つ（`IMG_9365.jpeg` など）は消さない**：2026-10-10 の移行は gcloud なしで行ったためコピーせず、`posts/{id}.filePaths` が元の場所を直接指している。
 - `moderation_queue` は当面 Firebase コンソールで確認する。`priority: true` が権利者からの削除依頼で、**フォームは受け付けるだけ（自動では非公開にしない）**。確認して認める場合は `posts/{postId}` の `hidden` を `true` にし、キューの `status` を `done` にする。通報 3 件の自動非公開は従来どおり。
 
+- `kyodai-info.web.app/flutter_service_worker.js` だけは転送せず、旧 Flutter の service worker を消す「キルスイッチ」を返す（`public-redirect/flutter_service_worker.js`）。これがないと、旧版を開いたことのあるアプリ内ブラウザ（Instagram・LINE）が古い読み込み画面で止まる。`firebase.cutover.json` の長い正規表現は「このファイル名以外」を表している（RE2 は否定先読みが使えないため）。1〜2か月して旧ワーカーが消えたら、普通の `^/(.*)$` に戻してよい。
+
 ## 既知の制約・あとでやること
 - 教員名の表示修正（2026-10-10、`tools/build_courses.py#display_lecturer`）は `tools/courses.json` に反映済み。**本番への再シードは未実行**：★ `cd tools && node seed_courses.mjs --project kyodai-sns`（科目ID・courseKey は不変なので Flutter 版のうちに実行しても安全）。シラバスの別項目しか入っていなかった 184 科目は「担当教員不明」表示。本当の教員名は各シラバスページの再スクレイプが必要。
 - 時間割のマスごとの「新着」バッジ、出品の「まだ有効？」通知は未実装（M3・M5 のメモ参照）。

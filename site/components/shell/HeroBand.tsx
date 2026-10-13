@@ -34,15 +34,16 @@ export function HeroBand({ children, subtitle }: { children?: React.ReactNode; s
   const now = useNow();
   return (
     <section className="bg-brand text-on-brand">
-      <div className="mx-auto max-w-page px-4 pb-6 pt-1 md:px-8 md:pb-8">
-        <p className="min-h-6 text-caption opacity-80">{now ? dateLabel(now) : ''}</p>
-        <p className="min-h-8 text-title">
+      <div className="mx-auto max-w-page px-4 pb-3 pt-1 md:px-8 md:pb-8">
+        {/* phones: the band is just the page controls, so the content below stays in view */}
+        <p className="hidden min-h-6 text-caption opacity-80 md:block">{now ? dateLabel(now) : ''}</p>
+        <p className="hidden min-h-8 text-title md:block">
           {now ? `${greeting(now)}${name ? '、' : ''}` : ''}
           {/* the name wraps as one unit, so 「さん」 never ends up alone on a line */}
           {now && name ? <span className="inline-block">{name}さん</span> : null}
         </p>
-        {subtitle ? <p className="mt-0.5 text-caption opacity-80">{subtitle}</p> : null}
-        {children ? <div className="mt-4">{children}</div> : null}
+        {subtitle ? <p className="mt-0.5 hidden text-caption opacity-80 md:block">{subtitle}</p> : null}
+        {children ? <div className="md:mt-4">{children}</div> : null}
       </div>
     </section>
   );
