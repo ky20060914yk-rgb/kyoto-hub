@@ -27,7 +27,7 @@ export async function generateMetadata(props: PageProps<'/courses/[id]'>): Promi
     description,
     alternates: { canonical: `/courses/${c.id}` },
     robots: s.reviewCount === 0 ? { index: false, follow: true } : undefined,
-    openGraph: { title, description, type: 'article' },
+    openGraph: { title, description, type: 'article', images: '/opengraph-image.png' }, // replacing openGraph drops the inherited image
   };
 }
 
