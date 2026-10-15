@@ -43,7 +43,7 @@ export const bucketFiles: Files = {
   },
 };
 
-async function authorName(uid: string) {
+export async function authorName(uid: string) {
   return ((await adminDb.collection('users').doc(uid).get()).data()?.displayName as string) || '京大生';
 }
 

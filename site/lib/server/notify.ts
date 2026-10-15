@@ -2,7 +2,7 @@ import 'server-only';
 import type { Transaction, WriteBatch } from 'firebase-admin/firestore';
 import { adminDb } from './admin';
 
-export type NotificationKind = 'review_helpful' | 'request_fulfilled' | 'textbook_match' | 'textbook_message' | 'textbook_rated' | 'listing_expiring' | 'resource_removed';
+export type NotificationKind = 'review_helpful' | 'request_fulfilled' | 'textbook_match' | 'textbook_message' | 'textbook_rated' | 'listing_expiring' | 'resource_removed' | 'question_answered';
 
 export type NewNotification = { uid: string; kind: NotificationKind; title: string; body?: string; href?: string };
 

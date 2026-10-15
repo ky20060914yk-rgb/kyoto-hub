@@ -4,20 +4,8 @@ import { adminDb } from './admin';
 import { HttpError } from '@/lib/http-error';
 
 /** Credit amounts — redesign spec §4.3 and 2A plan P2-1..P2-14. */
-export const CREDITS = {
-  welcome: 3,
-  upload: 3,
-  firstReviews: 2, // each of a user's first `firstReviewCount` reviews (P2-12)
-  firstReviewCount: 3,
-  scarceReview: 1, // review on a course with <= `scarceThreshold` reviews (P2-13)
-  scarceThreshold: 5,
-  reviewDailyCap: 5, // review-bonus grants per JST day (P2-14)
-  referral: 3, // each side of a successful invitation (P2-2)
-  referralCap: 10,
-  requestFulfilled: 3,
-  downloadCost: 1,
-  dailyGrantCap: 3, // upload / request grants per JST day (P2-3)
-} as const;
+export { CREDITS } from '@/lib/domain/credits';
+import { CREDITS } from '@/lib/domain/credits';
 
 /** `YYYY-MM-DD` in Asia/Tokyo (UTC+9, no DST). */
 export const jstDay = (now: Date = new Date()) => new Date(now.getTime() + 9 * 3600 * 1000).toISOString().slice(0, 10);

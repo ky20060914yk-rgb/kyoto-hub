@@ -760,3 +760,22 @@ test('unlisted collections are denied to everyone', async () => {
   await assertFails(getDoc(doc(db, 'posts/seed_u1/comments/x')));
   await assertFails(setDoc(doc(db, 'posts/seed_u1/comments/x'), { body: 'nested' }));
 });
+
+// --- Q&A board (server-written) ------------------------------------------------
+
+test('KU users can read board questions and answers; outsiders and anonymous cannot', async () => {
+  await env.withSecurityRulesDisabled(async (ctx) => {
+    await setDoc(doc(ctx.firestore(), 'questions/q1'), { courseKey: 'ck', title: 't', authorId: 'u2' });
+    await setDoc(doc(ctx.firestore(), 'questions/q1/answers/a1'), { body: 'b', authorId: 'u2' });
+  });
+  await assertSucceeds(getDoc(doc(asKu(), 'questions/q1')));
+  await assertSucceeds(getDoc(doc(asKu(), 'questions/q1/answers/a1')));
+  await assertFails(getDoc(doc(asAnon(), 'questions/q1')));
+  await assertFails(getDoc(doc(asOutsider(), 'questions/q1/answers/a1')));
+});
+
+test('nobody writes the board from the client, not even the author', async () => {
+  await assertFails(setDoc(doc(asKu(), 'questions/q9'), { courseKey: 'ck', title: 't', authorId: 'u1' }));
+  await assertFails(setDoc(doc(asKu(), 'questions/q1/answers/a9'), { body: 'b', authorId: 'u1' }));
+  await assertFails(getDoc(doc(asKu(), 'board_limits/u1')));
+});

@@ -190,6 +190,16 @@ service cloud.firestore {
       allow write: if false;
     }
 
+    // Per-course Q&A board. Written only by the server (/api/questions*).
+    match /questions/{questionId} {
+      allow read: if kuDomain();
+      allow write: if false;
+      match /answers/{answerId} {
+        allow read: if kuDomain();
+        allow write: if false;
+      }
+    }
+
     match /course_stats/{statsId} {
       allow read: if kuDomain();
       allow write: if false;

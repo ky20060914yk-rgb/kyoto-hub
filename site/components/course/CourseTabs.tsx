@@ -3,13 +3,15 @@
 import { useEffect, useState } from 'react';
 import { useSearchParams } from 'next/navigation';
 import { ResourceSection } from './ResourceSection';
+import { QuestionSection } from './QuestionSection';
 import { OPEN_REVIEW_FORM } from './CourseActions';
 
-/** レビュー / 過去問・資料 tabs (redesign spec §4.1). Reviews are the default. */
+/** レビュー / 過去問・資料 / 質問 tabs (redesign spec §4.1). Reviews are the default. */
+type Tab = 'reviews' | 'resources' | 'questions';
 export function CourseTabs({ reviews, resourceCount, courseId, courseKey }:
   { reviews: React.ReactNode; resourceCount: number; courseId: string; courseKey: string }) {
-  const initial = useSearchParams().get('tab') === 'resources' ? 'resources' : 'reviews';
-  const [tab, setTab] = useState<'reviews' | 'resources'>(initial);
+  const q = useSearchParams().get('tab');
+  const [tab, setTab] = useState<Tab>(q === 'resources' || q === 'questions' ? q : 'reviews');
   useEffect(() => {
     const toReviews = () => setTab('reviews');
     window.addEventListener(OPEN_REVIEW_FORM, toReviews);
@@ -18,6 +20,7 @@ export function CourseTabs({ reviews, resourceCount, courseId, courseKey }:
   const tabs = [
     { key: 'reviews' as const, label: 'レビュー' },
     { key: 'resources' as const, label: `過去問・資料${resourceCount ? `（${resourceCount}）` : ''}` },
+    { key: 'questions' as const, label: '質問' },
   ];
   return (
     <div>
@@ -36,6 +39,9 @@ export function CourseTabs({ reviews, resourceCount, courseId, courseKey }:
         <div hidden={tab !== 'reviews'} className="animate-fade-in">{reviews}</div>
         <div hidden={tab !== 'resources'} className="animate-fade-in">
           <ResourceSection courseId={courseId} courseKey={courseKey} />
+        </div>
+        <div hidden={tab !== 'questions'} className="animate-fade-in">
+          <QuestionSection courseId={courseId} courseKey={courseKey} />
         </div>
       </div>
     </div>

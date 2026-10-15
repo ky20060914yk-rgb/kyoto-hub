@@ -41,6 +41,7 @@ function Header() {
       <div className="mx-auto flex h-16 max-w-page items-center gap-3 px-4 md:px-6">
         <Logo />
         <nav className="ml-auto flex items-center gap-1">
+          <Link href="/guide" className="hidden h-10 items-center rounded-m px-3 text-body text-ink hover:bg-surface-muted md:inline-flex">使い方</Link>
           <Link href="/search" className="hidden h-10 items-center rounded-m px-3 text-body text-ink hover:bg-surface-muted sm:inline-flex">授業をさがす</Link>
           <Link href="/login" className="inline-flex h-10 items-center rounded-m px-3 text-body text-ink hover:bg-surface-muted">ログイン</Link>
           <ButtonLink href="/signup" size="sm" className="h-10 rounded-m px-4 text-body">無料登録</ButtonLink>
@@ -247,6 +248,7 @@ function Footer() {
         <span>© 京大InfoHub　京都大学の公式サービスではありません。</span>
         <nav className="flex flex-wrap gap-4 sm:ml-auto">
           <Link href="/search" className="hover:text-ink">授業をさがす</Link>
+          <Link href="/guide" className="hover:text-ink">はじめての方へ</Link>
           <Link href="/legal/terms" className="hover:text-ink">利用規約</Link>
           <Link href="/legal/privacy" className="hover:text-ink">プライバシーポリシー</Link>
           <Link href="/legal/takedown" className="hover:text-ink">削除依頼（教員・権利者の方）</Link>
