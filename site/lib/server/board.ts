@@ -89,7 +89,7 @@ export async function reportBoard(user: KuUser, t: BoardTarget, reason: string, 
     return { hidden: hide, already: false, text: String(d.title ? `${d.title}\n${d.body}` : d.body).slice(0, 500) };
   });
   if (out.hidden && !out.already) {
-    await alert('【京大InfoHub】掲示板の書き込みが通報で非公開になりました', [
+    await alert('【京大シラバス+】掲示板の書き込みが通報で非公開になりました', [
       `通報が${REPORT_THRESHOLD}件に達したため、自動で非公開にしました。問題なければ hidden を false に戻してください。`,
       '', `場所：${ref.path}`, '', out.text,
     ].join('\n'));

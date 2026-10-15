@@ -17,7 +17,7 @@ export async function alertOwner(subject: string, text: string, fetchImpl: typeo
     const res = await fetchImpl('https://api.resend.com/emails', {
       method: 'POST',
       headers: { Authorization: `Bearer ${key}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ from: '京大InfoHub <onboarding@resend.dev>', to: [OPERATOR.email], subject, text }),
+      body: JSON.stringify({ from: '京大シラバス+ <onboarding@resend.dev>', to: [OPERATOR.email], subject, text }),
     });
     if (!res.ok) console.error(`[alert failed ${res.status}] ${subject}`);
     return res.ok;

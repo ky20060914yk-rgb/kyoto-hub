@@ -7,7 +7,7 @@ export const metadata: Metadata = { title: 'プライバシーポリシー' };
 export default function PrivacyPage() {
   return (
     <Prose title="プライバシーポリシー" updated="2026年10月15日">
-      <p>{OPERATOR.name}（以下「運営者」）は、「京大InfoHub」（以下「本サービス」）における利用者の情報を、以下のとおり取り扱います。</p>
+      <p>{OPERATOR.name}（以下「運営者」）は、「京大シラバス+」（以下「本サービス」）における利用者の情報を、以下のとおり取り扱います。</p>
 
       <h2>1. 取得する情報</h2>
       <ul>

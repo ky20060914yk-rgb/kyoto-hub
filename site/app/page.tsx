@@ -11,7 +11,7 @@ import { getSiteStats } from '@/lib/server/cached';
 import { OPERATOR } from '@/lib/operator';
 
 export const metadata: Metadata = {
-  title: { absolute: '京大InfoHub — 京大生のための授業レビュー・過去問・教科書' },
+  title: { absolute: '京大シラバス+ — 京大生のための授業レビュー・過去問・教科書' },
   description: '楽単かどうか、出席は厳しいか、過去問は効くか。京大生だけのレビューで履修と試験を決めよう。過去問の共有、教科書の譲り合いも。京大メールで無料登録。',
   alternates: { canonical: '/' },
 };
@@ -207,7 +207,7 @@ function Trust() {
 }
 
 function ForCircles() {
-  const mailto = `mailto:${OPERATOR.email}?subject=${encodeURIComponent('【京大InfoHub】広告掲載のお問い合わせ')}`;
+  const mailto = `mailto:${OPERATOR.email}?subject=${encodeURIComponent('【京大シラバス+】広告掲載のお問い合わせ')}`;
   return (
     <section aria-labelledby="circles-h" className="mx-auto max-w-page px-4 pt-16 md:px-6 md:pt-24">
       <Reveal>
@@ -216,7 +216,7 @@ function ForCircles() {
           <div className="flex-1">
             <p className="text-caption font-medium text-brand">サークル・団体の方へ</p>
             <h2 id="circles-h" className="mt-1 text-h3 md:text-h3-lg">新歓やイベントの告知を、京大生に届けませんか。</h2>
-            <p className="mt-2 text-body text-ink-2">京大InfoHubでは、サークル・学生団体の広告を掲載できます。掲載場所や期間、料金はお気軽にお問い合わせください。</p>
+            <p className="mt-2 text-body text-ink-2">京大シラバス+では、サークル・学生団体の広告を掲載できます。掲載場所や期間、料金はお気軽にお問い合わせください。</p>
           </div>
           <a href={mailto} className={buttonClass('secondary', 'md', 'shrink-0')}>広告について問い合わせる</a>
         </div>
@@ -245,7 +245,7 @@ function Footer() {
   return (
     <footer className="border-t border-line">
       <div className="mx-auto flex max-w-page flex-col gap-4 px-4 py-8 text-caption text-ink-2 sm:flex-row sm:items-center md:px-6">
-        <span>© 京大InfoHub　京都大学の公式サービスではありません。</span>
+        <span>© 京大シラバス+　京都大学の公式サービスではありません。</span>
         <nav className="flex flex-wrap gap-4 sm:ml-auto">
           <Link href="/search" className="hover:text-ink">授業をさがす</Link>
           <Link href="/guide" className="hover:text-ink">はじめての方へ</Link>

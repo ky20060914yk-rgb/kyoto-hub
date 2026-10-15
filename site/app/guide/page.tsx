@@ -6,7 +6,7 @@ import { CREDITS } from '@/lib/domain/credits';
 
 export const metadata: Metadata = {
   title: 'はじめての方へ',
-  description: '京大InfoHubでできることと、クレジット（ポイント）のしくみ。',
+  description: '京大シラバス+でできることと、クレジット（ポイント）のしくみ。',
 };
 
 const FEATURES: { icon: IconName; title: string; body: string }[] = [
@@ -44,7 +44,7 @@ export default function GuidePage() {
   return (
     <article className="text-body text-ink">
       <p className="text-caption font-medium text-brand">はじめての方へ</p>
-      <h1 className="mt-1 text-title">京大InfoHubの使い方</h1>
+      <h1 className="mt-1 text-title">京大シラバス+の使い方</h1>
       <p className="mt-3 text-ink-2">京大生だけが使える、授業の情報共有サイトです。過去問も、授業の評判も、ここに集まります。</p>
 
       <h2 className="mt-10 text-heading">できること</h2>

@@ -63,7 +63,7 @@ export default function MyPage() {
 
   async function copyCode() {
     if (!balance?.invitationCode) return;
-    const text = `京大InfoHubに招待コード「${balance.invitationCode}」で登録すると、2人ともクレジットがもらえます。${location.origin}/signup`;
+    const text = `京大シラバス+に招待コード「${balance.invitationCode}」で登録すると、2人ともクレジットがもらえます。${location.origin}/signup`;
     try {
       await navigator.clipboard.writeText(text);
       setCopied(true);

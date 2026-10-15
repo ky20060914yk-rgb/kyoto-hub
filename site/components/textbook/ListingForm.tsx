@@ -126,7 +126,7 @@ export function ListingForm({ uid, onDone }: { uid: string; onDone: (id: string)
         </label>
       ) : null}
       <p className="rounded-m bg-warning-bg px-3 py-2 text-caption text-warning">
-        お金のやり取りはアプリの外（手渡しなど）で行います。京大InfoHubは代金を預かりません。教科書以外の出品はできません。
+        お金のやり取りはアプリの外（手渡しなど）で行います。京大シラバス+は代金を預かりません。教科書以外の出品はできません。
       </p>
       {error ? <p role="alert" className="rounded-m bg-danger-bg px-3 py-2 text-caption text-danger">{error}</p> : null}
       <Button type="submit" loading={busy} disabled={!title.trim() || (type === 'sell' && !price)}>{type === 'want' ? '募集する' : '出品する'}</Button>

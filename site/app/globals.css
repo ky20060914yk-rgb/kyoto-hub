@@ -1,7 +1,7 @@
 @import "tailwindcss";
 
 /*
- * 京大InfoHub design tokens — the ONLY place colors, type, radii, shadows and
+ * 京大シラバス+ design tokens — the ONLY place colors, type, radii, shadows and
  * motion are defined (design.md §2–§5). Components use the generated
  * utilities (bg-brand, text-ink-2, rounded-m, text-heading, duration-fast …);
  * literals in app/ or components/ fail tests/tokens.test.ts.

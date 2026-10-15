@@ -229,7 +229,7 @@ export async function requestTakedown(input: { postId: string; name: string; ema
     priority: true, createdAt: new Date().toISOString(), status: 'open',
   });
   const title = snap?.data()?.title as string | undefined;
-  await alert(`【京大InfoHub】削除依頼が届きました${title ? `：${title}` : ''}`, [
+  await alert(`【京大シラバス+】削除依頼が届きました${title ? `：${title}` : ''}`, [
     '教員・権利者から削除依頼が届きました。内容を確認し、認める場合は posts/{資料ID} の hidden を true、',
     'moderation_queue の status を done にしてください（docs/cutover.md）。',
     '',
