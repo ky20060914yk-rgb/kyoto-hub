@@ -21,8 +21,9 @@ const value = (n) => { const i = args.indexOf(n); return i >= 0 ? args[i + 1] : 
 
 const env = Object.fromEntries((await readFile(new URL('../.env.instagram', import.meta.url), 'utf-8'))
   .split('\n').map((l) => l.trim()).filter((l) => l && !l.startsWith('#')).map((l) => [l.slice(0, l.indexOf('=')), l.slice(l.indexOf('=') + 1)]));
-const { IG_USER_ID: user, IG_ACCESS_TOKEN: token } = env;
-if (!user || !token) { console.error('Fill IG_USER_ID and IG_ACCESS_TOKEN in .env.instagram first.'); process.exit(1); }
+const token = env.IG_ACCESS_TOKEN;
+if (!token) { console.error('Fill IG_ACCESS_TOKEN in .env.instagram first.'); process.exit(1); }
+let user = env.IG_USER_ID;
 
 async function graph(path, params = {}, method = 'GET') {
   const body = new URLSearchParams({ ...params, access_token: token });
@@ -41,6 +42,18 @@ async function waitReady(id) {
     await new Promise((r) => setTimeout(r, 2000));
   }
   throw new Error(`container ${id}: not ready after 60s`);
+}
+
+// IG_USER_ID may be left blank: find the Instagram account linked to the token's Facebook page(s).
+if (!user) {
+  const { data = [] } = await graph('me/accounts', { fields: 'name,instagram_business_account{id,username}' });
+  const linked = data.filter((p) => p.instagram_business_account);
+  if (linked.length !== 1) {
+    console.error(linked.length ? `Several Instagram accounts found; put the right id in IG_USER_ID:\n${linked.map((p) => `  ${p.instagram_business_account.id}  @${p.instagram_business_account.username}  (page: ${p.name})`).join('\n')}`
+      : 'No Instagram account is linked to the Facebook page(s) this token can see.');
+    process.exit(1);
+  }
+  user = linked[0].instagram_business_account.id;
 }
 
 if (flag('--check')) {
