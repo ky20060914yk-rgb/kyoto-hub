@@ -54,3 +54,6 @@ tools/firebase-debug.log
 
 # SDD scratch
 .superpowers/
+
+# Instagram Graph API credentials (tools/ig_post.mjs)
+.env.instagram

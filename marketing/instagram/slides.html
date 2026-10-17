@@ -1,0 +1,267 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<title>京大シラバス+ Instagram</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400;500;700;900&display=block" rel="stylesheet">
+<style>
+  :root {
+    --brand: #0f4c81; --brand-pressed: #0b3a63; --brand-subtle: #e8f0f8;
+    --canvas: #f9f7f6; --surface: #fff; --muted: #f2efec; --line: #e7e3de;
+    --ink: #25221e; --ink2: #6b655d; --star: #c98500;
+    --success: #166b3a; --success-bg: #e2f4e8; --warning: #9a4508; --warning-bg: #fdf0dc;
+    --danger: #b42323; --danger-bg: #fce3e3;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { width: 1080px; height: 1350px; overflow: hidden; background: var(--canvas); }
+  body { font-family: 'Noto Sans JP', sans-serif; color: var(--ink); -webkit-font-smoothing: antialiased; }
+  .slide { display: none; position: relative; width: 1080px; height: 1350px; padding: 96px 88px 88px; flex-direction: column; overflow: hidden; }
+  .slide.on { display: flex; }
+  .brandbar { display: flex; align-items: center; gap: 16px; font-size: 30px; font-weight: 700; }
+  .mark { width: 52px; height: 52px; border-radius: 14px; background: var(--brand); color: #fff; display: grid; place-items: center; font-size: 28px; font-weight: 900; }
+  .page { margin-left: auto; font-size: 26px; font-weight: 500; color: var(--ink2); letter-spacing: .08em; }
+  .kicker { margin-top: 72px; display: inline-flex; align-self: flex-start; align-items: center; gap: 10px; padding: 10px 22px; border-radius: 999px; background: var(--brand-subtle); color: var(--brand); font-size: 28px; font-weight: 700; }
+  h1 { margin-top: 28px; font-size: 76px; line-height: 1.28; font-weight: 900; letter-spacing: -.01em; }
+  h1 em { font-style: normal; color: var(--brand); }
+  .lead { margin-top: 28px; font-size: 32px; line-height: 1.7; color: var(--ink2); font-weight: 500; }
+  .stage { margin-top: auto; padding-top: 36px; }
+  .card { background: var(--surface); border: 2px solid var(--line); border-radius: 32px; padding: 40px; box-shadow: 0 24px 60px -24px rgba(37,34,30,.18); }
+  .row { display: flex; align-items: center; gap: 20px; }
+  .chip { display: inline-flex; align-items: center; padding: 8px 18px; border-radius: 999px; background: var(--muted); font-size: 24px; font-weight: 500; color: var(--ink2); }
+  .chip.ok { background: var(--success-bg); color: var(--success); }
+  .chip.warn { background: var(--warning-bg); color: var(--warning); }
+  .icon { width: 84px; height: 84px; border-radius: 22px; display: grid; place-items: center; font-size: 40px; font-weight: 900; flex-shrink: 0; }
+  .t-title { font-size: 36px; font-weight: 700; }
+  .t-sub { font-size: 24px; color: var(--ink2); margin-top: 6px; }
+  .stars { color: var(--star); font-size: 40px; letter-spacing: 2px; }
+  .bar { height: 18px; border-radius: 999px; background: var(--muted); overflow: hidden; flex: 1; }
+  .bar i { display: block; height: 100%; background: var(--brand); border-radius: 999px; }
+  .dist { display: grid; grid-template-columns: 150px 1fr 70px; align-items: center; gap: 18px; font-size: 24px; color: var(--ink2); margin-top: 16px; }
+  .dist b { color: var(--ink); font-weight: 700; text-align: right; }
+  .quote { margin-top: 28px; padding: 26px 30px; background: var(--canvas); border-radius: 22px; font-size: 27px; line-height: 1.65; }
+  .points { margin-top: 44px; display: flex; flex-direction: column; gap: 22px; }
+  .point { display: flex; gap: 22px; align-items: flex-start; font-size: 32px; line-height: 1.5; font-weight: 500; }
+  .point .n { width: 52px; height: 52px; border-radius: 999px; background: var(--brand); color: #fff; display: grid; place-items: center; font-size: 26px; font-weight: 700; flex-shrink: 0; margin-top: 2px; }
+  .swipe { position: absolute; right: 88px; bottom: 72px; font-size: 26px; font-weight: 700; color: var(--brand); display: flex; align-items: center; gap: 10px; }
+  .note { position: absolute; left: 88px; bottom: 36px; font-size: 20px; color: var(--ink2); opacity: .8; }
+  .ghost { position: absolute; font-weight: 900; color: var(--brand); opacity: .05; line-height: 1; pointer-events: none; }
+
+  /* cover */
+  .cover { background: var(--brand); color: #fff; }
+  .cover .mark { background: #fff; color: var(--brand); }
+  .cover .page { color: rgba(255,255,255,.7); }
+  .cover h1 { font-size: 92px; margin-top: 110px; }
+  .cover h1 em { color: #ffd479; }
+  .cover .lead { color: rgba(255,255,255,.85); font-size: 36px; }
+  .tags { margin-top: 56px; display: flex; flex-wrap: wrap; gap: 16px; }
+  .tags span { padding: 14px 26px; border-radius: 999px; background: rgba(255,255,255,.12); border: 2px solid rgba(255,255,255,.25); font-size: 30px; font-weight: 700; }
+  .cover .swipe { color: #fff; }
+
+  /* search */
+  .search { display: flex; align-items: center; gap: 18px; height: 84px; padding: 0 32px; border-radius: 24px; background: var(--surface); border: 2px solid var(--line-strong, #d6d1ca); font-size: 32px; color: var(--ink2); }
+  .rank { display: flex; align-items: center; gap: 24px; padding: 12px 0; border-bottom: 2px solid var(--line); }
+  .rank:last-child { border-bottom: 0; padding-bottom: 0; }
+  .rank .no { width: 56px; font-size: 40px; font-weight: 900; color: var(--brand); text-align: center; }
+  .tabs { display: inline-flex; gap: 8px; padding: 8px; background: var(--muted); border-radius: 20px; margin-bottom: 18px; }
+  .tabs span { padding: 12px 24px; border-radius: 14px; font-size: 24px; color: var(--ink2); font-weight: 500; }
+  .tabs span.on { background: var(--surface); color: var(--ink); font-weight: 700; box-shadow: 0 4px 12px rgba(0,0,0,.06); }
+
+  /* past exam */
+  .paper { position: relative; height: 330px; border-radius: 20px; border: 2px solid var(--line); background: #fff; overflow: hidden; padding: 36px 44px; margin-top: 26px; }
+  .paper h3 { font-size: 30px; font-weight: 700; text-align: center; }
+  .paper p { font-size: 22px; color: var(--ink); margin-top: 16px; }
+  .mosaic { position: absolute; left: 0; right: 0; top: 150px; bottom: 0; background:
+      repeating-linear-gradient(90deg, rgba(37,34,30,.0) 0 26px, rgba(37,34,30,.05) 26px 52px),
+      repeating-linear-gradient(0deg, #e9e6e2 0 26px, #f6f4f1 26px 52px);
+    filter: none; }
+  .mosaic::after { content: 'ここから先はダウンロードで'; position: absolute; left: 50%; top: 50%; transform: translate(-50%,-50%); padding: 14px 28px; border-radius: 999px; background: rgba(37,34,30,.82); color: #fff; font-size: 24px; font-weight: 700; white-space: nowrap; }
+  .credit { display: grid; grid-template-columns: repeat(3, 1fr); gap: 18px; margin-top: 28px; }
+  .credit div { background: var(--surface); border: 2px solid var(--line); border-radius: 24px; padding: 24px; text-align: center; }
+  .credit b { display: block; font-size: 48px; font-weight: 900; color: var(--brand); }
+  .credit span { font-size: 22px; color: var(--ink2); }
+
+  /* timetable */
+  .tt { display: grid; grid-template-columns: 56px repeat(5, 1fr); gap: 10px; }
+  .tt .h { text-align: center; font-size: 24px; font-weight: 700; color: var(--ink2); padding-bottom: 4px; }
+  .tt .h.today { color: var(--brand); }
+  .tt .p { display: grid; place-items: center; font-size: 22px; color: var(--ink2); font-weight: 700; }
+  .tt .c { height: 104px; border-radius: 18px; background: var(--muted); }
+  .tt .c.f { padding: 12px 14px; font-size: 21px; font-weight: 700; line-height: 1.35; display: flex; align-items: flex-end; }
+  .c1 { background: #dbe8f5 !important; color: #0f4c81; } .c2 { background: #fde6cf !important; color: #9a4508; }
+  .c3 { background: #dff1e4 !important; color: #166b3a; } .c4 { background: #efe3f7 !important; color: #6a2d8a; }
+  .c5 { background: #fbe0e3 !important; color: #a3223a; }
+  .now { outline: 4px solid var(--brand); outline-offset: 2px; }
+  .today-card { display: flex; align-items: center; gap: 24px; padding: 28px 32px; border-radius: 26px; background: var(--brand); color: #fff; margin-bottom: 24px; }
+  .today-card small { display: block; font-size: 22px; opacity: .8; }
+  .today-card b { font-size: 34px; }
+
+  /* textbook */
+  .books { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; }
+  .book { background: var(--surface); border: 2px solid var(--line); border-radius: 28px; overflow: hidden; }
+  .book .cov { height: 250px; display: grid; place-items: center; font-size: 34px; font-weight: 900; color: #fff; padding: 24px; text-align: center; line-height: 1.35; }
+  .book .meta { padding: 22px 24px 26px; }
+  .book .price { font-size: 40px; font-weight: 900; }
+  .book .price small { font-size: 22px; color: var(--ink2); font-weight: 500; margin-left: 10px; text-decoration: line-through; }
+
+  /* trust */
+  .trust { display: flex; flex-direction: column; gap: 22px; }
+  .trust .card { display: flex; gap: 28px; align-items: center; padding: 34px 38px; }
+  .trust .icon { background: var(--brand-subtle); color: var(--brand); }
+
+  /* cta */
+  .cta { background: var(--brand); color: #fff; justify-content: center; text-align: center; }
+  .cta h1 { margin-top: 0; font-size: 84px; }
+  .cta .lead { color: rgba(255,255,255,.85); }
+  .url { margin: 56px auto 0; padding: 30px 48px; border-radius: 28px; background: #fff; color: var(--brand); font-size: 48px; font-weight: 900; letter-spacing: .01em; }
+  .steps { margin: 56px auto 0; display: flex; gap: 18px; }
+  .steps div { width: 260px; padding: 26px 18px; border-radius: 24px; background: rgba(255,255,255,.1); border: 2px solid rgba(255,255,255,.22); font-size: 26px; font-weight: 700; line-height: 1.5; }
+  .steps b { display: block; font-size: 22px; opacity: .7; font-weight: 500; }
+  .foot { position: absolute; left: 0; right: 0; bottom: 64px; font-size: 22px; color: rgba(255,255,255,.6); }
+</style>
+</head>
+<body>
+
+<!-- 1 cover -->
+<section class="slide cover" data-s="1">
+  <div class="brandbar"><span class="mark">京</span>京大シラバス+<span class="page">01 / 08</span></div>
+  <h1>その履修、<br><em>先輩の声</em>を<br>聞いてから<br>決めよう。</h1>
+  <p class="lead">京大生だけの、授業レビュー・過去問・<br>時間割・教科書。ぜんぶ無料で1つに。</p>
+  <div class="tags"><span>#楽単</span><span>#過去問</span><span>#時間割</span><span>#教科書</span></div>
+  <div class="ghost" style="right:-60px;bottom:-110px;font-size:620px;color:#fff;opacity:.07">京</div>
+  <div class="swipe">機能を見る →</div>
+</section>
+
+<!-- 2 reviews -->
+<section class="slide" data-s="2">
+  <span class="note">※画面はイメージです</span>
+  <div class="brandbar"><span class="mark">京</span>京大シラバス+<span class="page">02 / 08</span></div>
+  <span class="kicker">① 授業レビュー</span>
+  <h1>楽単？出席は？<br><em>テストの形式</em>まで<br>まるわかり。</h1>
+  <div class="stage card">
+    <div class="row">
+      <div class="icon" style="background:var(--brand-subtle);color:var(--brand)">〇</div>
+      <div><div class="t-title">〇〇学概論</div><div class="t-sub">月2・全学共通科目</div></div>
+      <div style="margin-left:auto;text-align:right"><div class="stars">★★★★☆</div><div class="t-sub">レビュー 24件</div></div>
+    </div>
+    <div class="dist"><span>楽単度</span><span class="bar"><i style="width:72%"></i></span><b>72%</b></div>
+    <div class="dist"><span>出席なし</span><span class="bar"><i style="width:58%"></i></span><b>58%</b></div>
+    <div class="dist"><span>テストのみ</span><span class="bar"><i style="width:64%"></i></span><b>64%</b></div>
+    <div class="quote">「演習問題がほぼそのまま出る。小テストが出席代わり。」</div>
+  </div>
+</section>
+
+<!-- 3 search & ranking -->
+<section class="slide" data-s="3">
+  <span class="note">※画面はイメージです</span>
+  <div class="brandbar"><span class="mark">京</span>京大シラバス+<span class="page">03 / 08</span></div>
+  <span class="kicker">② さがす・ランキング</span>
+  <h1>約1万科目から、<br><em>授業名・先生名</em>で<br>すぐ見つかる。</h1>
+  <div class="stage">
+    <div class="search">🔍 <span>例：線形代数、田中、月2</span></div>
+    <div class="card" style="margin-top:20px;padding:30px 40px">
+      <div class="tabs"><span>レビュー数</span><span>過去問</span><span class="on">楽単</span></div>
+      <div class="rank"><span class="no">1</span><div><div class="t-title">〇〇学入門</div><div class="t-sub">金3・楽単度 ★4.6</div></div><span class="chip ok" style="margin-left:auto">出席なし</span></div>
+      <div class="rank"><span class="no">2</span><div><div class="t-title">△△概論</div><div class="t-sub">火4・楽単度 ★4.4</div></div><span class="chip ok" style="margin-left:auto">レポートのみ</span></div>
+      <div class="rank"><span class="no">3</span><div><div class="t-title">□□演習</div><div class="t-sub">木2・楽単度 ★4.3</div></div><span class="chip warn" style="margin-left:auto">出席あり</span></div>
+    </div>
+  </div>
+</section>
+
+<!-- 4 past exams -->
+<section class="slide" data-s="4">
+  <span class="note">※画面はイメージです</span>
+  <div class="brandbar"><span class="mark">京</span>京大シラバス+<span class="page">04 / 08</span></div>
+  <span class="kicker">③ 過去問</span>
+  <h1>中身を<em>プレビュー</em>して<br>からダウンロード。</h1>
+  <div class="stage">
+    <div class="card">
+      <div class="row">
+        <div class="icon" style="background:var(--danger-bg);color:var(--danger);width:72px;height:72px;font-size:32px">PDF</div>
+        <div><div class="t-title">2025年度 期末</div><div class="t-sub">力学・京大生_4821</div></div>
+        <span class="chip" style="margin-left:auto">プレビュー（無料）</span>
+      </div>
+      <div class="paper">
+        <h3>2025年度 力学 期末試験</h3>
+        <p>問1. 質量 m の質点が、ばね定数 k のばねにつながれて…</p>
+        <div class="mosaic"></div>
+      </div>
+    </div>
+    <div class="credit">
+      <div><b>+3</b><span>登録するともらえる</span></div>
+      <div><b>+3</b><span>過去問を投稿すると</span></div>
+      <div><b>−1</b><span>1つダウンロード</span></div>
+    </div>
+  </div>
+</section>
+
+<!-- 5 timetable -->
+<section class="slide" data-s="5">
+  <span class="note">※画面はイメージです</span>
+  <div class="brandbar"><span class="mark">京</span>京大シラバス+<span class="page">05 / 08</span></div>
+  <span class="kicker">④ 時間割</span>
+  <h1>授業ページから<br>ワンタップで<em>時間割</em>に。</h1>
+  <div class="stage">
+    <div class="today-card"><div style="font-size:44px">⏰</div><div><small>次の授業・13:15〜</small><b>3限　確率論基礎</b></div></div>
+    <div class="card" style="padding:32px">
+      <div class="tt">
+        <span></span><span class="h">月</span><span class="h">火</span><span class="h today">水</span><span class="h">木</span><span class="h">金</span>
+        <span class="p">1</span><span class="c f c1">線形代数</span><span class="c"></span><span class="c f c2">英語</span><span class="c"></span><span class="c f c3">物理学実験</span>
+        <span class="p">2</span><span class="c f c3">微分積分</span><span class="c f c4">情報基礎</span><span class="c"></span><span class="c f c1">力学</span><span class="c"></span>
+        <span class="p">3</span><span class="c"></span><span class="c f c5">中国語</span><span class="c f c4 now">確率論基礎</span><span class="c"></span><span class="c f c2">英語</span>
+        <span class="p">4</span><span class="c f c2">ILAS</span><span class="c"></span><span class="c"></span><span class="c f c5">哲学</span><span class="c"></span>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- 6 textbooks -->
+<section class="slide" data-s="6">
+  <span class="note">※画面はイメージです</span>
+  <div class="brandbar"><span class="mark">京</span>京大シラバス+<span class="page">06 / 08</span></div>
+  <span class="kicker">⑤ 教科書</span>
+  <h1>使い終わった教科書、<br><em>京大生どうし</em>で<br>ゆずり合う。</h1>
+  <div class="stage">
+    <div class="books">
+      <div class="book"><div class="cov" style="background:#0f4c81">線形代数<br>入門</div>
+        <div class="meta"><div class="price">¥1,200<small>¥2,800</small></div><div class="t-sub">書き込み少し・吉田南で手渡し</div></div></div>
+      <div class="book"><div class="cov" style="background:#166b3a">物理学<br>基礎</div>
+        <div class="meta"><div class="price">¥800<small>¥3,200</small></div><div class="t-sub">きれい・本部で手渡し</div></div></div>
+    </div>
+    <p class="lead" style="margin-top:28px;font-size:28px">サイト内のチャットでやりとり。受け渡しはキャンパスで。</p>
+  </div>
+</section>
+
+<!-- 7 trust -->
+<section class="slide" data-s="7">
+  <div class="brandbar"><span class="mark">京</span>京大シラバス+<span class="page">07 / 08</span></div>
+  <span class="kicker">安心して使えるように</span>
+  <h1><em>京大生だけ</em>の場所。</h1>
+  <p class="lead">書き込めるのは、京大メールで確認できた人だけ。<br>だから、京大の授業の話だけが集まります。</p>
+  <div class="stage trust">
+    <div class="card"><div class="icon">@</div><div><div class="t-title">京大メールで認証</div><div class="t-sub" style="font-size:26px">@st.kyoto-u.ac.jp の人だけが書き込めます</div></div></div>
+    <div class="card"><div class="icon">匿</div><div><div class="t-title">レビューは匿名</div><div class="t-sub" style="font-size:26px">表示はニックネームだけ。メールは公開されません</div></div></div>
+    <div class="card"><div class="icon">¥</div><div><div class="t-title">ずっと無料</div><div class="t-sub" style="font-size:26px">登録も、レビューを読むのも、書くのも無料</div></div></div>
+  </div>
+</section>
+
+<!-- 8 CTA -->
+<section class="slide cta" data-s="8">
+  <div class="brandbar" style="position:absolute;top:96px;left:88px;right:88px"><span class="mark" style="background:#fff;color:var(--brand)">京</span>京大シラバス+<span class="page" style="color:rgba(255,255,255,.7)">08 / 08</span></div>
+  <h1>次の履修登録は、<br>先輩の声を<br>聞いてから。</h1>
+  <p class="lead" style="margin-top:32px">登録は1分。京大メールだけでOK。</p>
+  <div class="url">kyodai-info.web.app</div>
+  <div class="steps">
+    <div><b>STEP 1</b>京大メールで登録</div>
+    <div><b>STEP 2</b>3クレジット<br>もらえる</div>
+    <div><b>STEP 3</b>授業をさがす</div>
+  </div>
+  <p class="foot">プロフィールのリンクから　｜　京都大学の公式サービスではありません</p>
+</section>
+
+<script>
+  const s = new URLSearchParams(location.search).get('s') || '1';
+  document.querySelector(`[data-s="${s}"]`).classList.add('on');
+</script>
+</body>
+</html>
