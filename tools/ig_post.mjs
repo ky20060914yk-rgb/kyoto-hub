@@ -13,7 +13,7 @@ import { readFile } from 'node:fs/promises';
 
 const GRAPH = 'https://graph.facebook.com/v21.0';
 const SITE = 'https://kyodai-info--kyodai-sns.asia-east1.hosted.app';
-const POSTS = { review: 3, exam: 3, qa: 3, timetable: 3, textbook: 3 };
+const POSTS = { intro: 8, review: 3, exam: 3, qa: 3, timetable: 3, textbook: 3 };
 
 const args = process.argv.slice(2);
 const flag = (n) => args.includes(n);
