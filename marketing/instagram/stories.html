@@ -1,0 +1,80 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<title>stories</title>
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400;500;700;900&display=block" rel="stylesheet">
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { width: 1080px; height: 1920px; overflow: hidden; }
+  body { font-family: 'Noto Sans JP', sans-serif; -webkit-font-smoothing: antialiased; }
+  /* Instagram covers ~260px at the top (account bar) and ~300px at the bottom (reply bar). */
+  .s { display: none; position: relative; width: 1080px; height: 1920px; padding: 300px 96px 0; overflow: hidden; background: #0f4c81; color: #fff; }
+  .s.on { display: block; }
+  .brand { display: flex; align-items: center; gap: 18px; font-size: 38px; font-weight: 700; }
+  .mark { width: 68px; height: 68px; border-radius: 18px; background: #fff; color: #0f4c81; display: grid; place-items: center; font-size: 38px; font-weight: 900; }
+  h1 { margin-top: 70px; font-size: 108px; line-height: 1.22; font-weight: 900; }
+  h1 em { font-style: normal; color: #ffd479; }
+  .lead { margin-top: 44px; font-size: 42px; line-height: 1.65; font-weight: 500; opacity: .9; }
+  .chips { margin-top: 56px; display: flex; flex-wrap: wrap; gap: 18px; }
+  .chips span { padding: 16px 30px; border-radius: 999px; background: rgba(255,255,255,.14); border: 2px solid rgba(255,255,255,.28); font-size: 36px; font-weight: 700; }
+  /* empty band for the link sticker, with a pointer above it */
+  .tap { position: absolute; left: 0; right: 0; top: 1230px; text-align: center; font-size: 40px; font-weight: 700; color: #ffd479; }
+  .tap b { display: block; font-size: 64px; line-height: 1; margin-top: 10px; }
+  .foot { position: absolute; left: 0; right: 0; bottom: 290px; text-align: center; font-size: 28px; opacity: .6; }
+  .ghost { position: absolute; right: -80px; top: 900px; font-size: 760px; font-weight: 900; line-height: 1; color: #fff; opacity: .06; }
+  .light { background: #f9f7f6; color: #25221e; }
+  .light .mark { background: #0f4c81; color: #fff; }
+  .light h1 em { color: #0f4c81; }
+  .light .lead { color: #6b655d; opacity: 1; }
+  .light .tap { color: #0f4c81; }
+  .light .foot { color: #6b655d; }
+  .light .ghost { color: #0f4c81; }
+  .card { margin-top: 44px; background: #fff; border: 2px solid #e7e3de; border-radius: 36px; padding: 40px 44px; box-shadow: 0 24px 60px -24px rgba(37,34,30,.18); }
+  .row { display: grid; grid-template-columns: 230px 1fr 110px; align-items: center; text-align: left; font-size: 34px; color: #6b655d; margin-top: 22px; }
+  .row:first-child { margin-top: 0; }
+  .row b { color: #166b3a; font-size: 34px; text-align: right; }
+  .bar { flex: 1; height: 20px; margin: 0 24px; border-radius: 999px; background: #f2efec; overflow: hidden; }
+  .bar i { display: block; height: 100%; background: #0f4c81; border-radius: 999px; }
+</style>
+</head>
+<body>
+
+<!-- 1: launch -->
+<section class="s" data-s="launch">
+  <div class="ghost">京</div>
+  <div class="brand"><span class="mark">京</span>京大シラバス+</div>
+  <h1>京大生だけの<br><em>授業レビュー</em><br>サイト、<br>つくりました。</h1>
+  <div class="chips"><span>楽単</span><span>過去問</span><span>質問掲示板</span><span>時間割</span><span>教科書</span></div>
+  <p class="tap">ここから見れます<b>↓</b></p>
+  <p class="foot">京大メールで無料登録・京都大学の非公式サービスです</p>
+</section>
+
+<!-- 2: past exams -->
+<section class="s" data-s="exam">
+  <div class="ghost">過</div>
+  <div class="brand"><span class="mark">京</span>京大シラバス+</div>
+  <h1>テスト前、<br><em>過去問</em><br>どこにある？</h1>
+  <p class="lead">京大生どうしで過去問を共有。<br>中身を無料でプレビューしてから<br>ダウンロードできます。</p>
+  <p class="tap">過去問をさがす<b>↓</b></p>
+  <p class="foot">登録で3クレジット＝3つダウンロードできる</p>
+</section>
+
+<!-- 3: review ask (light) -->
+<section class="s light" data-s="review">
+  <div class="ghost">楽</div>
+  <div class="brand"><span class="mark">京</span>京大シラバス+</div>
+  <h1>その授業、<br><em>楽単</em>？</h1>
+  <div class="card">
+    <div class="row">楽単度「楽」<span class="bar"><i style="width:72%"></i></span><b>72%</b></div>
+    <div class="row">出席取らない<span class="bar"><i style="width:58%"></i></span><b>58%</b></div>
+    <div class="row">試験一発<span class="bar"><i style="width:64%"></i></span><b>64%</b></div>
+  </div>
+  <p class="lead" style="font-size:36px">履修した授業のレビュー、1件だけでも<br>後輩がめちゃくちゃ助かります🙏</p>
+  <p class="tap">レビューを書く・読む<b>↓</b></p>
+  <p class="foot">※画面はイメージです</p>
+</section>
+
+<script>document.querySelector(`[data-s="${location.search.slice(1) || 'launch'}"]`).classList.add('on');</script>
+</body>
+</html>
