@@ -75,3 +75,6 @@ export function authErrorMessage(e: unknown): string {
   }
   return e instanceof Error ? e.message : 'エラーが発生しました。もう一度お試しください。';
 }
+
+/** KUMOI (KU student mail) is Microsoft 365; its web mail hands off to the university sign-in. */
+export const KUMOI_URL = 'https://outlook.office.com/mail/';

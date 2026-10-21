@@ -2,9 +2,9 @@
 
 import { useState } from 'react';
 import Link from 'next/link';
-import { Button } from '@/components/ui/Button';
+import { Button, buttonClass } from '@/components/ui/Button';
 import { TextField } from '@/components/ui/TextField';
-import { resetPassword, authErrorMessage } from '@/lib/firebase/auth-actions';
+import { KUMOI_URL, resetPassword, authErrorMessage } from '@/lib/firebase/auth-actions';
 
 export default function ResetPage() {
   const [email, setEmail] = useState('');
@@ -31,6 +31,7 @@ export default function ResetPage() {
       {sent ? (
         <p role="status" className="mt-4 text-body text-ink-2">
           登録済みのアドレスであれば、再設定用のメールを送りました。メール内のリンクから新しいパスワードを設定してください。
+          <a href={KUMOI_URL} target="_blank" rel="noopener noreferrer" className={buttonClass('primary', 'md', 'mt-4 w-full')}>KUMOI を開く</a>
           <span className="mt-2 block text-caption">転送先（Gmail など）には届かないことがあります。<span className="font-medium text-ink">KUMOI を直接開いて</span>、迷惑メールフォルダも確認してください。</span>
         </p>
       ) : (

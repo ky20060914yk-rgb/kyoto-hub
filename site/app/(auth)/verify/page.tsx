@@ -3,9 +3,9 @@
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useAuth } from '@/components/auth/AuthProvider';
-import { Button } from '@/components/ui/Button';
+import { Button, buttonClass } from '@/components/ui/Button';
 import { Icon } from '@/components/ui/Icon';
-import { refreshVerified, resendVerification, signOutUser, authErrorMessage } from '@/lib/firebase/auth-actions';
+import { KUMOI_URL, refreshVerified, resendVerification, signOutUser, authErrorMessage } from '@/lib/firebase/auth-actions';
 
 const COOLDOWN = 60;
 
@@ -56,6 +56,9 @@ export default function VerifyPage() {
       <p className="mt-2 text-caption text-ink-2">転送先（Gmail など）には届かないことがあります。<span className="font-medium text-ink">KUMOI を直接開いて</span>、迷惑メールフォルダも確認してください。</p>
       {msg ? <p role="status" className="mt-4 text-caption text-ink">{msg}</p> : null}
       <div className="mt-6 flex flex-col gap-2">
+        <a href={KUMOI_URL} target="_blank" rel="noopener noreferrer" className={buttonClass('primary')}>
+          <Icon name="mail" className="size-5" />KUMOI を開く
+        </a>
         <Button variant="secondary" onClick={resend} disabled={left > 0}>
           {left > 0 ? `再送できるまで ${left} 秒` : '確認メールを再送'}
         </Button>
